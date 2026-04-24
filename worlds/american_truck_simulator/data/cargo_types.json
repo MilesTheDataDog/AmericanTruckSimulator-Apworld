@@ -1,148 +1,2263 @@
 {
   "_notes": [
-    "Cargo type names are sourced from cross-referenced community guides.",
-    "The in-game wiki (trucksimulator.wiki.gg) was inaccessible during research.",
-    "All entries marked needs_verification=true should be confirmed against in-game cargo names.",
-    "Cargo types listed here are vanilla base game + free DLC only.",
-    "Paid DLC cargo packs (Heavy Cargo Pack, Special Transport, Farming Machinery, etc.) are excluded."
+    "Cargo names sourced from trucksimulator.wiki.gg/wiki/Cargo_types/American_Truck_Simulator",
+    "Excluded: Heavy Cargo Pack, Special Transport, Farm Machinery, JCB Equipment Pack, Volvo Construction Equipment, Forest Machinery, Bobcat Cargo Pack, KRONE Agriculture Equipment",
+    "required_dlc null = base game or free version patch; state_id = only active when that DLC state is enabled",
+    "trailer_types use snake_case normalized names matching ATS trailer categories"
   ],
   "cargo_types": [
-    {"id": "auto_parts", "name": "Auto Parts", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "baby_products", "name": "Baby Products", "trailer_type": "dry_van", "needs_verification": true},
-    {"id": "baked_goods", "name": "Baked Goods", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "beer_beverages", "name": "Beer and Beverages", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "books", "name": "Books and Printed Materials", "trailer_type": "dry_van", "needs_verification": true},
-    {"id": "building_materials", "name": "Building Materials", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "candy", "name": "Candy and Confectionery", "trailer_type": "dry_van", "needs_verification": true},
-    {"id": "canned_food", "name": "Canned Food", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "carpets", "name": "Carpets and Flooring", "trailer_type": "dry_van", "needs_verification": true},
-    {"id": "cereal_products", "name": "Cereal and Grain Products", "trailer_type": "dry_van", "needs_verification": true},
-    {"id": "cleaning_products", "name": "Cleaning Products", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "clothing", "name": "Clothing and Apparel", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "computer_equipment", "name": "Computer Equipment", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "consumer_goods", "name": "Consumer Goods", "trailer_type": "dry_van", "needs_verification": true},
-    {"id": "copier_paper", "name": "Copier Paper", "trailer_type": "dry_van", "needs_verification": true},
-    {"id": "cosmetics", "name": "Cosmetics", "trailer_type": "dry_van", "needs_verification": true},
-    {"id": "cotton_bales", "name": "Cotton Bales", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "dried_fruit", "name": "Dried Fruit", "trailer_type": "dry_van", "needs_verification": true},
-    {"id": "electrical_equipment", "name": "Electrical Equipment", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "engine_parts", "name": "Engine Parts", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "farm_supplies", "name": "Farm Supplies", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "fertilizer_dry", "name": "Fertilizer (Bagged)", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "furniture", "name": "Furniture", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "glass_products", "name": "Glass Products", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "hardware_tools", "name": "Hardware and Tools", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "hazardous_materials", "name": "Hazardous Materials", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "healthcare_supplies", "name": "Healthcare Supplies", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "heavy_machinery_parts", "name": "Heavy Machinery Parts", "trailer_type": "dry_van", "needs_verification": true},
-    {"id": "household_appliances", "name": "Household Appliances", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "industrial_equipment_boxed", "name": "Industrial Equipment", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "kitchenware", "name": "Kitchenware", "trailer_type": "dry_van", "needs_verification": true},
-    {"id": "machine_parts", "name": "Machine Parts", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "metal_products", "name": "Metal Products", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "newspapers", "name": "Newspapers", "trailer_type": "dry_van", "needs_verification": true},
-    {"id": "paint_coatings", "name": "Paint and Coatings", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "paper_products", "name": "Paper Products", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "pet_supplies", "name": "Pet Supplies", "trailer_type": "dry_van", "needs_verification": true},
-    {"id": "pharmaceuticals", "name": "Pharmaceutical Products", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "plastic_products", "name": "Plastic Products", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "plumbing_fixtures", "name": "Plumbing Fixtures", "trailer_type": "dry_van", "needs_verification": true},
-    {"id": "retail_goods", "name": "Retail Goods", "trailer_type": "dry_van", "needs_verification": true},
-    {"id": "rubber_products", "name": "Rubber Products", "trailer_type": "dry_van", "needs_verification": true},
-    {"id": "semiconductors", "name": "Semiconductors", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "shoes_footwear", "name": "Shoes and Footwear", "trailer_type": "dry_van", "needs_verification": true},
-    {"id": "sporting_goods", "name": "Sporting Goods", "trailer_type": "dry_van", "needs_verification": true},
-    {"id": "textiles", "name": "Textiles and Fabrics", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "tires", "name": "Tires", "trailer_type": "dry_van", "needs_verification": false},
-    {"id": "tobacco", "name": "Tobacco Products", "trailer_type": "dry_van", "needs_verification": true},
-    {"id": "toys_games", "name": "Toys and Games", "trailer_type": "dry_van", "needs_verification": true},
-    {"id": "vehicle_parts", "name": "Vehicle Parts", "trailer_type": "dry_van", "needs_verification": false},
-
-    {"id": "aerial_work_platforms", "name": "Aerial Work Platforms", "trailer_type": "flatbed", "needs_verification": true},
-    {"id": "air_conditioning_units", "name": "Air Conditioning Units", "trailer_type": "flatbed", "needs_verification": true},
-    {"id": "cable_drums", "name": "Cable Drums", "trailer_type": "flatbed", "needs_verification": false},
-    {"id": "compressors", "name": "Compressors", "trailer_type": "flatbed", "needs_verification": false},
-    {"id": "concrete_barriers", "name": "Concrete Barriers", "trailer_type": "flatbed", "needs_verification": false},
-    {"id": "construction_machinery_sm", "name": "Construction Machinery", "trailer_type": "flatbed", "needs_verification": false},
-    {"id": "drainage_pipes", "name": "Drainage Pipes", "trailer_type": "flatbed", "needs_verification": false},
-    {"id": "forklifts", "name": "Forklifts", "trailer_type": "flatbed", "needs_verification": false},
-    {"id": "industrial_machinery_flat", "name": "Industrial Machinery", "trailer_type": "flatbed", "needs_verification": false},
-    {"id": "large_pipes", "name": "Large Pipes", "trailer_type": "flatbed", "needs_verification": false},
-    {"id": "lumber", "name": "Lumber", "trailer_type": "flatbed", "needs_verification": false},
-    {"id": "metal_coils", "name": "Metal Coils", "trailer_type": "flatbed", "needs_verification": false},
-    {"id": "metal_sheets", "name": "Metal Sheets", "trailer_type": "flatbed", "needs_verification": false},
-    {"id": "mobile_homes", "name": "Mobile Homes", "trailer_type": "flatbed", "needs_verification": true},
-    {"id": "prefab_concrete", "name": "Prefab Concrete Elements", "trailer_type": "flatbed", "needs_verification": false},
-    {"id": "steel_beams", "name": "Steel Beams", "trailer_type": "flatbed", "needs_verification": false},
-    {"id": "tractors_agricultural", "name": "Agricultural Tractors", "trailer_type": "flatbed", "needs_verification": false},
-    {"id": "utility_poles", "name": "Utility Poles", "trailer_type": "flatbed", "needs_verification": false},
-    {"id": "wind_turbine_blades", "name": "Wind Turbine Blades", "trailer_type": "flatbed", "needs_verification": false},
-    {"id": "wind_turbine_nacelles", "name": "Wind Turbine Nacelles", "trailer_type": "flatbed", "needs_verification": true},
-
-    {"id": "dairy_products", "name": "Dairy Products", "trailer_type": "refrigerated", "needs_verification": false},
-    {"id": "fish_seafood", "name": "Fish and Seafood", "trailer_type": "refrigerated", "needs_verification": false},
-    {"id": "fresh_fruit", "name": "Fresh Fruit", "trailer_type": "refrigerated", "needs_verification": false},
-    {"id": "fresh_vegetables", "name": "Fresh Vegetables", "trailer_type": "refrigerated", "needs_verification": false},
-    {"id": "frozen_food", "name": "Frozen Food", "trailer_type": "refrigerated", "needs_verification": false},
-    {"id": "frozen_meat", "name": "Frozen Meat", "trailer_type": "refrigerated", "needs_verification": false},
-    {"id": "ice_cream", "name": "Ice Cream", "trailer_type": "refrigerated", "needs_verification": false},
-    {"id": "meat_poultry", "name": "Meat and Poultry", "trailer_type": "refrigerated", "needs_verification": false},
-    {"id": "pharma_biologics", "name": "Temperature-Sensitive Pharmaceuticals", "trailer_type": "refrigerated", "needs_verification": true},
-
-    {"id": "cooking_oil", "name": "Cooking Oil", "trailer_type": "food_tank", "needs_verification": false},
-    {"id": "corn_syrup", "name": "Corn Syrup", "trailer_type": "food_tank", "needs_verification": false},
-    {"id": "food_grade_liquid", "name": "Food Grade Liquid", "trailer_type": "food_tank", "needs_verification": true},
-    {"id": "liquid_fertilizer", "name": "Liquid Fertilizer", "trailer_type": "food_tank", "needs_verification": false},
-    {"id": "liquid_milk", "name": "Liquid Milk", "trailer_type": "food_tank", "needs_verification": false},
-    {"id": "molasses", "name": "Molasses", "trailer_type": "food_tank", "needs_verification": false},
-    {"id": "wine_spirits_bulk", "name": "Wine and Spirits (Bulk)", "trailer_type": "food_tank", "needs_verification": true},
-
-    {"id": "aviation_fuel", "name": "Aviation Fuel", "trailer_type": "fuel_tank", "needs_verification": false},
-    {"id": "diesel_fuel", "name": "Diesel Fuel", "trailer_type": "fuel_tank", "needs_verification": false},
-    {"id": "gasoline", "name": "Gasoline", "trailer_type": "fuel_tank", "needs_verification": false},
-    {"id": "heating_oil", "name": "Heating Oil", "trailer_type": "fuel_tank", "needs_verification": false},
-
-    {"id": "caustic_chemicals", "name": "Caustic Chemicals", "trailer_type": "chemical_tank", "needs_verification": false},
-    {"id": "industrial_chemicals", "name": "Industrial Chemicals", "trailer_type": "chemical_tank", "needs_verification": false},
-    {"id": "liquid_plastics", "name": "Liquid Plastics", "trailer_type": "chemical_tank", "needs_verification": true},
-
-    {"id": "livestock", "name": "Livestock", "trailer_type": "livestock", "needs_verification": false},
-
-    {"id": "grain_wheat", "name": "Grain and Wheat", "trailer_type": "grain_hopper", "needs_verification": false},
-    {"id": "corn_bulk", "name": "Corn (Bulk)", "trailer_type": "grain_hopper", "needs_verification": false},
-    {"id": "soybeans", "name": "Soybeans", "trailer_type": "grain_hopper", "needs_verification": false},
-    {"id": "wood_chips", "name": "Wood Chips", "trailer_type": "chip_van", "needs_verification": false},
-    {"id": "coal_bulk", "name": "Coal", "trailer_type": "grain_hopper", "needs_verification": false},
-    {"id": "potatoes_bulk", "name": "Potatoes (Bulk)", "trailer_type": "grain_hopper", "needs_verification": true},
-    {"id": "sand_gravel_hopper", "name": "Sand and Gravel", "trailer_type": "grain_hopper", "needs_verification": true},
-    {"id": "cottonseed", "name": "Cottonseed", "trailer_type": "grain_hopper", "needs_verification": true},
-
-    {"id": "raw_timber_logs", "name": "Raw Timber Logs", "trailer_type": "log_trailer", "needs_verification": false},
-
-    {"id": "agricultural_machinery_low", "name": "Agricultural Machinery", "trailer_type": "lowboy", "needs_verification": false},
-    {"id": "bulldozer", "name": "Bulldozer", "trailer_type": "lowboy", "needs_verification": false},
-    {"id": "crawler_excavator", "name": "Crawler Excavator", "trailer_type": "lowboy", "needs_verification": false},
-    {"id": "crawler_loader", "name": "Crawler Loader", "trailer_type": "lowboy", "needs_verification": false},
-    {"id": "small_dump_truck", "name": "Small Dump Truck", "trailer_type": "lowboy", "needs_verification": true},
-    {"id": "excavator_lowboy", "name": "Excavator", "trailer_type": "lowboy", "needs_verification": false},
-    {"id": "industrial_crane_low", "name": "Industrial Crane", "trailer_type": "lowboy", "needs_verification": false},
-    {"id": "large_generator", "name": "Large Generator", "trailer_type": "lowboy", "needs_verification": false},
-    {"id": "mobile_crane", "name": "Mobile Crane", "trailer_type": "lowboy", "needs_verification": false},
-    {"id": "motor_grader_heavy", "name": "Motor Grader", "trailer_type": "lowboy", "needs_verification": false},
-    {"id": "pipe_layer", "name": "Pipe Layer", "trailer_type": "lowboy", "needs_verification": true},
-    {"id": "road_roller_heavy", "name": "Road Roller (Heavy)", "trailer_type": "lowboy", "needs_verification": false},
-    {"id": "scraper", "name": "Scraper", "trailer_type": "lowboy", "needs_verification": true},
-    {"id": "telescopic_handler", "name": "Telescopic Handler", "trailer_type": "lowboy", "needs_verification": true},
-    {"id": "track_loader", "name": "Track Loader", "trailer_type": "lowboy", "needs_verification": true},
-    {"id": "wheel_loader", "name": "Wheel Loader", "trailer_type": "lowboy", "needs_verification": false},
-
-    {"id": "iso_container_20ft", "name": "ISO Container (20ft)", "trailer_type": "container", "needs_verification": false},
-    {"id": "iso_container_40ft", "name": "ISO Container (40ft)", "trailer_type": "container", "needs_verification": false},
-
-    {"id": "aggregates", "name": "Aggregates", "trailer_type": "dump_trailer", "needs_verification": false},
-    {"id": "construction_waste", "name": "Construction Waste", "trailer_type": "dump_trailer", "needs_verification": false},
-    {"id": "gravel_dump", "name": "Gravel", "trailer_type": "dump_trailer", "needs_verification": false},
-    {"id": "sand_dump", "name": "Sand", "trailer_type": "dump_trailer", "needs_verification": false},
-    {"id": "topsoil", "name": "Topsoil", "trailer_type": "dump_trailer", "needs_verification": false}
+    {
+      "id": "almond_boxes",
+      "name": "Almond Boxes",
+      "trailer_types": [
+        "drop_deck",
+        "dry_van",
+        "flatbed",
+        "insulated",
+        "refrigerated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "1.50",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "aluminum_ingots",
+      "name": "Aluminum Ingots",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "1.55",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "aluminum_profiles",
+      "name": "Aluminum Profiles",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "1.53",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "anhydrous_ammonia",
+      "name": "Anhydrous Ammonia",
+      "trailer_types": [
+        "gas_tank"
+      ],
+      "dlc_introduced": "1.47",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "backhoe_loader",
+      "name": "Backhoe Loader",
+      "trailer_types": [
+        "drop_deck",
+        "lowboy"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "beverages",
+      "name": "Beverages",
+      "trailer_types": [
+        "container_carrier",
+        "dry_van",
+        "insulated",
+        "refrigerated"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "borates",
+      "name": "Borates",
+      "trailer_types": [
+        "container_carrier",
+        "dry_bulk",
+        "dry_van",
+        "insulated"
+      ],
+      "dlc_introduced": "1.53",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "boric_acid",
+      "name": "Boric Acid",
+      "trailer_types": [
+        "container_carrier",
+        "dry_van",
+        "insulated"
+      ],
+      "dlc_introduced": "1.53",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "bromine",
+      "name": "Bromine",
+      "trailer_types": [
+        "container_carrier"
+      ],
+      "dlc_introduced": "1.51",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "bulldozer",
+      "name": "Bulldozer",
+      "trailer_types": [
+        "lowboy"
+      ],
+      "dlc_introduced": "1.39",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "butter",
+      "name": "Butter",
+      "trailer_types": [
+        "refrigerated"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "cables",
+      "name": "Cables",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed",
+        "lowboy"
+      ],
+      "dlc_introduced": "1.39",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "cans",
+      "name": "Cans",
+      "trailer_types": [
+        "dry_van",
+        "insulated",
+        "refrigerated"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "car_parts",
+      "name": "Car Parts",
+      "trailer_types": [
+        "container_carrier"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "cars",
+      "name": "Cars",
+      "trailer_types": [
+        "car_transporter"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "cars_small",
+      "name": "Cars (small)",
+      "trailer_types": [
+        "car_transporter"
+      ],
+      "dlc_introduced": "1.48",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "cars_mixed",
+      "name": "Cars (mixed)",
+      "trailer_types": [
+        "car_transporter"
+      ],
+      "dlc_introduced": "1.48",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "cars_suvs",
+      "name": "Cars (SUVs)",
+      "trailer_types": [
+        "van_transporter"
+      ],
+      "dlc_introduced": "1.48",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "cement",
+      "name": "Cement",
+      "trailer_types": [
+        "dry_bulk"
+      ],
+      "dlc_introduced": "1.45",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "cheese",
+      "name": "Cheese",
+      "trailer_types": [
+        "refrigerated"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "chlorine",
+      "name": "Chlorine",
+      "trailer_types": [
+        "gas_tank"
+      ],
+      "dlc_introduced": "1.47",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "clothes",
+      "name": "Clothes",
+      "trailer_types": [
+        "container_carrier",
+        "dry_van",
+        "insulated",
+        "refrigerated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "computers",
+      "name": "Computers",
+      "trailer_types": [
+        "dry_van",
+        "insulated",
+        "refrigerated"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "concrete_tubes_small",
+      "name": "Concrete Tubes (small)",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "concrete_tubes_large",
+      "name": "Concrete Tubes (large)",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "construction_houses",
+      "name": "Construction Houses",
+      "trailer_types": [
+        "container_carrier"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "crawler_carrier",
+      "name": "Crawler Carrier",
+      "trailer_types": [
+        "lowboy"
+      ],
+      "dlc_introduced": "1.57",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "curtains",
+      "name": "Curtains",
+      "trailer_types": [
+        "dry_van",
+        "insulated",
+        "refrigerated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "diesel",
+      "name": "Diesel",
+      "trailer_types": [
+        "fuel_tank"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "dry_fruits",
+      "name": "Dry Fruits",
+      "trailer_types": [
+        "container_carrier",
+        "dry_van",
+        "insulated",
+        "refrigerated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "dry_milk",
+      "name": "Dry Milk",
+      "trailer_types": [
+        "container_carrier",
+        "dry_van",
+        "insulated",
+        "refrigerated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "dump_truck",
+      "name": "Dump Truck",
+      "trailer_types": [
+        "lowboy"
+      ],
+      "dlc_introduced": "1.57",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "dynamite",
+      "name": "Dynamite",
+      "trailer_types": [
+        "dry_van",
+        "insulated",
+        "refrigerated"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "electronic_components",
+      "name": "Electronic Components",
+      "trailer_types": [
+        "container_carrier"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "empty_bottles",
+      "name": "Empty Bottles",
+      "trailer_types": [
+        "dry_van",
+        "insulated",
+        "refrigerated"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "empty_pallets",
+      "name": "Empty Pallets",
+      "trailer_types": [
+        "drop_deck",
+        "dry_van",
+        "flatbed",
+        "insulated",
+        "refrigerated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "ethane",
+      "name": "Ethane",
+      "trailer_types": [
+        "gas_tank"
+      ],
+      "dlc_introduced": "1.47",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "excavated_soil",
+      "name": "Excavated Soil",
+      "trailer_types": [
+        "dumper"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "excavator",
+      "name": "Excavator",
+      "trailer_types": [
+        "lowboy"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "fertilizer",
+      "name": "Fertilizer",
+      "trailer_types": [
+        "drop_deck",
+        "dry_van",
+        "flatbed",
+        "insulated",
+        "refrigerated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "fertilizer_tank",
+      "name": "Fertilizer Tank",
+      "trailer_types": [
+        "drop_deck"
+      ],
+      "dlc_introduced": "1.53",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "fireworks",
+      "name": "Fireworks",
+      "trailer_types": [
+        "dry_van",
+        "insulated",
+        "refrigerated"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "flour",
+      "name": "Flour",
+      "trailer_types": [
+        "container_carrier",
+        "dry_van",
+        "insulated",
+        "refrigerated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "forklifts",
+      "name": "Forklifts",
+      "trailer_types": [
+        "drop_deck",
+        "lowboy"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "frozen_food",
+      "name": "Frozen Food",
+      "trailer_types": [
+        "refrigerated"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "frozen_fruits",
+      "name": "Frozen Fruits",
+      "trailer_types": [
+        "refrigerated"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "frozen_vegetables",
+      "name": "Frozen Vegetables",
+      "trailer_types": [
+        "refrigerated"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "fruit_juice",
+      "name": "Fruit Juice",
+      "trailer_types": [
+        "food_tank"
+      ],
+      "dlc_introduced": "1.37",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "fruits",
+      "name": "Fruits",
+      "trailer_types": [
+        "insulated",
+        "refrigerated"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "furniture",
+      "name": "Furniture",
+      "trailer_types": [
+        "dry_van",
+        "insulated",
+        "refrigerated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "gasoline",
+      "name": "Gasoline",
+      "trailer_types": [
+        "fuel_tank"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "grain",
+      "name": "Grain",
+      "trailer_types": [
+        "bulk_feed",
+        "dry_bulk",
+        "dry_van",
+        "hopper",
+        "insulated",
+        "refrigerated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "gravel",
+      "name": "Gravel",
+      "trailer_types": [
+        "dumper"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "gypsum",
+      "name": "Gypsum",
+      "trailer_types": [
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "harvester",
+      "name": "Harvester",
+      "trailer_types": [
+        "lowboy"
+      ],
+      "dlc_introduced": "1.39",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "hay",
+      "name": "Hay",
+      "trailer_types": [
+        "chip_van",
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "heat_exchanger",
+      "name": "Heat Exchanger",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "1.57",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "home_accessories",
+      "name": "Home Accessories",
+      "trailer_types": [
+        "dry_van",
+        "insulated",
+        "refrigerated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "household_appliances",
+      "name": "Household Appliances",
+      "trailer_types": [
+        "dry_van",
+        "insulated",
+        "refrigerated"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "hydrochloric_acid",
+      "name": "Hydrochloric Acid",
+      "trailer_types": [
+        "chemical_tank"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "ice_cream",
+      "name": "Ice Cream",
+      "trailer_types": [
+        "refrigerated"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "industrial_pallets",
+      "name": "Industrial Pallets",
+      "trailer_types": [
+        "flatbed"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "insulation_panels",
+      "name": "Insulation Panels",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "iron_pipes",
+      "name": "Iron Pipes",
+      "trailer_types": [
+        "flatbed"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "large_tubes",
+      "name": "Large Tubes",
+      "trailer_types": [
+        "flatbed",
+        "log"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "limestone",
+      "name": "Limestone",
+      "trailer_types": [
+        "dumper"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "live_pigs",
+      "name": "Live Pigs",
+      "trailer_types": [
+        "livestock"
+      ],
+      "dlc_introduced": "1.55",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "lpg",
+      "name": "LPG",
+      "trailer_types": [
+        "gas_tank"
+      ],
+      "dlc_introduced": "1.47",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "lye",
+      "name": "Lye",
+      "trailer_types": [
+        "chemical_tank"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "machine_parts",
+      "name": "Machine Parts",
+      "trailer_types": [
+        "container_carrier"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "meat",
+      "name": "Meat",
+      "trailer_types": [
+        "refrigerated"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "medium_truck_chassis",
+      "name": "Medium Truck Chassis",
+      "trailer_types": [
+        "drop_deck",
+        "lowboy"
+      ],
+      "dlc_introduced": "1.57",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "mercuric_chloride",
+      "name": "Mercuric Chloride",
+      "trailer_types": [
+        "chemical_tank"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "milk",
+      "name": "Milk",
+      "trailer_types": [
+        "food_tank",
+        "refrigerated"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "mix_tank",
+      "name": "Mix Tank",
+      "trailer_types": [
+        "drop_deck",
+        "lowboy"
+      ],
+      "dlc_introduced": "1.40",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "mobile_barrier",
+      "name": "Mobile Barrier",
+      "trailer_types": [
+        "mobile_barrier"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "mortar",
+      "name": "Mortar",
+      "trailer_types": [
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "nitrocellulose",
+      "name": "Nitrocellulose",
+      "trailer_types": [
+        "container_carrier",
+        "dry_van",
+        "insulated",
+        "refrigerated"
+      ],
+      "dlc_introduced": "1.45",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "nuts",
+      "name": "Nuts",
+      "trailer_types": [
+        "dry_van",
+        "insulated",
+        "refrigerated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "office_supplies",
+      "name": "Office Supplies",
+      "trailer_types": [
+        "dry_van",
+        "insulated",
+        "refrigerated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "packaged_food",
+      "name": "Packaged Food",
+      "trailer_types": [
+        "container_carrier",
+        "dry_van",
+        "insulated",
+        "refrigerated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "paint",
+      "name": "Paint",
+      "trailer_types": [
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "paper",
+      "name": "Paper",
+      "trailer_types": [
+        "container_carrier",
+        "dry_van",
+        "insulated",
+        "refrigerated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "pelleted_animal_food",
+      "name": "Pelleted Animal Food",
+      "trailer_types": [
+        "bulk_feed",
+        "dry_bulk",
+        "dry_van",
+        "hopper",
+        "insulated",
+        "refrigerated"
+      ],
+      "dlc_introduced": "1.36",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "pesticides",
+      "name": "Pesticides",
+      "trailer_types": [
+        "chemical_tank"
+      ],
+      "dlc_introduced": "1.46",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "peterbilt_trucks",
+      "name": "Peterbilt Trucks",
+      "trailer_types": [
+        "truck_transporter"
+      ],
+      "dlc_introduced": "1.46",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "pickups_passenger",
+      "name": "Pickups (passenger)",
+      "trailer_types": [
+        "van_transporter"
+      ],
+      "dlc_introduced": "1.48",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "plows",
+      "name": "Plows",
+      "trailer_types": [
+        "flatbed"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "potassium",
+      "name": "Potassium",
+      "trailer_types": [
+        "container_carrier",
+        "dry_van",
+        "insulated",
+        "refrigerated"
+      ],
+      "dlc_introduced": "1.45",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "power_generator",
+      "name": "Power Generator",
+      "trailer_types": [
+        "container_carrier"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "pressure_tank",
+      "name": "Pressure Tank",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "propane",
+      "name": "Propane",
+      "trailer_types": [
+        "gas_tank"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "raw_milk",
+      "name": "Raw Milk",
+      "trailer_types": [
+        "food_tank"
+      ],
+      "dlc_introduced": "1.37",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "reservoir_tank",
+      "name": "Reservoir Tank",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "rice",
+      "name": "Rice",
+      "trailer_types": [
+        "dry_van",
+        "insulated",
+        "refrigerated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "roadroller",
+      "name": "Roadroller",
+      "trailer_types": [
+        "drop_deck",
+        "lowboy"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "roof_shingles",
+      "name": "Roof Shingles",
+      "trailer_types": [
+        "flatbed"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "salt",
+      "name": "Salt",
+      "trailer_types": [
+        "container_carrier",
+        "dry_van",
+        "insulated",
+        "refrigerated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "1.38",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "sand",
+      "name": "Sand",
+      "trailer_types": [
+        "dry_bulk",
+        "dumper"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "scissor_lift",
+      "name": "Scissor Lift",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "1.57",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "scrap_metals",
+      "name": "Scrap Metals",
+      "trailer_types": [
+        "chip_van",
+        "dumper"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "scrapped_cars",
+      "name": "Scrapped Cars",
+      "trailer_types": [
+        "flatbed"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "service_truck",
+      "name": "Service Truck",
+      "trailer_types": [
+        "drop_deck",
+        "lowboy"
+      ],
+      "dlc_introduced": "1.57",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "silica",
+      "name": "Silica",
+      "trailer_types": [
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "solvents",
+      "name": "Solvents",
+      "trailer_types": [
+        "fuel_tank"
+      ],
+      "dlc_introduced": "1.45",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "speed_motor_boat",
+      "name": "Speed Motor Boat",
+      "trailer_types": [
+        "lowboy"
+      ],
+      "dlc_introduced": "1.57",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "stones",
+      "name": "Stones",
+      "trailer_types": [
+        "dumper"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "sugar",
+      "name": "Sugar",
+      "trailer_types": [
+        "container_carrier",
+        "dry_van",
+        "insulated",
+        "refrigerated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "sulphuric_acid",
+      "name": "Sulphuric Acid",
+      "trailer_types": [
+        "chemical_tank"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "tableware",
+      "name": "Tableware",
+      "trailer_types": [
+        "dry_van",
+        "insulated",
+        "refrigerated"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "tires",
+      "name": "Tires",
+      "trailer_types": [
+        "dry_van",
+        "insulated",
+        "refrigerated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "toys",
+      "name": "Toys",
+      "trailer_types": [
+        "dry_van",
+        "insulated",
+        "refrigerated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "tractor",
+      "name": "Tractor",
+      "trailer_types": [
+        "drop_deck",
+        "lowboy"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "transformer",
+      "name": "Transformer",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "tvs",
+      "name": "TVs",
+      "trailer_types": [
+        "container_carrier",
+        "dry_van",
+        "insulated",
+        "refrigerated"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "used_packaging",
+      "name": "Used Packaging",
+      "trailer_types": [
+        "chip_van",
+        "dry_van",
+        "insulated",
+        "refrigerated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "vegetables",
+      "name": "Vegetables",
+      "trailer_types": [
+        "insulated",
+        "refrigerated"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "ventilation_shaft",
+      "name": "Ventilation Shaft",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "western_star_trucks",
+      "name": "Western Star Trucks",
+      "trailer_types": [
+        "truck_transporter"
+      ],
+      "dlc_introduced": "1.38",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "wheel_loader",
+      "name": "Wheel Loader",
+      "trailer_types": [
+        "lowboy"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "yogurt",
+      "name": "Yogurt",
+      "trailer_types": [
+        "refrigerated"
+      ],
+      "dlc_introduced": "Launch",
+      "required_dlc": null,
+      "needs_verification": false
+    },
+    {
+      "id": "house_prefabs",
+      "name": "House Prefabs",
+      "trailer_types": [
+        "flatbed"
+      ],
+      "dlc_introduced": "Oregon",
+      "required_dlc": "oregon",
+      "needs_verification": false
+    },
+    {
+      "id": "logs",
+      "name": "Logs",
+      "trailer_types": [
+        "log"
+      ],
+      "dlc_introduced": "Oregon",
+      "required_dlc": "oregon",
+      "needs_verification": false
+    },
+    {
+      "id": "lumber_beams",
+      "name": "Lumber (beams)",
+      "trailer_types": [
+        "flatbed",
+        "log"
+      ],
+      "dlc_introduced": "Oregon",
+      "required_dlc": "oregon",
+      "needs_verification": false
+    },
+    {
+      "id": "lumber_boards",
+      "name": "Lumber (boards)",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Oregon",
+      "required_dlc": "oregon",
+      "needs_verification": false
+    },
+    {
+      "id": "metal_coil",
+      "name": "Metal Coil",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Oregon",
+      "required_dlc": "oregon",
+      "needs_verification": false
+    },
+    {
+      "id": "mooring_buoy",
+      "name": "Mooring Buoy",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Oregon",
+      "required_dlc": "oregon",
+      "needs_verification": false
+    },
+    {
+      "id": "sawdust_panels",
+      "name": "Sawdust Panels",
+      "trailer_types": [
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Oregon",
+      "required_dlc": "oregon",
+      "needs_verification": false
+    },
+    {
+      "id": "square_tubing",
+      "name": "Square Tubing",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Oregon",
+      "required_dlc": "oregon",
+      "needs_verification": false
+    },
+    {
+      "id": "wood_shavings",
+      "name": "Wood Shavings",
+      "trailer_types": [
+        "chip_van",
+        "dumper"
+      ],
+      "dlc_introduced": "Oregon",
+      "required_dlc": "oregon",
+      "needs_verification": false
+    },
+    {
+      "id": "aircraft_engine",
+      "name": "Aircraft Engine",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Washington",
+      "required_dlc": "washington",
+      "needs_verification": false
+    },
+    {
+      "id": "boat",
+      "name": "Boat",
+      "trailer_types": [
+        "lowboy_boat"
+      ],
+      "dlc_introduced": "Washington",
+      "required_dlc": "washington",
+      "needs_verification": false
+    },
+    {
+      "id": "kenworth_trucks",
+      "name": "Kenworth Trucks",
+      "trailer_types": [
+        "truck_transporter"
+      ],
+      "dlc_introduced": "Washington",
+      "required_dlc": "washington",
+      "needs_verification": false
+    },
+    {
+      "id": "aromatics",
+      "name": "Aromatics",
+      "trailer_types": [
+        "fuel_tank"
+      ],
+      "dlc_introduced": "Utah",
+      "required_dlc": "utah",
+      "needs_verification": false
+    },
+    {
+      "id": "crude_oil",
+      "name": "Crude Oil",
+      "trailer_types": [
+        "fuel_tank"
+      ],
+      "dlc_introduced": "Utah",
+      "required_dlc": "utah",
+      "needs_verification": false
+    },
+    {
+      "id": "frac_tank_cargo",
+      "name": "Frac Tank",
+      "trailer_types": [
+        "frac_tank"
+      ],
+      "dlc_introduced": "Utah",
+      "required_dlc": "utah",
+      "needs_verification": false
+    },
+    {
+      "id": "potatoes",
+      "name": "Potatoes",
+      "trailer_types": [
+        "container_carrier",
+        "dry_van",
+        "hopper",
+        "insulated",
+        "refrigerated"
+      ],
+      "dlc_introduced": "Idaho",
+      "required_dlc": "idaho",
+      "needs_verification": false
+    },
+    {
+      "id": "live_cattle",
+      "name": "Live Cattle",
+      "trailer_types": [
+        "livestock"
+      ],
+      "dlc_introduced": "Colorado",
+      "required_dlc": "colorado",
+      "needs_verification": false
+    },
+    {
+      "id": "rails",
+      "name": "Rails",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Wyoming",
+      "required_dlc": "wyoming",
+      "needs_verification": false
+    },
+    {
+      "id": "soda_ash",
+      "name": "Soda Ash",
+      "trailer_types": [
+        "container_carrier",
+        "dry_van",
+        "insulated",
+        "refrigerated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Wyoming",
+      "required_dlc": "wyoming",
+      "needs_verification": false
+    },
+    {
+      "id": "tamping_machine",
+      "name": "Tamping Machine",
+      "trailer_types": [
+        "lowboy_double",
+        "lowboy_triple"
+      ],
+      "dlc_introduced": "Wyoming",
+      "required_dlc": "wyoming",
+      "needs_verification": false
+    },
+    {
+      "id": "train_axles",
+      "name": "Train Axles",
+      "trailer_types": [
+        "flatbed"
+      ],
+      "dlc_introduced": "Wyoming",
+      "required_dlc": "wyoming",
+      "needs_verification": false
+    },
+    {
+      "id": "wind_turbine_nacelle",
+      "name": "Wind Turbine Nacelle",
+      "trailer_types": [
+        "lowboy"
+      ],
+      "dlc_introduced": "Wyoming",
+      "required_dlc": "wyoming",
+      "needs_verification": false
+    },
+    {
+      "id": "wind_turbine_tower",
+      "name": "Wind Turbine Tower",
+      "trailer_types": [
+        "lowboy"
+      ],
+      "dlc_introduced": "Wyoming",
+      "required_dlc": "wyoming",
+      "needs_verification": false
+    },
+    {
+      "id": "beet_harvester",
+      "name": "Beet Harvester",
+      "trailer_types": [
+        "lowboy_double",
+        "lowboy_triple"
+      ],
+      "dlc_introduced": "Montana",
+      "required_dlc": "montana",
+      "needs_verification": false
+    },
+    {
+      "id": "buttermilk",
+      "name": "Buttermilk",
+      "trailer_types": [
+        "refrigerated"
+      ],
+      "dlc_introduced": "Montana",
+      "required_dlc": "montana",
+      "needs_verification": false
+    },
+    {
+      "id": "circuit_breakers",
+      "name": "Circuit Breakers",
+      "trailer_types": [
+        "drop_deck"
+      ],
+      "dlc_introduced": "Montana",
+      "required_dlc": "montana",
+      "needs_verification": false
+    },
+    {
+      "id": "dumpster",
+      "name": "Dumpster",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Montana",
+      "required_dlc": "montana",
+      "needs_verification": false
+    },
+    {
+      "id": "garbage_truck",
+      "name": "Garbage Truck",
+      "trailer_types": [
+        "lowboy"
+      ],
+      "dlc_introduced": "Montana",
+      "required_dlc": "montana",
+      "needs_verification": false
+    },
+    {
+      "id": "guard_rails",
+      "name": "Guard Rails",
+      "trailer_types": [
+        "dry_van",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Montana",
+      "required_dlc": "montana",
+      "needs_verification": false
+    },
+    {
+      "id": "ibc_containers",
+      "name": "IBC Containers",
+      "trailer_types": [
+        "dry_van",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Montana",
+      "required_dlc": "montana",
+      "needs_verification": false
+    },
+    {
+      "id": "lemonade",
+      "name": "Lemonade",
+      "trailer_types": [
+        "container_carrier",
+        "dry_van",
+        "insulated",
+        "refrigerated"
+      ],
+      "dlc_introduced": "Montana",
+      "required_dlc": "montana",
+      "needs_verification": false
+    },
+    {
+      "id": "silane",
+      "name": "Silane",
+      "trailer_types": [
+        "container_carrier"
+      ],
+      "dlc_introduced": "Montana",
+      "required_dlc": "montana",
+      "needs_verification": false
+    },
+    {
+      "id": "sugar_beet",
+      "name": "Sugar Beet",
+      "trailer_types": [
+        "hopper"
+      ],
+      "dlc_introduced": "Montana",
+      "required_dlc": "montana",
+      "needs_verification": false
+    },
+    {
+      "id": "talc_powder",
+      "name": "Talc Powder",
+      "trailer_types": [
+        "dry_van",
+        "insulated",
+        "refrigerated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Montana",
+      "required_dlc": "montana",
+      "needs_verification": false
+    },
+    {
+      "id": "trees",
+      "name": "Trees",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Montana",
+      "required_dlc": "montana",
+      "needs_verification": false
+    },
+    {
+      "id": "utility_poles",
+      "name": "Utility Poles",
+      "trailer_types": [
+        "log"
+      ],
+      "dlc_introduced": "Montana",
+      "required_dlc": "montana",
+      "needs_verification": false
+    },
+    {
+      "id": "waste_paper",
+      "name": "Waste Paper",
+      "trailer_types": [
+        "chip_van",
+        "drop_deck",
+        "dry_van",
+        "flatbed",
+        "insulated",
+        "refrigerated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Montana",
+      "required_dlc": "montana",
+      "needs_verification": false
+    },
+    {
+      "id": "concrete_barrier",
+      "name": "Concrete Barrier",
+      "trailer_types": [
+        "flatbed"
+      ],
+      "dlc_introduced": "Texas",
+      "required_dlc": "texas",
+      "needs_verification": false
+    },
+    {
+      "id": "cotton_lint",
+      "name": "Cotton Lint",
+      "trailer_types": [
+        "flatbed"
+      ],
+      "dlc_introduced": "Texas",
+      "required_dlc": "texas",
+      "needs_verification": false
+    },
+    {
+      "id": "cotton_seed",
+      "name": "Cotton Seed",
+      "trailer_types": [
+        "bulk_feed",
+        "chip_van",
+        "dry_bulk",
+        "hopper"
+      ],
+      "dlc_introduced": "Texas",
+      "required_dlc": "texas",
+      "needs_verification": false
+    },
+    {
+      "id": "generator_set",
+      "name": "Generator Set",
+      "trailer_types": [
+        "flatbed"
+      ],
+      "dlc_introduced": "Texas",
+      "required_dlc": "texas",
+      "needs_verification": false
+    },
+    {
+      "id": "glass",
+      "name": "Glass",
+      "trailer_types": [
+        "drop_deck"
+      ],
+      "dlc_introduced": "Texas",
+      "required_dlc": "texas",
+      "needs_verification": false
+    },
+    {
+      "id": "glass_racks",
+      "name": "Glass Racks",
+      "trailer_types": [
+        "drop_deck"
+      ],
+      "dlc_introduced": "Texas",
+      "required_dlc": "texas",
+      "needs_verification": false
+    },
+    {
+      "id": "oil_pipes",
+      "name": "Oil Pipes",
+      "trailer_types": [
+        "flatbed"
+      ],
+      "dlc_introduced": "Texas",
+      "required_dlc": "texas",
+      "needs_verification": false
+    },
+    {
+      "id": "pumpjack",
+      "name": "Pumpjack",
+      "trailer_types": [
+        "flatbed"
+      ],
+      "dlc_introduced": "Texas",
+      "required_dlc": "texas",
+      "needs_verification": false
+    },
+    {
+      "id": "space_container",
+      "name": "Space Container",
+      "trailer_types": [
+        "lowboy"
+      ],
+      "dlc_introduced": "Texas",
+      "required_dlc": "texas",
+      "needs_verification": false
+    },
+    {
+      "id": "air_conditioning_units",
+      "name": "Air Conditioning Units",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Oklahoma",
+      "required_dlc": "oklahoma",
+      "needs_verification": false
+    },
+    {
+      "id": "big_tires",
+      "name": "Big Tires",
+      "trailer_types": [
+        "drop_deck"
+      ],
+      "dlc_introduced": "Oklahoma",
+      "required_dlc": "oklahoma",
+      "needs_verification": false
+    },
+    {
+      "id": "boom_lift_articulated",
+      "name": "Boom Lift (articulated)",
+      "trailer_types": [
+        "drop_deck",
+        "lowboy"
+      ],
+      "dlc_introduced": "Oklahoma",
+      "required_dlc": "oklahoma",
+      "needs_verification": false
+    },
+    {
+      "id": "boom_lift_telescopic",
+      "name": "Boom Lift (telescopic)",
+      "trailer_types": [
+        "drop_deck"
+      ],
+      "dlc_introduced": "Oklahoma",
+      "required_dlc": "oklahoma",
+      "needs_verification": false
+    },
+    {
+      "id": "bus_hood",
+      "name": "Bus Hood",
+      "trailer_types": [
+        "drop_deck"
+      ],
+      "dlc_introduced": "Oklahoma",
+      "required_dlc": "oklahoma",
+      "needs_verification": false
+    },
+    {
+      "id": "school_bus",
+      "name": "School Bus",
+      "trailer_types": [
+        "drop_deck"
+      ],
+      "dlc_introduced": "Oklahoma",
+      "required_dlc": "oklahoma",
+      "needs_verification": false
+    },
+    {
+      "id": "yard_truck",
+      "name": "Yard Truck",
+      "trailer_types": [
+        "drop_deck"
+      ],
+      "dlc_introduced": "Oklahoma",
+      "required_dlc": "oklahoma",
+      "needs_verification": false
+    },
+    {
+      "id": "aircraft_wing",
+      "name": "Aircraft Wing",
+      "trailer_types": [
+        "lowboy"
+      ],
+      "dlc_introduced": "Kansas",
+      "required_dlc": "kansas",
+      "needs_verification": false
+    },
+    {
+      "id": "jet_engine_inlet_cowl",
+      "name": "Jet Engine Inlet Cowl",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Kansas",
+      "required_dlc": "kansas",
+      "needs_verification": false
+    },
+    {
+      "id": "corn",
+      "name": "Corn",
+      "trailer_types": [
+        "bulk_feed",
+        "dry_bulk",
+        "hopper"
+      ],
+      "dlc_introduced": "Nebraska",
+      "required_dlc": "nebraska",
+      "needs_verification": false
+    },
+    {
+      "id": "railcar_mover",
+      "name": "Railcar Mover",
+      "trailer_types": [
+        "lowboy"
+      ],
+      "dlc_introduced": "Nebraska",
+      "required_dlc": "nebraska",
+      "needs_verification": false
+    },
+    {
+      "id": "rv_motorhomes",
+      "name": "Recreational Vehicle (motorhomes)",
+      "trailer_types": [
+        "drop_deck",
+        "lowboy"
+      ],
+      "dlc_introduced": "Nebraska",
+      "required_dlc": "nebraska",
+      "needs_verification": false
+    },
+    {
+      "id": "rv_campers",
+      "name": "Recreational Vehicle (campers)",
+      "trailer_types": [
+        "van_transporter"
+      ],
+      "dlc_introduced": "Nebraska",
+      "required_dlc": "nebraska",
+      "needs_verification": false
+    },
+    {
+      "id": "soybean",
+      "name": "Soybean",
+      "trailer_types": [
+        "bulk_feed",
+        "dry_bulk",
+        "hopper"
+      ],
+      "dlc_introduced": "Nebraska",
+      "required_dlc": "nebraska",
+      "needs_verification": false
+    },
+    {
+      "id": "telescopic_handler",
+      "name": "Telescopic Handler",
+      "trailer_types": [
+        "drop_deck",
+        "lowboy"
+      ],
+      "dlc_introduced": "Nebraska",
+      "required_dlc": "nebraska",
+      "needs_verification": false
+    },
+    {
+      "id": "utility_terrain_vehicles",
+      "name": "Utility Terrain Vehicles",
+      "trailer_types": [
+        "car_transporter"
+      ],
+      "dlc_introduced": "Nebraska",
+      "required_dlc": "nebraska",
+      "needs_verification": false
+    },
+    {
+      "id": "clamshell_bucket",
+      "name": "Clamshell Bucket",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Arkansas",
+      "required_dlc": "arkansas",
+      "needs_verification": false
+    },
+    {
+      "id": "mobile_air_compressor",
+      "name": "Mobile Air Compressor",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Arkansas",
+      "required_dlc": "arkansas",
+      "needs_verification": false
+    },
+    {
+      "id": "packed_lumber",
+      "name": "Packed Lumber",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Arkansas",
+      "required_dlc": "arkansas",
+      "needs_verification": false
+    },
+    {
+      "id": "rough_terrain_forklift",
+      "name": "Rough Terrain Forklift",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed",
+        "lowboy"
+      ],
+      "dlc_introduced": "Arkansas",
+      "required_dlc": "arkansas",
+      "needs_verification": false
+    },
+    {
+      "id": "wood_chipper",
+      "name": "Wood Chipper",
+      "trailer_types": [
+        "drop_deck"
+      ],
+      "dlc_introduced": "Arkansas",
+      "required_dlc": "arkansas",
+      "needs_verification": false
+    },
+    {
+      "id": "cattle_equipment",
+      "name": "Cattle Equipment",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Missouri",
+      "required_dlc": "missouri",
+      "needs_verification": false
+    },
+    {
+      "id": "moving_containers",
+      "name": "Moving Containers",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Missouri",
+      "required_dlc": "missouri",
+      "needs_verification": false
+    },
+    {
+      "id": "pickups_crane",
+      "name": "Pickups (crane)",
+      "trailer_types": [
+        "drop_deck",
+        "lowboy"
+      ],
+      "dlc_introduced": "Missouri",
+      "required_dlc": "missouri",
+      "needs_verification": false
+    },
+    {
+      "id": "scaffolding",
+      "name": "Scaffolding",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Missouri",
+      "required_dlc": "missouri",
+      "needs_verification": false
+    },
+    {
+      "id": "batteries",
+      "name": "Batteries",
+      "trailer_types": [
+        "container_carrier",
+        "dry_van",
+        "insulated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "Iowa",
+      "required_dlc": "iowa",
+      "needs_verification": false
+    },
+    {
+      "id": "compact_tractor",
+      "name": "Compact Tractor",
+      "trailer_types": [
+        "drop_deck",
+        "lowboy"
+      ],
+      "dlc_introduced": "Iowa",
+      "required_dlc": "iowa",
+      "needs_verification": false
+    },
+    {
+      "id": "cooling_tower",
+      "name": "Cooling Tower",
+      "trailer_types": [
+        "lowboy"
+      ],
+      "dlc_introduced": "Iowa",
+      "required_dlc": "iowa",
+      "needs_verification": false
+    },
+    {
+      "id": "corn_head",
+      "name": "Corn Head",
+      "trailer_types": [
+        "drop_deck"
+      ],
+      "dlc_introduced": "Iowa",
+      "required_dlc": "iowa",
+      "needs_verification": false
+    },
+    {
+      "id": "live_sheep",
+      "name": "Live Sheep",
+      "trailer_types": [
+        "livestock"
+      ],
+      "dlc_introduced": "Iowa",
+      "required_dlc": "iowa",
+      "needs_verification": false
+    },
+    {
+      "id": "municipal_truck",
+      "name": "Municipal Truck",
+      "trailer_types": [
+        "drop_deck",
+        "lowboy"
+      ],
+      "dlc_introduced": "Iowa",
+      "required_dlc": "iowa",
+      "needs_verification": false
+    },
+    {
+      "id": "wire_rod_coil",
+      "name": "Wire Rod Coil",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "Iowa",
+      "required_dlc": "iowa",
+      "needs_verification": false
+    },
+    {
+      "id": "work_truck_chassis",
+      "name": "Work Truck Chassis",
+      "trailer_types": [
+        "drop_deck",
+        "lowboy"
+      ],
+      "dlc_introduced": "Iowa",
+      "required_dlc": "iowa",
+      "needs_verification": false
+    },
+    {
+      "id": "barley",
+      "name": "Barley",
+      "trailer_types": [
+        "bulk_feed",
+        "dry_bulk",
+        "hopper"
+      ],
+      "dlc_introduced": "Louisiana",
+      "required_dlc": "louisiana",
+      "needs_verification": false
+    },
+    {
+      "id": "ethanol",
+      "name": "Ethanol",
+      "trailer_types": [
+        "chemical_tank"
+      ],
+      "dlc_introduced": "Louisiana",
+      "required_dlc": "louisiana",
+      "needs_verification": false
+    },
+    {
+      "id": "rye",
+      "name": "Rye",
+      "trailer_types": [
+        "bulk_feed",
+        "dry_bulk",
+        "hopper"
+      ],
+      "dlc_introduced": "Louisiana",
+      "required_dlc": "louisiana",
+      "needs_verification": false
+    },
+    {
+      "id": "wheat",
+      "name": "Wheat",
+      "trailer_types": [
+        "bulk_feed",
+        "dry_bulk",
+        "hopper"
+      ],
+      "dlc_introduced": "Louisiana",
+      "required_dlc": "louisiana",
+      "needs_verification": false
+    }
   ]
 }

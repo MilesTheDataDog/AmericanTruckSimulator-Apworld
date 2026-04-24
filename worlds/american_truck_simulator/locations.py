@@ -32,6 +32,11 @@ class ATSLocationData(NamedTuple):
 _cities_data = _load("cities.json")
 _cargo_data = _load("cargo_types.json")
 
+# Build state_id → state display name lookup for region assignment
+_state_id_to_name: Dict[str, str] = {
+    s["id"]: s["name"] for s in _cities_data["states"]
+}
+
 # ── Level milestone locations ──────────────────────────────────────────────────
 _MILESTONE_LEVELS = [5, 10, 15, 20, 25, 30]
 
@@ -45,13 +50,16 @@ for _i, _lvl in enumerate(_MILESTONE_LEVELS):
     )
 
 # ── Cargo delivery locations ───────────────────────────────────────────────────
-# All cargo types land in the "Menu" region: the base states (CA + NV) carry
-# almost all vanilla cargo types, so no state unlock is required in logic.
+# Base game cargo (required_dlc = null) lands in "Menu" — always reachable.
+# DLC state cargo (required_dlc = state_id) lands in that state's region so it
+# is automatically excluded when the DLC state is not enabled.
 CARGO_DELIVERY_LOCATIONS: Dict[str, ATSLocationData] = {}
 for _i, _cargo in enumerate(_cargo_data["cargo_types"]):
+    _req = _cargo.get("required_dlc")
+    _region = _state_id_to_name.get(_req, "Menu") if _req else "Menu"
     CARGO_DELIVERY_LOCATIONS[f"Delivered - {_cargo['name']}"] = ATSLocationData(
         code=ATS_BASE_ID + 10000 + _i,
-        region="Menu",
+        region=_region,
         category="cargo",
         game_id=_cargo["id"],
     )
@@ -139,7 +147,9 @@ def get_locations_for_options(options) -> List[str]:
         locations.extend(LEVEL_MILESTONE_LOCATIONS.keys())
 
     if options.cargo_delivery_checks:
-        locations.extend(CARGO_DELIVERY_LOCATIONS.keys())
+        for name, data in CARGO_DELIVERY_LOCATIONS.items():
+            if data.region == "Menu" or data.region in _active_regions:
+                locations.append(name)
 
     if options.city_arrival_checks:
         for name, data in CITY_ARRIVAL_LOCATIONS.items():
