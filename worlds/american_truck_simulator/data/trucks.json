@@ -1,0 +1,239 @@
+{
+  "_notes": [
+    "All trucks here are either base game or free DLC updates.",
+    "Paid DLC truck packs are excluded.",
+    "Kenworth T680 and Peterbilt 579 are the two default starting trucks and are NOT shuffled items.",
+    "All other trucks are items when shuffle_trucks option is enabled.",
+    "Entries with needs_verification=true should be confirmed against current game version.",
+    "Trucks marked used_dealers_only may not appear at main dealerships.",
+    "Sources: SCS blog posts, community wikis, Steam patch notes."
+  ],
+  "starting_trucks": [
+    {
+      "id": "kenworth_t680",
+      "manufacturer": "Kenworth",
+      "model": "T680",
+      "year": "Original",
+      "always_available": true,
+      "notes": "Base game launch truck (Feb 2016)"
+    },
+    {
+      "id": "peterbilt_579",
+      "manufacturer": "Peterbilt",
+      "model": "579",
+      "year": "Original",
+      "always_available": true,
+      "notes": "Base game launch truck (Feb 2016)"
+    }
+  ],
+  "shuffle_trucks": [
+    {
+      "id": "kenworth_w900",
+      "manufacturer": "Kenworth",
+      "model": "W900",
+      "year": null,
+      "added_version": "1.2-1.3",
+      "needs_verification": false,
+      "notes": "Classic long-nose conventional. Fully reworked in March 2023."
+    },
+    {
+      "id": "peterbilt_389",
+      "manufacturer": "Peterbilt",
+      "model": "389",
+      "year": null,
+      "added_version": "1.4",
+      "needs_verification": false,
+      "notes": "Classic long-nose. Added November 2016."
+    },
+    {
+      "id": "volvo_vnl",
+      "manufacturer": "Volvo",
+      "model": "VNL",
+      "year": "2018",
+      "added_version": "1.32",
+      "needs_verification": false,
+      "notes": "Initially paid; became free. Major rework in 2023 (v1.47)."
+    },
+    {
+      "id": "international_lonestar",
+      "manufacturer": "International",
+      "model": "LoneStar",
+      "year": null,
+      "added_version": null,
+      "needs_verification": false,
+      "notes": "Classic style. Added December 2019."
+    },
+    {
+      "id": "mack_anthem",
+      "manufacturer": "Mack",
+      "model": "Anthem",
+      "year": null,
+      "added_version": "1.37",
+      "needs_verification": false,
+      "notes": "Added April 2020."
+    },
+    {
+      "id": "western_star_49x",
+      "manufacturer": "Western Star",
+      "model": "49X",
+      "year": null,
+      "added_version": "1.38",
+      "needs_verification": false,
+      "notes": "Added September 2020."
+    },
+    {
+      "id": "freightliner_cascadia",
+      "manufacturer": "Freightliner",
+      "model": "Cascadia",
+      "year": "2019",
+      "added_version": null,
+      "needs_verification": false,
+      "notes": "Added December 2020."
+    },
+    {
+      "id": "international_lt",
+      "manufacturer": "International",
+      "model": "LT",
+      "year": null,
+      "added_version": null,
+      "needs_verification": false,
+      "notes": "Added September 2021."
+    },
+    {
+      "id": "international_9900i",
+      "manufacturer": "International",
+      "model": "9900i",
+      "year": null,
+      "added_version": null,
+      "needs_verification": false,
+      "used_dealers_only": true,
+      "notes": "Classic retro style. Added March 2022. Available at used truck dealers only."
+    },
+    {
+      "id": "western_star_57x",
+      "manufacturer": "Western Star",
+      "model": "57X",
+      "year": null,
+      "added_version": "1.45",
+      "needs_verification": false,
+      "notes": "Added August 2022."
+    },
+    {
+      "id": "western_star_5700xe",
+      "manufacturer": "Western Star",
+      "model": "5700XE",
+      "year": null,
+      "added_version": null,
+      "needs_verification": false,
+      "used_dealers_only": true,
+      "notes": "Added January 2023. Available at used truck dealers only."
+    },
+    {
+      "id": "kenworth_t680_2022",
+      "manufacturer": "Kenworth",
+      "model": "T680",
+      "year": "2022",
+      "added_version": "1.49",
+      "needs_verification": false,
+      "notes": "2022 model. Added December 2023 as free Steam DLC claim. Separate from original T680."
+    },
+    {
+      "id": "mack_pinnacle",
+      "manufacturer": "Mack",
+      "model": "Pinnacle",
+      "year": null,
+      "added_version": "1.51",
+      "needs_verification": false,
+      "notes": "Added September 2024. Free update alongside Mack Anthem Black Edition."
+    },
+    {
+      "id": "freightliner_cascadia_2025",
+      "manufacturer": "Freightliner",
+      "model": "Cascadia",
+      "year": "2025",
+      "added_version": "1.51",
+      "needs_verification": false,
+      "notes": "Next-gen Cascadia model. Added September 2024. Different from 2019 Cascadia."
+    },
+    {
+      "id": "kenworth_w900_legacy",
+      "manufacturer": "Kenworth",
+      "model": "W900 Legacy Edition",
+      "year": null,
+      "added_version": "1.53",
+      "needs_verification": true,
+      "notes": "Released with Missouri DLC in April 2025. Verify if truly separate item from base W900."
+    },
+    {
+      "id": "volvo_vnr",
+      "manufacturer": "Volvo",
+      "model": "VNR",
+      "year": "2025",
+      "added_version": null,
+      "needs_verification": true,
+      "notes": "NEEDS VERIFICATION: Release status unclear. May be unreleased or announced-only."
+    }
+  ],
+  "upgrade_packs": [
+    {
+      "id": "engine_tier_2",
+      "name": "Engine Tier 2",
+      "category": "engine",
+      "description": "Unlocks mid-range engine options across all trucks"
+    },
+    {
+      "id": "engine_tier_3",
+      "name": "Engine Tier 3",
+      "category": "engine",
+      "description": "Unlocks upper-mid engine options"
+    },
+    {
+      "id": "engine_tier_4",
+      "name": "Engine Tier 4",
+      "category": "engine",
+      "description": "Unlocks high-performance engine options"
+    },
+    {
+      "id": "engine_tier_5",
+      "name": "Engine Tier 5",
+      "category": "engine",
+      "description": "Unlocks top-tier engine options (where available per truck)"
+    },
+    {
+      "id": "transmission_tier_2",
+      "name": "Transmission Tier 2",
+      "category": "transmission",
+      "description": "Unlocks improved gearbox options"
+    },
+    {
+      "id": "transmission_tier_3",
+      "name": "Transmission Tier 3",
+      "category": "transmission",
+      "description": "Unlocks advanced gearbox options including 13/18-speed"
+    },
+    {
+      "id": "transmission_tier_4",
+      "name": "Transmission Tier 4",
+      "category": "transmission",
+      "description": "Unlocks top-tier AMT and manual gearbox options"
+    },
+    {
+      "id": "chassis_upgrade",
+      "name": "Chassis Upgrade Pack",
+      "category": "chassis",
+      "description": "Unlocks extended wheelbase and high-capacity fuel tank chassis options"
+    },
+    {
+      "id": "cab_upgrade",
+      "name": "Cab Upgrade Pack",
+      "category": "cab",
+      "description": "Unlocks high-roof sleeper and ultra-cab options"
+    },
+    {
+      "id": "accessories_pack",
+      "name": "Accessories Pack",
+      "category": "accessories",
+      "description": "Unlocks premium exterior and interior accessory options"
+    }
+  ]
+}
