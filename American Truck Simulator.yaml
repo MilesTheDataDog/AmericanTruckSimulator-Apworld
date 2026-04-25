@@ -1,0 +1,126 @@
+# ══════════════════════════════════════════════════════════════════════════════
+#  American Truck Simulator — Archipelago Player Template
+# ══════════════════════════════════════════════════════════════════════════════
+#
+#  Drive across the American West, delivering cargo and discovering cities.
+#  Unlock states, trucks, and upgrades through the multiworld item pool.
+#
+#  Instructions:
+#   1. Set your player name below.
+#   2. Configure which DLC states you own under "enabled_dlc".
+#   3. Adjust any other options to your preference.
+#   4. Submit this file to your Archipelago server.
+# ══════════════════════════════════════════════════════════════════════════════
+
+name: YourName    # Your name as it will appear in the multiworld. No spaces.
+
+game: American Truck Simulator
+
+requires:
+  version: 0.5.0  # Minimum Archipelago version
+
+American Truck Simulator:
+
+  # ── Win Condition ─────────────────────────────────────────────────────────────
+  # What you need to accomplish to complete your run.
+  #
+  #   level_and_money : Reach the goal level AND the goal money amount (both).
+  #   level_only      : Reach the goal level.
+  #   money_only      : Reach the goal money amount.
+  #   level_or_money  : Reach either the goal level OR the goal money (first wins).
+  win_condition: level_and_money
+
+  # Driver level target (5–35). Level 35 is the maximum and unlocks all skill upgrades.
+  goal_level: 35
+
+  # Earnings target in thousands of dollars (100–10000).
+  # Default 1000 = $1,000,000. Maximum 10000 = $10,000,000.
+  goal_money: 1000
+
+  # ── Enabled DLC States ────────────────────────────────────────────────────────
+  # Which DLC map packs you own and want active in the randomizer.
+  #
+  # California and Nevada are always active (base game) — do not list them here.
+  # Arizona is FREE DLC for all players and is enabled by default.
+  #
+  # Only enabled states will contribute city arrivals, garages, recruitment offices,
+  # and DLC-specific cargo types as location checks. Each enabled DLC state also
+  # adds an "Unlock [State]" progression item to the pool that must be received
+  # before you can accept jobs to or from that state.
+  #
+  # Full list of available DLC states:
+  #   Arizona, New Mexico, Oregon, Washington, Utah, Idaho, Colorado, Wyoming,
+  #   Montana, Texas, Oklahoma, Kansas, Nebraska, Arkansas, Missouri, Iowa, Louisiana
+  enabled_dlc:
+    - Arizona
+  # Add more lines below to include additional states (must own the DLC):
+  #   - New Mexico
+  #   - Oregon
+  #   - Washington
+  #   - Utah
+  #   - Idaho
+  #   - Colorado
+  #   - Wyoming
+  #   - Montana
+  #   - Texas
+  #   - Oklahoma
+  #   - Kansas
+  #   - Nebraska
+  #   - Arkansas
+  #   - Missouri
+  #   - Iowa
+  #   - Louisiana
+
+  # ── Starting State ────────────────────────────────────────────────────────────
+  # Which state your home garage is located in at the start.
+  # California and Nevada are always accessible regardless of this setting.
+  #
+  #   california : Start with a home garage in California (default).
+  #   nevada     : Start with a home garage in Nevada.
+  starting_state: california
+
+  # ── Item Shuffles ─────────────────────────────────────────────────────────────
+  # Shuffle truck models into the multiworld item pool.
+  # Locked trucks are hidden in dealer menus until you receive the unlock item.
+  # The two base starting trucks (Kenworth T680, Peterbilt 579) are never shuffled.
+  shuffle_trucks: true
+
+  # Shuffle truck upgrade tiers into the pool.
+  # Engine (Tiers 2–5), Transmission (Tiers 2–4), Chassis, Cab, and Accessories.
+  # You start with Tier 1 options only; higher tiers unlock as items are received.
+  shuffle_truck_upgrades: false
+
+  # Shuffle garage deeds into the pool.
+  # You must receive a city's garage deed before you can purchase that garage.
+  shuffle_garages: true
+
+  # Shuffle recruitment offices into the pool.
+  # Driving past an office is always a location check, but you must receive the
+  # matching office item before you can use it to hire drivers.
+  shuffle_recruitment_offices: true
+
+  # ── Location Checks ───────────────────────────────────────────────────────────
+  # Reaching driver levels 5, 10, 15, 20, 25, and 30 each count as a check.
+  level_milestone_checks: true
+
+  # Completing the first delivery of each cargo type counts as a check.
+  # Cargo types tied to a DLC state are only active if that state is enabled.
+  cargo_delivery_checks: true
+
+  # Arriving in a city for the first time counts as a check.
+  # Only cities in California, Nevada, and your enabled DLC states are included.
+  city_arrival_checks: true
+
+  # Fully upgrading a garage to 5 truck slots counts as a check.
+  # Only garages in California, Nevada, and your enabled DLC states are included.
+  garage_upgrade_checks: true
+
+  # Discovering a recruitment office for the first time counts as a check.
+  # Only offices in California, Nevada, and your enabled DLC states are included.
+  recruitment_office_checks: true
+
+  # ── Death Link ────────────────────────────────────────────────────────────────
+  # When enabled, crashing your truck sends a "death" event to all Death Link
+  # players in the session. Receiving a death from them causes a truck breakdown
+  # event in your game.
+  death_link: false
