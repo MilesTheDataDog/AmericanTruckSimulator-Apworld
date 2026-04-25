@@ -1,0 +1,6 @@
+# CMake build output (keep only the committed DLL artifact)
+build/CMakeCache.txt
+build/CMakeFiles/
+build/Makefile
+build/cmake_install.cmake
+build/libats_archipelago.dll.a
