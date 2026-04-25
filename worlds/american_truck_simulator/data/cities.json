@@ -1,13 +1,16 @@
 {
   "_notes": [
+    "Cities sourced from trucksimulator.wiki.gg \u2014 all entries verified against the wiki city list.",
     "Cities are ordered: base game first (CA, NV), then free DLC (AZ), then paid DLC in release order.",
-    "Within each state, cities are in alphabetical order. This order defines city_index and garage_index values.",
-    "city_index: sequential across ALL states (used for 'First Arrival' location IDs).",
-    "garage_index: sequential across only cities WITH garages (used for garage item and upgrade location IDs).",
-    "office_index: sequential across all offices in all cities (used for recruitment office item/location IDs).",
-    "needs_verification=true means the data point was not confirmed from a primary source during research.",
-    "recruitment_office_count=0 with office_nv=true means offices likely exist but locations are unknown.",
-    "Sources: ATS wiki, SCS blog posts, Steam community guides (cross-referenced)."
+    "Within each state cities are alphabetical; this order defines sequential location/item IDs.",
+    "has_garage: player can purchase and upgrade a garage in this city.",
+    "recruitment_office_count: number of driver recruitment offices discoverable in this city.",
+    "Texarkana appears in both Texas (texarkana_tx) and Arkansas (texarkana_ar) as separate city IDs.",
+    "Kansas City appears in both Kansas (kansas_city_ks) and Missouri (kansas_city_mo).",
+    "Longview appears in both Texas (longview_tx) and Washington (longview_wa).",
+    "Burlington appears in both Colorado (burlington_co) and Iowa (burlington_ia).",
+    "Salina appears in both Kansas (salina) and Utah (salina_ut).",
+    "Sidney appears in both Montana (sidney_mt) and Nebraska (sydney_ne)."
   ],
   "states": [
     {
@@ -17,30 +20,174 @@
       "paid_dlc": false,
       "always_accessible": true,
       "cities": [
-        {"id": "bakersfield",    "name": "Bakersfield",      "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "barstow",        "name": "Barstow",          "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "bishop",         "name": "Bishop",           "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "blythe",         "name": "Blythe",           "has_garage": false, "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "el_centro",      "name": "El Centro",        "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "eureka",         "name": "Eureka",           "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "fresno",         "name": "Fresno",           "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "huron",          "name": "Huron",            "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "indio",          "name": "Indio",            "has_garage": false, "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "los_angeles",    "name": "Los Angeles",      "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "modesto",        "name": "Modesto",          "has_garage": false, "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "mojave",         "name": "Mojave",           "has_garage": false, "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "oakland",        "name": "Oakland",          "has_garage": false, "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "oxnard",         "name": "Oxnard",           "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "redding",        "name": "Redding",          "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "sacramento",     "name": "Sacramento",       "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "san_diego",      "name": "San Diego",        "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "san_francisco",  "name": "San Francisco",    "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "san_jose",       "name": "San Jose",         "has_garage": false, "recruitment_office_count": 1, "needs_verification": true},
-        {"id": "santa_cruz",     "name": "Santa Cruz",       "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "santa_maria",    "name": "Santa Maria",      "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "stockton",       "name": "Stockton",         "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "truckee",        "name": "Truckee",          "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "ukiah",          "name": "Ukiah",            "has_garage": false, "recruitment_office_count": 0, "needs_verification": true}
+        {
+          "id": "bakersfield",
+          "name": "Bakersfield",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "barstow",
+          "name": "Barstow",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "blythe",
+          "name": "Blythe",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "el_centro",
+          "name": "El Centro",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "eureka",
+          "name": "Eureka",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "fresno",
+          "name": "Fresno",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "hilt",
+          "name": "Hilt",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "huron",
+          "name": "Huron",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "indio",
+          "name": "Indio",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "los_angeles",
+          "name": "Los Angeles",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "modesto",
+          "name": "Modesto",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "mojave",
+          "name": "Mojave",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "oakland",
+          "name": "Oakland",
+          "has_garage": false,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "oxnard",
+          "name": "Oxnard",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "redding",
+          "name": "Redding",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "sacramento",
+          "name": "Sacramento",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "san_diego",
+          "name": "San Diego",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "san_francisco",
+          "name": "San Francisco",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "san_jose",
+          "name": "San Jose",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "santa_cruz",
+          "name": "Santa Cruz",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "santa_maria",
+          "name": "Santa Maria",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "stockton",
+          "name": "Stockton",
+          "has_garage": false,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "truckee",
+          "name": "Truckee",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "ukiah",
+          "name": "Ukiah",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        }
       ]
     },
     {
@@ -50,16 +197,76 @@
       "paid_dlc": false,
       "always_accessible": true,
       "cities": [
-        {"id": "carson_city",  "name": "Carson City",  "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "elko",         "name": "Elko",         "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "ely",          "name": "Ely",          "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "fallon",       "name": "Fallon",       "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "hawthorne",    "name": "Hawthorne",    "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "las_vegas",    "name": "Las Vegas",    "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "laughlin",     "name": "Laughlin",     "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "reno",         "name": "Reno",         "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "tonopah",      "name": "Tonopah",      "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "winnemucca",   "name": "Winnemucca",   "has_garage": false, "recruitment_office_count": 0, "needs_verification": false}
+        {
+          "id": "carson_city",
+          "name": "Carson City",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "elko",
+          "name": "Elko",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "ely",
+          "name": "Ely",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "jackpot",
+          "name": "Jackpot",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "las_vegas",
+          "name": "Las Vegas",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "pioche",
+          "name": "Pioche",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "primm",
+          "name": "Primm",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "reno",
+          "name": "Reno",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "tonopah",
+          "name": "Tonopah",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "winnemucca",
+          "name": "Winnemucca",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        }
       ]
     },
     {
@@ -69,23 +276,118 @@
       "paid_dlc": false,
       "always_accessible": false,
       "cities": [
-        {"id": "camp_verde",        "name": "Camp Verde",        "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "clifton",           "name": "Clifton",           "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "ehrenberg",         "name": "Ehrenberg",         "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "flagstaff",         "name": "Flagstaff",         "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "grand_canyon",      "name": "Grand Canyon Village","has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "kayenta",           "name": "Kayenta",           "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "kingman",           "name": "Kingman",           "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "lake_havasu_city",  "name": "Lake Havasu City",  "has_garage": false, "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "nogales",           "name": "Nogales",           "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "page",              "name": "Page",              "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "phoenix",           "name": "Phoenix",           "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "san_simon",         "name": "San Simon",         "has_garage": false, "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "show_low",          "name": "Show Low",          "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "sierra_vista",      "name": "Sierra Vista",      "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "tucson",            "name": "Tucson",            "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "winslow",           "name": "Winslow",           "has_garage": false, "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "yuma",              "name": "Yuma",              "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false}
+        {
+          "id": "camp_verde",
+          "name": "Camp Verde",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "clifton",
+          "name": "Clifton",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "flagstaff",
+          "name": "Flagstaff",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "grand_canyon",
+          "name": "Grand Canyon Village",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "kayenta",
+          "name": "Kayenta",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "kingman",
+          "name": "Kingman",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "lake_havasu_city",
+          "name": "Lake Havasu City",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "nogales",
+          "name": "Nogales",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "page",
+          "name": "Page",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "phoenix",
+          "name": "Phoenix",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "san_simon",
+          "name": "San Simon",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "show_low",
+          "name": "Show Low",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "sierra_vista",
+          "name": "Sierra Vista",
+          "has_garage": false,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "tucson",
+          "name": "Tucson",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "winslow",
+          "name": "Winslow",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "yuma",
+          "name": "Yuma",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        }
       ]
     },
     {
@@ -95,20 +397,104 @@
       "paid_dlc": true,
       "always_accessible": false,
       "cities": [
-        {"id": "albuquerque",  "name": "Albuquerque",  "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "carlsbad",     "name": "Carlsbad",     "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "clovis",       "name": "Clovis",       "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "farmington",   "name": "Farmington",   "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "gallup",       "name": "Gallup",       "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "las_cruces",   "name": "Las Cruces",   "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "raton",        "name": "Raton",        "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "roswell",      "name": "Roswell",      "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "santa_fe",     "name": "Santa Fe",     "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "silver_city",  "name": "Silver City",  "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "socorro",      "name": "Socorro",      "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "taos",         "name": "Taos",         "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "tucumcari",    "name": "Tucumcari",    "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "nm_14th_city", "name": "Unknown NM City", "has_garage": false, "recruitment_office_count": 0, "needs_verification": true, "_todo": "Identify 14th New Mexico city — possibly Lordsburg or Alamogordo"}
+        {
+          "id": "alamogordo",
+          "name": "Alamogordo",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "albuquerque",
+          "name": "Albuquerque",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "artesia",
+          "name": "Artesia",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "carlsbad",
+          "name": "Carlsbad",
+          "has_garage": false,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "clovis",
+          "name": "Clovis",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "farmington",
+          "name": "Farmington",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "gallup",
+          "name": "Gallup",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "hobbs",
+          "name": "Hobbs",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "las_cruces",
+          "name": "Las Cruces",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "raton",
+          "name": "Raton",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "roswell",
+          "name": "Roswell",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "santa_fe",
+          "name": "Santa Fe",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "socorro",
+          "name": "Socorro",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "tucumcari",
+          "name": "Tucumcari",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        }
       ]
     },
     {
@@ -118,20 +504,104 @@
       "paid_dlc": true,
       "always_accessible": false,
       "cities": [
-        {"id": "astoria",       "name": "Astoria",       "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "bend",          "name": "Bend",          "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "burns",         "name": "Burns",         "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "coos_bay",      "name": "Coos Bay",      "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "eugene",        "name": "Eugene",        "has_garage": true,  "recruitment_office_count": 2, "needs_verification": false},
-        {"id": "klamath_falls", "name": "Klamath Falls", "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "lakeview",      "name": "Lakeview",      "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "medford",       "name": "Medford",       "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "newport",       "name": "Newport",       "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "ontario_or",    "name": "Ontario",       "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "pendleton",     "name": "Pendleton",     "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "portland",      "name": "Portland",      "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "salem",         "name": "Salem",         "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "the_dalles",    "name": "The Dalles",    "has_garage": false, "recruitment_office_count": 0, "needs_verification": false}
+        {
+          "id": "astoria",
+          "name": "Astoria",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "bend",
+          "name": "Bend",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "burns",
+          "name": "Burns",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "coos_bay",
+          "name": "Coos Bay",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "eugene",
+          "name": "Eugene",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "klamath_falls",
+          "name": "Klamath Falls",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "lakeview",
+          "name": "Lakeview",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "medford",
+          "name": "Medford",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "newport",
+          "name": "Newport",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "ontario_or",
+          "name": "Ontario",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "pendleton",
+          "name": "Pendleton",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "portland",
+          "name": "Portland",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "salem",
+          "name": "Salem",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "the_dalles",
+          "name": "The Dalles",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        }
       ]
     },
     {
@@ -141,22 +611,118 @@
       "paid_dlc": true,
       "always_accessible": false,
       "cities": [
-        {"id": "aberdeen",      "name": "Aberdeen",      "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "bellingham",    "name": "Bellingham",    "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "colville",      "name": "Colville",      "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "everett",       "name": "Everett",       "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "grand_coulee",  "name": "Grand Coulee",  "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "kennewick",     "name": "Kennewick",     "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "longview_wa",   "name": "Longview",      "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "olympia",       "name": "Olympia",       "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "omak",          "name": "Omak",          "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "port_angeles",  "name": "Port Angeles",  "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "seattle",       "name": "Seattle",       "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "spokane",       "name": "Spokane",       "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "tacoma",        "name": "Tacoma",        "has_garage": false, "recruitment_office_count": 1, "needs_verification": true},
-        {"id": "vancouver_wa",  "name": "Vancouver",     "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "wenatchee",     "name": "Wenatchee",     "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "yakima",        "name": "Yakima",        "has_garage": false, "recruitment_office_count": 0, "needs_verification": false}
+        {
+          "id": "aberdeen",
+          "name": "Aberdeen",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "bellingham",
+          "name": "Bellingham",
+          "has_garage": false,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "colville",
+          "name": "Colville",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "everett",
+          "name": "Everett",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "grand_coulee",
+          "name": "Grand Coulee",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "kennewick",
+          "name": "Kennewick",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "longview_wa",
+          "name": "Longview",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "olympia",
+          "name": "Olympia",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "omak",
+          "name": "Omak",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "port_angeles",
+          "name": "Port Angeles",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "seattle",
+          "name": "Seattle",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "spokane",
+          "name": "Spokane",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "tacoma",
+          "name": "Tacoma",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "vancouver_wa",
+          "name": "Vancouver",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "wenatchee",
+          "name": "Wenatchee",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "yakima",
+          "name": "Yakima",
+          "has_garage": false,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        }
       ]
     },
     {
@@ -166,16 +732,76 @@
       "paid_dlc": true,
       "always_accessible": false,
       "cities": [
-        {"id": "cedar_city",    "name": "Cedar City",    "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "moab",          "name": "Moab",          "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "ogden",         "name": "Ogden",         "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "price",         "name": "Price",         "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "provo",         "name": "Provo",         "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "salina_ut",     "name": "Salina",        "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "salt_lake_city","name": "Salt Lake City","has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "st_george",     "name": "St. George",    "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "vernal",        "name": "Vernal",        "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "ut_10th_city",  "name": "Unknown UT City","has_garage": false,"recruitment_office_count": 0, "needs_verification": true, "_todo": "Identify 10th Utah city — possibly Richfield or Logan"}
+        {
+          "id": "cedar_city",
+          "name": "Cedar City",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "logan",
+          "name": "Logan",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "moab",
+          "name": "Moab",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "ogden",
+          "name": "Ogden",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "price",
+          "name": "Price",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "provo",
+          "name": "Provo",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "salina_ut",
+          "name": "Salina",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "salt_lake_city",
+          "name": "Salt Lake City",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "st_george",
+          "name": "St. George",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "vernal",
+          "name": "Vernal",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        }
       ]
     },
     {
@@ -185,17 +811,83 @@
       "paid_dlc": true,
       "always_accessible": false,
       "cities": [
-        {"id": "boise",         "name": "Boise",         "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "coeur_dalene",  "name": "Coeur d'Alene", "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "grangeville",   "name": "Grangeville",   "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "idaho_falls",   "name": "Idaho Falls",   "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "ketchum",       "name": "Ketchum",       "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "lewiston",      "name": "Lewiston",      "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "nampa",         "name": "Nampa",         "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "pocatello",     "name": "Pocatello",     "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "salmon",        "name": "Salmon",        "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "sandpoint",     "name": "Sandpoint",     "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "twin_falls",    "name": "Twin Falls",    "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false}
+        {
+          "id": "boise",
+          "name": "Boise",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "coeur_dalene",
+          "name": "Coeur d'Alene",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "grangeville",
+          "name": "Grangeville",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "idaho_falls",
+          "name": "Idaho Falls",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "ketchum",
+          "name": "Ketchum",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "lewiston",
+          "name": "Lewiston",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "nampa",
+          "name": "Nampa",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "pocatello",
+          "name": "Pocatello",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "salmon",
+          "name": "Salmon",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "sandpoint",
+          "name": "Sandpoint",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "twin_falls",
+          "name": "Twin Falls",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        }
       ]
     },
     {
@@ -205,19 +897,97 @@
       "paid_dlc": true,
       "always_accessible": false,
       "cities": [
-        {"id": "alamosa",          "name": "Alamosa",          "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "burlington_co",    "name": "Burlington",       "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "colorado_springs", "name": "Colorado Springs", "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "denver",           "name": "Denver",           "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "durango",          "name": "Durango",          "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "fort_collins",     "name": "Fort Collins",     "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "grand_junction",   "name": "Grand Junction",   "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "lamar",            "name": "Lamar",            "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "montrose",         "name": "Montrose",         "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "pueblo",           "name": "Pueblo",           "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "rangely",          "name": "Rangely",          "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "steamboat_springs","name": "Steamboat Springs","has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "sterling",         "name": "Sterling",         "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false}
+        {
+          "id": "alamosa",
+          "name": "Alamosa",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "burlington_co",
+          "name": "Burlington",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "colorado_springs",
+          "name": "Colorado Springs",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "denver",
+          "name": "Denver",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "durango",
+          "name": "Durango",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "fort_collins",
+          "name": "Fort Collins",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "grand_junction",
+          "name": "Grand Junction",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "lamar",
+          "name": "Lamar",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "montrose",
+          "name": "Montrose",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "pueblo",
+          "name": "Pueblo",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "rangely",
+          "name": "Rangely",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "steamboat_springs",
+          "name": "Steamboat Springs",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "sterling",
+          "name": "Sterling",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        }
       ]
     },
     {
@@ -227,17 +997,83 @@
       "paid_dlc": true,
       "always_accessible": false,
       "cities": [
-        {"id": "casper",      "name": "Casper",      "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "cheyenne",    "name": "Cheyenne",    "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "cody",        "name": "Cody",        "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "evanston",    "name": "Evanston",    "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "gillette",    "name": "Gillette",    "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "jackson",     "name": "Jackson",     "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "laramie",     "name": "Laramie",     "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "rawlins",     "name": "Rawlins",     "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "riverton",    "name": "Riverton",    "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "rock_springs","name": "Rock Springs","has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "sheridan",    "name": "Sheridan",    "has_garage": false, "recruitment_office_count": 0, "needs_verification": false}
+        {
+          "id": "casper",
+          "name": "Casper",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "cheyenne",
+          "name": "Cheyenne",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "cody",
+          "name": "Cody",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "evanston",
+          "name": "Evanston",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "gillette",
+          "name": "Gillette",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "jackson",
+          "name": "Jackson",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "laramie",
+          "name": "Laramie",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "rawlins",
+          "name": "Rawlins",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "riverton",
+          "name": "Riverton",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "rock_springs",
+          "name": "Rock Springs",
+          "has_garage": false,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "sheridan",
+          "name": "Sheridan",
+          "has_garage": false,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        }
       ]
     },
     {
@@ -247,21 +1083,111 @@
       "paid_dlc": true,
       "always_accessible": false,
       "cities": [
-        {"id": "billings",    "name": "Billings",    "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "bozeman",     "name": "Bozeman",     "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "butte",       "name": "Butte",       "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "glasgow",     "name": "Glasgow",     "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "glendive",    "name": "Glendive",    "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "great_falls", "name": "Great Falls", "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "havre",       "name": "Havre",       "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "helena",      "name": "Helena",      "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "kalispell",   "name": "Kalispell",   "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "laurel",      "name": "Laurel",      "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "lewistown",   "name": "Lewistown",   "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "miles_city",  "name": "Miles City",  "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "missoula",    "name": "Missoula",    "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "mt_14th_city","name": "Unknown MT City 1","has_garage": false,"recruitment_office_count": 0,"needs_verification": true,"_todo": "Identify 14th Montana city"},
-        {"id": "mt_15th_city","name": "Unknown MT City 2","has_garage": false,"recruitment_office_count": 0,"needs_verification": true,"_todo": "Identify 15th Montana city"}
+        {
+          "id": "billings",
+          "name": "Billings",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "bozeman",
+          "name": "Bozeman",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "butte",
+          "name": "Butte",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "glasgow",
+          "name": "Glasgow",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "glendive",
+          "name": "Glendive",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "great_falls",
+          "name": "Great Falls",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "havre",
+          "name": "Havre",
+          "has_garage": false,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "helena",
+          "name": "Helena",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "kalispell",
+          "name": "Kalispell",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "laurel",
+          "name": "Laurel",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "lewistown",
+          "name": "Lewistown",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "miles_city",
+          "name": "Miles City",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "missoula",
+          "name": "Missoula",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "sidney_mt",
+          "name": "Sidney",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "thompson_falls",
+          "name": "Thompson Falls",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        }
       ]
     },
     {
@@ -271,36 +1197,216 @@
       "paid_dlc": true,
       "always_accessible": false,
       "cities": [
-        {"id": "abilene",       "name": "Abilene",       "has_garage": true,  "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "amarillo",      "name": "Amarillo",      "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "austin",        "name": "Austin",        "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "beaumont",      "name": "Beaumont",      "has_garage": true,  "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "brownsville",   "name": "Brownsville",   "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "corpus_christi","name": "Corpus Christi","has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "dalhart",       "name": "Dalhart",       "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "dallas",        "name": "Dallas",        "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "del_rio",       "name": "Del Rio",       "has_garage": true,  "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "el_paso",       "name": "El Paso",       "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "fort_stockton", "name": "Fort Stockton", "has_garage": true,  "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "fort_worth",    "name": "Fort Worth",    "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "galveston",     "name": "Galveston",     "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "houston",       "name": "Houston",       "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "huntsville_tx", "name": "Huntsville",    "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "junction",      "name": "Junction",      "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "laredo",        "name": "Laredo",        "has_garage": true,  "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "longview_tx",   "name": "Longview",      "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "lubbock",       "name": "Lubbock",       "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "lufkin",        "name": "Lufkin",        "has_garage": true,  "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "mcallen",       "name": "McAllen",       "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "odessa",        "name": "Odessa",        "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "san_angelo",    "name": "San Angelo",    "has_garage": false, "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "san_antonio",   "name": "San Antonio",   "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "texarkana_tx",  "name": "Texarkana (TX)","has_garage": true,  "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "tyler",         "name": "Tyler",         "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "van_horn",      "name": "Van Horn",      "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "victoria",      "name": "Victoria",      "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "waco",          "name": "Waco",          "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "wichita_falls", "name": "Wichita Falls", "has_garage": false, "recruitment_office_count": 0, "needs_verification": false}
+        {
+          "id": "abilene",
+          "name": "Abilene",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "amarillo",
+          "name": "Amarillo",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "austin",
+          "name": "Austin",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "beaumont",
+          "name": "Beaumont",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "brownsville",
+          "name": "Brownsville",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "corpus_christi",
+          "name": "Corpus Christi",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "dalhart",
+          "name": "Dalhart",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "dallas",
+          "name": "Dallas",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "del_rio",
+          "name": "Del Rio",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "el_paso",
+          "name": "El Paso",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "fort_stockton",
+          "name": "Fort Stockton",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "fort_worth",
+          "name": "Fort Worth",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "galveston",
+          "name": "Galveston",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "houston",
+          "name": "Houston",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "huntsville_tx",
+          "name": "Huntsville",
+          "has_garage": false,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "junction",
+          "name": "Junction",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "laredo",
+          "name": "Laredo",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "longview_tx",
+          "name": "Longview",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "lubbock",
+          "name": "Lubbock",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "lufkin",
+          "name": "Lufkin",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "mcallen",
+          "name": "McAllen",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "odessa",
+          "name": "Odessa",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "san_angelo",
+          "name": "San Angelo",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "san_antonio",
+          "name": "San Antonio",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "texarkana_tx",
+          "name": "Texarkana",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "tyler",
+          "name": "Tyler",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "van_horn",
+          "name": "Van Horn",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "victoria",
+          "name": "Victoria",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "waco",
+          "name": "Waco",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "wichita_falls",
+          "name": "Wichita Falls",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        }
       ]
     },
     {
@@ -310,16 +1416,76 @@
       "paid_dlc": true,
       "always_accessible": false,
       "cities": [
-        {"id": "ardmore",       "name": "Ardmore",       "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "clinton",       "name": "Clinton",       "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "enid",          "name": "Enid",          "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "guymon",        "name": "Guymon",        "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "idabel",        "name": "Idabel",        "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "lawton",        "name": "Lawton",        "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "mcalester",     "name": "McAlester",     "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "oklahoma_city", "name": "Oklahoma City", "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "tulsa",         "name": "Tulsa",         "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "woodward",      "name": "Woodward",      "has_garage": false, "recruitment_office_count": 0, "needs_verification": false}
+        {
+          "id": "ardmore",
+          "name": "Ardmore",
+          "has_garage": false,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "clinton",
+          "name": "Clinton",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "enid",
+          "name": "Enid",
+          "has_garage": false,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "guymon",
+          "name": "Guymon",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "idabel",
+          "name": "Idabel",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "lawton",
+          "name": "Lawton",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "mcalester",
+          "name": "McAlester",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "oklahoma_city",
+          "name": "Oklahoma City",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "tulsa",
+          "name": "Tulsa",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "woodward",
+          "name": "Woodward",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        }
       ]
     },
     {
@@ -329,20 +1495,104 @@
       "paid_dlc": true,
       "always_accessible": false,
       "cities": [
-        {"id": "colby",          "name": "Colby",          "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "dodge_city",     "name": "Dodge City",     "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "emporia",        "name": "Emporia",        "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "garden_city",    "name": "Garden City",    "has_garage": true,  "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "hays",           "name": "Hays",           "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "hutchinson",     "name": "Hutchinson",     "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "junction_city",  "name": "Junction City",  "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "kansas_city_ks", "name": "Kansas City",    "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "marysville",     "name": "Marysville",     "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "phillipsburg",   "name": "Phillipsburg",   "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "pittsburg_ks",   "name": "Pittsburg",      "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "salina",         "name": "Salina",         "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "topeka",         "name": "Topeka",         "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "wichita",        "name": "Wichita",        "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false}
+        {
+          "id": "colby",
+          "name": "Colby",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "dodge_city",
+          "name": "Dodge City",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "emporia",
+          "name": "Emporia",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "garden_city",
+          "name": "Garden City",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "hays",
+          "name": "Hays",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "hutchinson",
+          "name": "Hutchinson",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "junction_city",
+          "name": "Junction City",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "kansas_city_ks",
+          "name": "Kansas City",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "marysville",
+          "name": "Marysville",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "phillipsburg",
+          "name": "Phillipsburg",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "pittsburg_ks",
+          "name": "Pittsburg",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "salina",
+          "name": "Salina",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "topeka",
+          "name": "Topeka",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "wichita",
+          "name": "Wichita",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        }
       ]
     },
     {
@@ -352,18 +1602,90 @@
       "paid_dlc": true,
       "always_accessible": false,
       "cities": [
-        {"id": "alliance",      "name": "Alliance",      "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "chadron",       "name": "Chadron",       "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "columbus_ne",   "name": "Columbus",      "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "grand_island",  "name": "Grand Island",  "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "lincoln_ne",    "name": "Lincoln",       "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "mccook",        "name": "McCook",        "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "norfolk_ne",    "name": "Norfolk",       "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "north_platte",  "name": "North Platte",  "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "omaha",         "name": "Omaha",         "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "scottsbluff",   "name": "Scottsbluff",   "has_garage": true,  "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "sydney_ne",     "name": "Sydney",        "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "valentine",     "name": "Valentine",     "has_garage": false, "recruitment_office_count": 0, "needs_verification": false}
+        {
+          "id": "alliance",
+          "name": "Alliance",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "chadron",
+          "name": "Chadron",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "columbus_ne",
+          "name": "Columbus",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "grand_island",
+          "name": "Grand Island",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "lincoln_ne",
+          "name": "Lincoln",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "mccook",
+          "name": "McCook",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "norfolk_ne",
+          "name": "Norfolk",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "north_platte",
+          "name": "North Platte",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "omaha",
+          "name": "Omaha",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "scottsbluff",
+          "name": "Scottsbluff",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "sydney_ne",
+          "name": "Sidney",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "valentine",
+          "name": "Valentine",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        }
       ]
     },
     {
@@ -373,16 +1695,76 @@
       "paid_dlc": true,
       "always_accessible": false,
       "cities": [
-        {"id": "el_dorado",      "name": "El Dorado",      "has_garage": true,  "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "fayetteville",   "name": "Fayetteville",   "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "fort_smith",     "name": "Fort Smith",     "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "harrison",       "name": "Harrison",       "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "hot_springs",    "name": "Hot Springs",    "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "jonesboro",      "name": "Jonesboro",      "has_garage": true,  "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "little_rock",    "name": "Little Rock",    "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "pine_bluff",     "name": "Pine Bluff",     "has_garage": true,  "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "springdale",     "name": "Springdale",     "has_garage": true,  "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "texarkana_ar",   "name": "Texarkana (AR)", "has_garage": true,  "recruitment_office_count": 0, "needs_verification": true}
+        {
+          "id": "el_dorado",
+          "name": "El Dorado",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "fayetteville",
+          "name": "Fayetteville",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "fort_smith",
+          "name": "Fort Smith",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "harrison",
+          "name": "Harrison",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "hot_springs",
+          "name": "Hot Springs",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "jonesboro",
+          "name": "Jonesboro",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "little_rock",
+          "name": "Little Rock",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "pine_bluff",
+          "name": "Pine Bluff",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "springdale",
+          "name": "Springdale",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "texarkana_ar",
+          "name": "Texarkana",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        }
       ]
     },
     {
@@ -392,18 +1774,90 @@
       "paid_dlc": true,
       "always_accessible": false,
       "cities": [
-        {"id": "cape_girardeau", "name": "Cape Girardeau", "has_garage": true,  "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "columbia_mo",    "name": "Columbia",       "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "jefferson_city", "name": "Jefferson City", "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "joplin",         "name": "Joplin",         "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "kansas_city_mo", "name": "Kansas City (MO)","has_garage": true, "recruitment_office_count": 1, "needs_verification": false},
-        {"id": "kirksville",     "name": "Kirksville",     "has_garage": true,  "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "poplar_bluff",   "name": "Poplar Bluff",   "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "rolla",          "name": "Rolla",          "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "sikeston",       "name": "Sikeston",       "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "springfield_mo", "name": "Springfield",    "has_garage": false, "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "st_joseph",      "name": "St. Joseph",     "has_garage": false, "recruitment_office_count": 0, "needs_verification": false},
-        {"id": "st_louis",       "name": "St. Louis",      "has_garage": true,  "recruitment_office_count": 1, "needs_verification": false}
+        {
+          "id": "cape_girardeau",
+          "name": "Cape Girardeau",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "columbia_mo",
+          "name": "Columbia",
+          "has_garage": false,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "jefferson_city",
+          "name": "Jefferson City",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "joplin",
+          "name": "Joplin",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "kansas_city_mo",
+          "name": "Kansas City",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "kirksville",
+          "name": "Kirksville",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "maryville_mo",
+          "name": "Maryville",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "poplar_bluff",
+          "name": "Poplar Bluff",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "rolla",
+          "name": "Rolla",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "springfield_mo",
+          "name": "Springfield",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "st_joseph",
+          "name": "St. Joseph",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "st_louis",
+          "name": "St. Louis",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        }
       ]
     },
     {
@@ -412,20 +1866,91 @@
       "dlc": "iowa",
       "paid_dlc": true,
       "always_accessible": false,
-      "_note": "Garage assignments for Iowa are unconfirmed. Assumed based on city size.",
       "cities": [
-        {"id": "ames",          "name": "Ames",          "has_garage": false, "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "burlington_ia", "name": "Burlington",    "has_garage": false, "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "cedar_rapids",  "name": "Cedar Rapids",  "has_garage": true,  "recruitment_office_count": 1, "needs_verification": true},
-        {"id": "council_bluffs","name": "Council Bluffs","has_garage": false, "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "davenport",     "name": "Davenport",     "has_garage": true,  "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "des_moines",    "name": "Des Moines",    "has_garage": true,  "recruitment_office_count": 1, "needs_verification": true},
-        {"id": "dubuque",       "name": "Dubuque",       "has_garage": false, "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "fort_dodge",    "name": "Fort Dodge",    "has_garage": false, "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "iowa_city",     "name": "Iowa City",     "has_garage": false, "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "mason_city",    "name": "Mason City",    "has_garage": false, "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "sioux_city",    "name": "Sioux City",    "has_garage": true,  "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "waterloo",      "name": "Waterloo",      "has_garage": false, "recruitment_office_count": 0, "needs_verification": true}
+        {
+          "id": "burlington_ia",
+          "name": "Burlington",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "cedar_rapids",
+          "name": "Cedar Rapids",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "council_bluffs",
+          "name": "Council Bluffs",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "davenport",
+          "name": "Davenport",
+          "has_garage": false,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "des_moines",
+          "name": "Des Moines",
+          "has_garage": true,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "dubuque",
+          "name": "Dubuque",
+          "has_garage": false,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "fort_dodge",
+          "name": "Fort Dodge",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "iowa_city",
+          "name": "Iowa City",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "mason_city",
+          "name": "Mason City",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "ottumwa",
+          "name": "Ottumwa",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "sioux_city",
+          "name": "Sioux City",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "waterloo",
+          "name": "Waterloo",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        }
       ]
     },
     {
@@ -434,19 +1959,84 @@
       "dlc": "louisiana",
       "paid_dlc": true,
       "always_accessible": false,
-      "_note": "Garage assignments for Louisiana are unconfirmed. Assumed based on city size.",
       "cities": [
-        {"id": "alexandria_la", "name": "Alexandria",    "has_garage": false, "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "baton_rouge",   "name": "Baton Rouge",   "has_garage": true,  "recruitment_office_count": 1, "needs_verification": true},
-        {"id": "deridder",      "name": "DeRidder",      "has_garage": false, "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "houma",         "name": "Houma",         "has_garage": false, "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "lafayette_la",  "name": "Lafayette",     "has_garage": true,  "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "lake_charles",  "name": "Lake Charles",  "has_garage": true,  "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "monroe_la",     "name": "Monroe",        "has_garage": false, "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "natchitoches",  "name": "Natchitoches",  "has_garage": false, "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "new_orleans",   "name": "New Orleans",   "has_garage": true,  "recruitment_office_count": 1, "needs_verification": true},
-        {"id": "port_fourchon", "name": "Port Fourchon", "has_garage": false, "recruitment_office_count": 0, "needs_verification": true},
-        {"id": "shreveport",    "name": "Shreveport",    "has_garage": true,  "recruitment_office_count": 0, "needs_verification": true}
+        {
+          "id": "alexandria_la",
+          "name": "Alexandria",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "baton_rouge",
+          "name": "Baton Rouge",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "deridder",
+          "name": "DeRidder",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "houma",
+          "name": "Houma",
+          "has_garage": false,
+          "recruitment_office_count": 1,
+          "needs_verification": false
+        },
+        {
+          "id": "lafayette_la",
+          "name": "Lafayette",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "lake_charles",
+          "name": "Lake Charles",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "monroe_la",
+          "name": "Monroe",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "natchitoches",
+          "name": "Natchitoches",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "new_orleans",
+          "name": "New Orleans",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "port_fourchon",
+          "name": "Port Fourchon",
+          "has_garage": false,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        },
+        {
+          "id": "shreveport",
+          "name": "Shreveport",
+          "has_garage": true,
+          "recruitment_office_count": 0,
+          "needs_verification": false
+        }
       ]
     }
   ]

@@ -49,31 +49,31 @@ local g_initialized     = false
 -- This mirrors the cities.json data so the Lua mod can check job destinations.
 local CITY_STATE_MAP = {
     -- California (always unlocked)
-    bakersfield="california", barstow="california", bishop="california",
+    bakersfield="california", barstow="california",
     blythe="california", el_centro="california", eureka="california",
-    fresno="california", huron="california", indio="california",
+    fresno="california", hilt="california", huron="california", indio="california",
     los_angeles="california", modesto="california", mojave="california",
     oakland="california", oxnard="california", redding="california",
     sacramento="california", san_diego="california", san_francisco="california",
     san_jose="california", santa_cruz="california", santa_maria="california",
     stockton="california", truckee="california", ukiah="california",
     -- Nevada (always unlocked)
-    carson_city="nevada", elko="nevada", ely="nevada", fallon="nevada",
-    hawthorne="nevada", las_vegas="nevada", laughlin="nevada", reno="nevada",
-    tonopah="nevada", winnemucca="nevada",
+    carson_city="nevada", elko="nevada", ely="nevada",
+    jackpot="nevada", las_vegas="nevada", pioche="nevada", primm="nevada",
+    reno="nevada", tonopah="nevada", winnemucca="nevada",
     -- Arizona
-    camp_verde="arizona", clifton="arizona", ehrenberg="arizona",
+    camp_verde="arizona", clifton="arizona",
     flagstaff="arizona", grand_canyon="arizona", kayenta="arizona",
     kingman="arizona", lake_havasu_city="arizona", nogales="arizona",
     page="arizona", phoenix="arizona", san_simon="arizona",
     show_low="arizona", sierra_vista="arizona", tucson="arizona",
     winslow="arizona", yuma="arizona",
     -- New Mexico
-    albuquerque="new_mexico", carlsbad="new_mexico", clovis="new_mexico",
-    farmington="new_mexico", gallup="new_mexico", las_cruces="new_mexico",
-    raton="new_mexico", roswell="new_mexico", santa_fe="new_mexico",
-    silver_city="new_mexico", socorro="new_mexico", taos="new_mexico",
-    tucumcari="new_mexico",
+    alamogordo="new_mexico", albuquerque="new_mexico", artesia="new_mexico",
+    carlsbad="new_mexico", clovis="new_mexico",
+    farmington="new_mexico", gallup="new_mexico", hobbs="new_mexico",
+    las_cruces="new_mexico", raton="new_mexico", roswell="new_mexico",
+    santa_fe="new_mexico", socorro="new_mexico", tucumcari="new_mexico",
     -- Oregon
     astoria="oregon", bend="oregon", burns="oregon", coos_bay="oregon",
     eugene="oregon", klamath_falls="oregon", lakeview="oregon",
@@ -87,7 +87,7 @@ local CITY_STATE_MAP = {
     tacoma="washington", vancouver_wa="washington", wenatchee="washington",
     yakima="washington",
     -- Utah
-    cedar_city="utah", moab="utah", ogden="utah", price="utah",
+    cedar_city="utah", logan="utah", moab="utah", ogden="utah", price="utah",
     provo="utah", salina_ut="utah", salt_lake_city="utah",
     st_george="utah", vernal="utah",
     -- Idaho
@@ -112,7 +112,7 @@ local CITY_STATE_MAP = {
     glasgow="montana", glendive="montana", great_falls="montana",
     havre="montana", helena="montana", kalispell="montana",
     laurel="montana", lewistown="montana", miles_city="montana",
-    missoula="montana",
+    missoula="montana", sidney_mt="montana", thompson_falls="montana",
     -- Texas
     abilene="texas", amarillo="texas", austin="texas", beaumont="texas",
     brownsville="texas", corpus_christi="texas", dalhart="texas",
@@ -148,13 +148,13 @@ local CITY_STATE_MAP = {
     cape_girardeau="missouri", columbia_mo="missouri",
     jefferson_city="missouri", joplin="missouri",
     kansas_city_mo="missouri", kirksville="missouri",
-    poplar_bluff="missouri", rolla="missouri", sikeston="missouri",
+    maryville_mo="missouri", poplar_bluff="missouri", rolla="missouri",
     springfield_mo="missouri", st_joseph="missouri", st_louis="missouri",
     -- Iowa
-    ames="iowa", burlington_ia="iowa", cedar_rapids="iowa",
+    burlington_ia="iowa", cedar_rapids="iowa",
     council_bluffs="iowa", davenport="iowa", des_moines="iowa",
     dubuque="iowa", fort_dodge="iowa", iowa_city="iowa",
-    mason_city="iowa", sioux_city="iowa", waterloo="iowa",
+    mason_city="iowa", ottumwa="iowa", sioux_city="iowa", waterloo="iowa",
     -- Louisiana
     alexandria_la="louisiana", baton_rouge="louisiana", deridder="louisiana",
     houma="louisiana", lafayette_la="louisiana", lake_charles="louisiana",
