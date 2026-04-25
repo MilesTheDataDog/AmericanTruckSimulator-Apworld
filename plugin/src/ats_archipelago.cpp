@@ -410,7 +410,7 @@ static void poll_save_file() {
 
 SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
                                   const scs_telemetry_init_params_t* const params) {
-    if (version != SCS_TELEMETRY_VERSION_1_00) {
+    if (version < SCS_TELEMETRY_VERSION_1_00) {
         return SCS_RESULT_unsupported;
     }
 
