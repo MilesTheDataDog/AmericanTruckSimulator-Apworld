@@ -305,10 +305,14 @@ static bool is_state_locked(const std::string& state_id) {
 
 // ── SCS SDK telemetry callbacks ────────────────────────────────────────────────
 
-SCSAPI_VOID telemetry_gameplay_event(const scs_string_t name,
-                                     const scs_value_t* const value,
+SCSAPI_VOID telemetry_gameplay_event(const scs_event_t event,
+                                     const void* const event_info,
                                      const scs_context_t context) {
-    const std::string event_name(name);
+    if (!event_info) return;
+    const scs_telemetry_gameplay_event_t* const gev =
+        static_cast<const scs_telemetry_gameplay_event_t*>(event_info);
+    if (!gev->id) return;
+    const std::string event_name(gev->id);
 
     if (event_name == SCS_TELEMETRY_GAMEPLAY_EVENT_job_delivered) {
         std::lock_guard<std::mutex> lock(g_state_mutex);
@@ -338,9 +342,9 @@ SCSAPI_VOID on_truck_placement(const scs_string_t name,
                                 const scs_context_t context) {
     if (!value || value->type != SCS_VALUE_TYPE_dplacement) return;
     std::lock_guard<std::mutex> lock(g_state_mutex);
-    g_state.truck_x = static_cast<float>(value->value_dplacement.position.x);
-    g_state.truck_y = static_cast<float>(value->value_dplacement.position.y);
-    g_state.truck_z = static_cast<float>(value->value_dplacement.position.z);
+    g_state.truck_x = static_cast<float>(value->value_dplacement.value.position.x);
+    g_state.truck_y = static_cast<float>(value->value_dplacement.value.position.y);
+    g_state.truck_z = static_cast<float>(value->value_dplacement.value.position.z);
 
     // Boundary check: determine current state from position
     std::string cur_state = get_state_at(g_state.truck_x, g_state.truck_z);

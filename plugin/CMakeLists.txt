@@ -24,14 +24,16 @@ endif()
 # ── nlohmann/json ─────────────────────────────────────────────────────────────
 # Download the single-header version from: https://github.com/nlohmann/json/releases
 # Place json.hpp at: <project_root>/plugin/vendor/nlohmann/json.hpp
-set(NLOHMANN_JSON_INCLUDE "${CMAKE_SOURCE_DIR}/vendor/nlohmann"
-    CACHE PATH "Path to nlohmann/json include directory")
+# Include path is the *parent* of the nlohmann/ directory so that
+# #include "nlohmann/json.hpp" resolves correctly.
+set(NLOHMANN_JSON_INCLUDE "${CMAKE_SOURCE_DIR}/vendor"
+    CACHE PATH "Parent directory containing nlohmann/json.hpp")
 
-if(NOT EXISTS "${NLOHMANN_JSON_INCLUDE}/json.hpp")
+if(NOT EXISTS "${NLOHMANN_JSON_INCLUDE}/nlohmann/json.hpp")
     message(FATAL_ERROR
-        "nlohmann/json.hpp not found at ${NLOHMANN_JSON_INCLUDE}/json.hpp.\n"
+        "nlohmann/json.hpp not found at ${NLOHMANN_JSON_INCLUDE}/nlohmann/json.hpp.\n"
         "Download json.hpp from https://github.com/nlohmann/json/releases/latest\n"
-        "and place it at: ${NLOHMANN_JSON_INCLUDE}/json.hpp"
+        "and place it at: ${CMAKE_SOURCE_DIR}/vendor/nlohmann/json.hpp"
     )
 endif()
 
@@ -63,6 +65,17 @@ target_link_libraries(ats_archipelago PRIVATE
     shell32    # SHGetFolderPath
     shlwapi
 )
+
+# MinGW cross-compilation: statically link the C++ runtime so the DLL is
+# self-contained and doesn't require MinGW runtime DLLs on the target machine.
+if(MINGW)
+    target_link_options(ats_archipelago PRIVATE
+        -static-libgcc
+        -static-libstdc++
+        -Wl,--kill-at          # stdcall name decoration compatible with MSVC callers
+    )
+    # std::filesystem on MinGW-w64 GCC 13 is built-in; no extra link needed.
+endif()
 
 # ── Install target ────────────────────────────────────────────────────────────
 # Run: cmake --install . --prefix "<ATS install path>"
