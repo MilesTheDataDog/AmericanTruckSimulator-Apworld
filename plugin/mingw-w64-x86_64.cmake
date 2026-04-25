@@ -4,13 +4,14 @@
 set(CMAKE_SYSTEM_NAME Windows)
 set(CMAKE_SYSTEM_PROCESSOR x86_64)
 
-# Prefer the -posix thread model (supports std::thread, std::mutex)
+# Use the win32 thread model — std::mutex uses native Windows CRITICAL_SECTION,
+# no libwinpthread-1.dll dependency, which is required for ATS plugin loading.
 find_program(MINGW_CXX NAMES
-    x86_64-w64-mingw32-g++-posix
+    x86_64-w64-mingw32-g++-win32
     x86_64-w64-mingw32-g++
     REQUIRED)
 find_program(MINGW_CC NAMES
-    x86_64-w64-mingw32-gcc-posix
+    x86_64-w64-mingw32-gcc-win32
     x86_64-w64-mingw32-gcc
     REQUIRED)
 find_program(MINGW_RC NAMES
