@@ -95,11 +95,16 @@ typedef scs_result_t (SCSAPI_CALL *scs_telemetry_unregister_from_channel_t)(
     const scs_value_type_t  type);
 
 /* ── Common SDK init params (v1.00) ───────────────────────────────────────── */
+/* Field order must exactly match the real SCS SDK struct:
+ *   +0  game_version  u32   (4 bytes)
+ *   +4  game_id       ptr   (8 bytes on x64)
+ *   +12 game_build    u32   (4 bytes)
+ *   +16 log           fptr  (8 bytes on x64)
+ * There is NO sdk_version field — that was a mistake in the initial stub. */
 #pragma pack(push, 1)
 typedef struct {
-    scs_u32_t       sdk_version;
-    scs_string_t    game_id;
     scs_u32_t       game_version;
+    scs_string_t    game_id;
     scs_u32_t       game_build;
     scs_log_t       log;
 } scs_sdk_init_params_v100_t;
