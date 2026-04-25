@@ -1,11 +1,22 @@
 /**
- * amtrucks/scssdk_ats.h - American Truck Simulator SDK identifiers
- * Reconstructed from public SCS SDK documentation.
+ * @file scssdk_ats.h
+ *
+ * @brief ATS specific constants.
  */
 #ifndef SCSSDK_ATS_H
 #define SCSSDK_ATS_H
 
-#define SCS_GAME_ID_ATS     "amtrucks"
-#define SCS_GAME_ID_ATS_VER ((scs_u32_t)0x00010015)  /* ~1.21, approximate */
+#include "../scssdk.h"
 
-#endif /* SCSSDK_ATS_H */
+SCSSDK_HEADER
+
+/**
+ * @brief Value used in the scs_sdk_init_params_t::game_id to identify this game.
+ */
+#define SCS_GAME_ID_ATS         "ats"
+
+SCSSDK_FOOTER
+
+#endif // SCSSDK_ATS_H
+
+/* eof */

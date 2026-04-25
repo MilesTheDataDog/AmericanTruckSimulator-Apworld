@@ -342,9 +342,9 @@ SCSAPI_VOID on_truck_placement(const scs_string_t name,
                                 const scs_context_t context) {
     if (!value || value->type != SCS_VALUE_TYPE_dplacement) return;
     std::lock_guard<std::mutex> lock(g_state_mutex);
-    g_state.truck_x = static_cast<float>(value->value_dplacement.value.position.x);
-    g_state.truck_y = static_cast<float>(value->value_dplacement.value.position.y);
-    g_state.truck_z = static_cast<float>(value->value_dplacement.value.position.z);
+    g_state.truck_x = static_cast<float>(value->value_dplacement.position.x);
+    g_state.truck_y = static_cast<float>(value->value_dplacement.position.y);
+    g_state.truck_z = static_cast<float>(value->value_dplacement.position.z);
 
     // Boundary check: determine current state from position
     std::string cur_state = get_state_at(g_state.truck_x, g_state.truck_z);
@@ -438,7 +438,7 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
     p->register_for_event(SCS_TELEMETRY_EVENT_gameplay, telemetry_gameplay_event, nullptr);
 
     // Register position channel (called each telemetry frame ~50ms)
-    p->register_channel(
+    p->register_for_channel(
         SCS_TELEMETRY_TRUCK_CHANNEL_world_placement,
         SCS_U32_NIL,
         SCS_VALUE_TYPE_dplacement,

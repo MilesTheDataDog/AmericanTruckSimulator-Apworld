@@ -1,136 +1,107 @@
 /**
- * scssdk_telemetry.h - SCS SDK Telemetry API
- * Reconstructed from public SCS SDK documentation and known plugin examples.
+ * @file scssdk_telemetry.h
  *
- * The plugin DLL must export:
- *   SCSAPI_RESULT scs_telemetry_init(scs_u32_t version, const scs_telemetry_init_params_t* params)
- *   SCSAPI_VOID   scs_telemetry_shutdown(void)
+ * @brief Telemetry SDK.
  */
 #ifndef SCSSDK_TELEMETRY_H
 #define SCSSDK_TELEMETRY_H
 
 #include "scssdk.h"
 #include "scssdk_value.h"
+#include "scssdk_telemetry_event.h"
+#include "scssdk_telemetry_channel.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+SCSSDK_HEADER
 
-/* ── API version ──────────────────────────────────────────────────────────── */
-#define SCS_TELEMETRY_VERSION_1_00  ((scs_u32_t)0x00000100)
+/**
+ * @name Versions of the telemetry SDK
+ *
+ * Changes in the major version indicate incompatible changes in the API.
+ * Changes in the minor version indicate additions (e.g. more events, defined
+ * types as long layout of existing fields in scs_value_t does not change).
+ *
+ * 1.01 version - added s64 type support, added gameplay events
+ */
+//@{
+#define SCS_TELEMETRY_VERSION_1_00              SCS_MAKE_VERSION(1, 0)
+#define SCS_TELEMETRY_VERSION_1_01              SCS_MAKE_VERSION(1, 1)
+#define SCS_TELEMETRY_VERSION_CURRENT           SCS_TELEMETRY_VERSION_1_01
+//@}
 
-/* ── Telemetry events ─────────────────────────────────────────────────────── */
-typedef scs_u32_t scs_event_t;
-#define SCS_TELEMETRY_EVENT_invalid         ((scs_event_t)0)
-#define SCS_TELEMETRY_EVENT_frame_start     ((scs_event_t)1)
-#define SCS_TELEMETRY_EVENT_frame_end       ((scs_event_t)2)
-#define SCS_TELEMETRY_EVENT_paused          ((scs_event_t)3)
-#define SCS_TELEMETRY_EVENT_started         ((scs_event_t)4)
-#define SCS_TELEMETRY_EVENT_configuration   ((scs_event_t)5)
-#define SCS_TELEMETRY_EVENT_gameplay        ((scs_event_t)6)
+// Structures used to pass additional data to the initialization function.
 
-/* ── Channel flags ────────────────────────────────────────────────────────── */
-typedef scs_u32_t scs_telemetry_channel_flag_t;
-#define SCS_TELEMETRY_CHANNEL_FLAG_none         ((scs_telemetry_channel_flag_t)0x00000000)
-#define SCS_TELEMETRY_CHANNEL_FLAG_each_frame   ((scs_telemetry_channel_flag_t)0x00000001)
-#define SCS_TELEMETRY_CHANNEL_FLAG_no_value     ((scs_telemetry_channel_flag_t)0x00000002)
+/**
+ * @brief Common ancestor to all structures providing parameters to the telemetry
+ * initialization.
+ */
+struct scs_telemetry_init_params_t
+{
+        void    method_indicating_this_is_not_a_c_struct(void);
+};
 
-/* ── Gameplay event info structure ────────────────────────────────────────── */
-#pragma pack(push, 1)
-typedef struct {
-    scs_string_t        id;     /* e.g. "job.delivered", "job.cancelled" */
-    scs_u32_t           flags;
-    /* Followed by a null-terminated scs_named_value_t attribute array,
-     * but we only need the id field for our purposes. */
-} scs_telemetry_gameplay_event_t;
+/**
+ * @brief Initialization parameters for the 1.00 version of the telemetry API.
+ */
+struct scs_telemetry_init_params_v100_t : public scs_telemetry_init_params_t
+{
+        /**
+         * @brief Common initialization parameters.
+         */
+        scs_sdk_init_params_v100_t              common;
 
-/* ── Configuration event info structure ───────────────────────────────────── */
-typedef struct {
-    scs_string_t            id;
-    scs_u32_t               flags;
-    const scs_named_value_t *attributes;
-} scs_telemetry_configuration_t;
+        /**
+         * @name Functions used to handle registration of event callbacks.
+         */
+        //@{
+        scs_telemetry_register_for_event_t      register_for_event;
+        scs_telemetry_unregister_from_event_t   unregister_from_event;
+        //@}
 
-/* ── Frame start event info ───────────────────────────────────────────────── */
-typedef struct {
-    scs_u64_t   paused_simulation_time;
-    scs_u64_t   render_time;
-    scs_u64_t   simulation_time;
-    scs_u64_t   multi_player_time_offset;
-} scs_telemetry_frame_start_t;
-#pragma pack(pop)
+        /**
+         * @name Functions used to handle registration of telemetry callbacks.
+         */
+        //@{
+        scs_telemetry_register_for_channel_t    register_for_channel;
+        scs_telemetry_unregister_from_channel_t unregister_from_channel;
+        //@}
+};
+scs_check_size(scs_telemetry_init_params_v100_t, 32, 64);
 
-/* ── Callback typedefs ────────────────────────────────────────────────────── */
-typedef void (SCSAPI_CALL *scs_telemetry_event_callback_t)(
-    const scs_event_t           event,
-    const void *const           event_info,
-    const scs_context_t         context);
+/**
+ * @brief Initialization parameters for the 1.01 version of the telemetry API.
+ */
+typedef scs_telemetry_init_params_v100_t scs_telemetry_init_params_v101_t;
 
-typedef void (SCSAPI_CALL *scs_telemetry_channel_callback_t)(
-    const scs_string_t          name,
-    const scs_u32_t             index,
-    const scs_value_t *const    value,
-    const scs_context_t         context);
+// Functions which should be exported by the dynamic library serving as
+// recipient of the telemetry.
 
-/* ── Register / unregister function pointer types ─────────────────────────── */
-typedef scs_result_t (SCSAPI_CALL *scs_telemetry_register_for_event_t)(
-    const scs_event_t                       event,
-    const scs_telemetry_event_callback_t    callback,
-    const scs_context_t                     context);
+/**
+ * @brief Initializes telemetry support.
+ *
+ * This function must be provided by the library if it wants to support telemetry API.
+ *
+ * The engine will call this function with API versions it supports starting from the latest
+ * until the function returns SCS_RESULT_ok or error other than SCS_RESULT_unsupported or it
+ * runs out of supported versions.
+ *
+ * At the time this function is called, the telemetry is in the paused state.
+ *
+ * @param version Version of the API to initialize.
+ * @param params Structure with additional initialization data specific to the specified API version.
+ * @return SCS_RESULT_ok if version is supported and library was initialized. Error code otherwise.
+ */
+SCSAPI_RESULT   scs_telemetry_init              (const scs_u32_t version, const scs_telemetry_init_params_t *const params);
 
-typedef scs_result_t (SCSAPI_CALL *scs_telemetry_unregister_from_event_t)(
-    const scs_event_t event);
+/**
+ * @brief Shuts down the telemetry support.
+ *
+ * The engine will call this function if available and if the scs_telemetry_init indicated
+ * success.
+ */
+SCSAPI_VOID     scs_telemetry_shutdown          (void);
 
-typedef scs_result_t (SCSAPI_CALL *scs_telemetry_register_channel_t)(
-    const scs_string_t                      name,
-    const scs_u32_t                         index,
-    const scs_value_type_t                  type,
-    const scs_u32_t                         flags,
-    const scs_telemetry_channel_callback_t  callback,
-    const scs_context_t                     context);
+SCSSDK_FOOTER
 
-typedef scs_result_t (SCSAPI_CALL *scs_telemetry_unregister_from_channel_t)(
-    const scs_string_t      name,
-    const scs_u32_t         index,
-    const scs_value_type_t  type);
+#endif // SCSSDK_TELEMETRY_H
 
-/* ── Common SDK init params (v1.00) ───────────────────────────────────────── */
-/* Field order must exactly match the real SCS SDK struct:
- *   +0  game_version  u32   (4 bytes)
- *   +4  game_id       ptr   (8 bytes on x64)
- *   +12 game_build    u32   (4 bytes)
- *   +16 log           fptr  (8 bytes on x64)
- * There is NO sdk_version field — that was a mistake in the initial stub. */
-#pragma pack(push, 1)
-typedef struct {
-    scs_u32_t       game_version;
-    scs_string_t    game_id;
-    scs_u32_t       game_build;
-    scs_log_t       log;
-} scs_sdk_init_params_v100_t;
-
-/* ── Telemetry init params (v1.00) ────────────────────────────────────────── */
-typedef struct {
-    scs_sdk_init_params_v100_t              common;
-    scs_telemetry_register_for_event_t      register_for_event;
-    scs_telemetry_unregister_from_event_t   unregister_from_event;
-    scs_telemetry_register_channel_t        register_channel;
-    scs_telemetry_unregister_from_channel_t unregister_from_channel;
-} scs_telemetry_init_params_v100_t;
-#pragma pack(pop)
-
-/* Opaque base type used in the init function signature */
-typedef void scs_telemetry_init_params_t;
-
-/* ── DLL entry points the plugin must export ──────────────────────────────── */
-SCSAPI_RESULT scs_telemetry_init(
-    const scs_u32_t                         version,
-    const scs_telemetry_init_params_t *const params);
-
-SCSAPI_VOID scs_telemetry_shutdown(void);
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif /* SCSSDK_TELEMETRY_H */
+/* eof */

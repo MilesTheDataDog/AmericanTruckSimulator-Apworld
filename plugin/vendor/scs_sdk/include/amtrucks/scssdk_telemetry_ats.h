@@ -1,82 +1,77 @@
 /**
- * amtrucks/scssdk_telemetry_ats.h - ATS-specific telemetry channel and event names
- * Reconstructed from public SCS SDK documentation and modding resources.
+ * @file scssdk_telemetry_ats.h
+ *
+ * @brief ATS telemetry specific constants.
  */
 #ifndef SCSSDK_TELEMETRY_ATS_H
 #define SCSSDK_TELEMETRY_ATS_H
 
-#include "../scssdk_telemetry.h"
-#include "scssdk_ats.h"
+#include "../scssdk.h"
+#include "../common/scssdk_telemetry_common_configs.h"
+#include "../common/scssdk_telemetry_common_channels.h"
+#include "../common/scssdk_telemetry_truck_common_channels.h"
+#include "../common/scssdk_telemetry_trailer_common_channels.h"
+#include "../common/scssdk_telemetry_job_common_channels.h"
 
-/* ── Gameplay event IDs ───────────────────────────────────────────────────── */
-#define SCS_TELEMETRY_GAMEPLAY_EVENT_job_delivered          "job.delivered"
-#define SCS_TELEMETRY_GAMEPLAY_EVENT_job_cancelled          "job.cancelled"
-#define SCS_TELEMETRY_GAMEPLAY_EVENT_job_finished           "job.finished"
-#define SCS_TELEMETRY_GAMEPLAY_EVENT_transport_load         "transport.load"
-#define SCS_TELEMETRY_GAMEPLAY_EVENT_transport_unload       "transport.unload"
-#define SCS_TELEMETRY_GAMEPLAY_EVENT_player_fined           "player.fined"
-#define SCS_TELEMETRY_GAMEPLAY_EVENT_player_tollgate_paid   "player.tollgate.paid"
-#define SCS_TELEMETRY_GAMEPLAY_EVENT_player_use_ferry       "player.use.ferry"
-#define SCS_TELEMETRY_GAMEPLAY_EVENT_player_use_train       "player.use.train"
+SCSSDK_HEADER
 
-/* ── Configuration IDs ────────────────────────────────────────────────────── */
-#define SCS_TELEMETRY_CONFIG_substances     "substances"
-#define SCS_TELEMETRY_CONFIG_controls       "controls"
-#define SCS_TELEMETRY_CONFIG_hshifter       "hshifter"
-#define SCS_TELEMETRY_CONFIG_truck          "truck"
-#define SCS_TELEMETRY_CONFIG_trailer        "trailer"
-#define SCS_TELEMETRY_CONFIG_job            "job"
+/**
+ * @name Value used in the scs_sdk_init_params_t::game_version
+ *
+ * Changes in the major version indicate incompatible changes (e.g. changed interpretation
+ * of the channel value). Change of major version is highly discouraged, creation of
+ * alternative channel is preferred solution if necessary.
+ * Changes in the minor version indicate compatible changes (e.g. added channel, more supported
+ * value types). Removal of channel is also compatible change however it is recommended
+ * to keep the channel with some default value.
+ *
+ * Changes:
+ * 1.00 - initial version - corresponds to 1.12 in ETS2
+ * 1.01 - added support for multiple trailers (doubles, triples), trailer ownership support,
+ *        gameplay events support added
+ * 1.02 - added planned_distance_km to active job info
+ * 1.03 - added support for 'avoid_inspection', 'illegal_border_crossing' and 'hard_shoulder_violation' offence type in 'player.fined' gameplay event
+ * 1.04 - added differential lock, lift axle and hazard warning channels
+ * 1.05 - added multiplayer time offset and trailer body wear channel, fixed trailer chassis wear channel
+ */
+//@{
+#define SCS_TELEMETRY_ATS_GAME_VERSION_1_00             SCS_MAKE_VERSION(1, 0)
+#define SCS_TELEMETRY_ATS_GAME_VERSION_1_01             SCS_MAKE_VERSION(1, 1)
+#define SCS_TELEMETRY_ATS_GAME_VERSION_1_02             SCS_MAKE_VERSION(1, 2) // Patch 1.36
+#define SCS_TELEMETRY_ATS_GAME_VERSION_1_03             SCS_MAKE_VERSION(1, 3) // Patch 1.36
+#define SCS_TELEMETRY_ATS_GAME_VERSION_1_04             SCS_MAKE_VERSION(1, 4) // Patch 1.41
+#define SCS_TELEMETRY_ATS_GAME_VERSION_1_05             SCS_MAKE_VERSION(1, 5) // Patch 1.45
+#define SCS_TELEMETRY_ATS_GAME_VERSION_CURRENT          SCS_TELEMETRY_ATS_GAME_VERSION_1_05
+//@}
 
-/* ── Truck telemetry channels ─────────────────────────────────────────────── */
+// Game specific units.
+//
+// @li The game uses US Dolars as internal currency provided
+//     by the telemetry unless documented otherwise.
 
-/* Position / orientation */
-#define SCS_TELEMETRY_TRUCK_CHANNEL_world_placement         "truck.world.placement"
-#define SCS_TELEMETRY_TRUCK_CHANNEL_local_linear_velocity   "truck.local.velocity.linear"
-#define SCS_TELEMETRY_TRUCK_CHANNEL_local_angular_velocity  "truck.local.velocity.angular"
-#define SCS_TELEMETRY_TRUCK_CHANNEL_local_linear_acceleration   "truck.local.acceleration.linear"
-#define SCS_TELEMETRY_TRUCK_CHANNEL_local_angular_acceleration  "truck.local.acceleration.angular"
+// Channels defined in scssdk_telemetry_common_channels.h,
+// scssdk_telemetry_job_common_channels.h,
+// scssdk_telemetry_truck_common_channels.h and
+// scssdk_telemetry_trailer_common_channels.h are supported
+// with following exceptions and limitations as of v1.00:
+//
+// @li Adblue related channels are not supported.
+// @li The fuel_average_consumption is currently mostly static and depends
+//     on presence of the trailer and skills of the driver instead
+//     of the workload of the engine.
+// @li Rolling rotation of trailer wheels is determined from linear
+//     movement.
+// @li The pressures, temperatures and voltages are not simulated.
+//     They are very loosely approximated.
 
-/* Cabin / head placement */
-#define SCS_TELEMETRY_TRUCK_CHANNEL_cabin_offset            "truck.cabin.offset"
-#define SCS_TELEMETRY_TRUCK_CHANNEL_head_offset             "truck.head.offset"
+// Configurations defined in scssdk_telemetry_common_configs.h are
+// supported with following exceptions and limitations as of v1.00:
+//
+// @li The localized strings are not updated when different in-game
+//     language is selected.
 
-/* Powertrain */
-#define SCS_TELEMETRY_TRUCK_CHANNEL_speed                   "truck.speed"
-#define SCS_TELEMETRY_TRUCK_CHANNEL_engine_rpm              "truck.engine.rpm"
-#define SCS_TELEMETRY_TRUCK_CHANNEL_engine_rpm_max          "truck.engine.rpm.max"
-#define SCS_TELEMETRY_TRUCK_CHANNEL_fuel                    "truck.fuel.amount"
-#define SCS_TELEMETRY_TRUCK_CHANNEL_fuel_warning            "truck.fuel.warning"
-#define SCS_TELEMETRY_TRUCK_CHANNEL_cruise_control          "truck.cruise_control"
-#define SCS_TELEMETRY_TRUCK_CHANNEL_gear_dash               "truck.engine.gear.dash"
-#define SCS_TELEMETRY_TRUCK_CHANNEL_displayed_gear          "truck.displayed.gear"
-#define SCS_TELEMETRY_TRUCK_CHANNEL_motor_gear_driving      "truck.engine.gear.driving"
+SCSSDK_FOOTER
 
-/* Brakes / suspension */
-#define SCS_TELEMETRY_TRUCK_CHANNEL_parking_brake           "truck.brake.parking"
-#define SCS_TELEMETRY_TRUCK_CHANNEL_motor_brake             "truck.brake.motor"
+#endif // SCSSDK_TELEMETRY_ATS_H
 
-/* Lights / indicators */
-#define SCS_TELEMETRY_TRUCK_CHANNEL_lights_lblinker         "truck.light.lblinker"
-#define SCS_TELEMETRY_TRUCK_CHANNEL_lights_rblinker         "truck.light.rblinker"
-#define SCS_TELEMETRY_TRUCK_CHANNEL_lights_parking          "truck.light.parking"
-#define SCS_TELEMETRY_TRUCK_CHANNEL_lights_low_beam         "truck.light.beam.low"
-#define SCS_TELEMETRY_TRUCK_CHANNEL_lights_high_beam        "truck.light.beam.high"
-
-/* Damage */
-#define SCS_TELEMETRY_TRUCK_CHANNEL_wear_engine             "truck.wear.engine"
-#define SCS_TELEMETRY_TRUCK_CHANNEL_wear_transmission       "truck.wear.transmission"
-#define SCS_TELEMETRY_TRUCK_CHANNEL_wear_cabin              "truck.wear.cabin"
-#define SCS_TELEMETRY_TRUCK_CHANNEL_wear_chassis            "truck.wear.chassis"
-#define SCS_TELEMETRY_TRUCK_CHANNEL_wear_wheels             "truck.wear.wheels"
-
-/* Navigation */
-#define SCS_TELEMETRY_TRUCK_CHANNEL_navigation_distance     "truck.navigation.distance"
-#define SCS_TELEMETRY_TRUCK_CHANNEL_navigation_time         "truck.navigation.time"
-#define SCS_TELEMETRY_TRUCK_CHANNEL_navigation_speed_limit  "truck.navigation.speed.limit"
-
-/* ── Trailer channels (indexed) ───────────────────────────────────────────── */
-#define SCS_TELEMETRY_TRAILER_CHANNEL_connected             "trailer.connection"
-#define SCS_TELEMETRY_TRAILER_CHANNEL_world_placement       "trailer.world.placement"
-#define SCS_TELEMETRY_TRAILER_CHANNEL_wear_chassis          "trailer.wear.chassis"
-
-#endif /* SCSSDK_TELEMETRY_ATS_H */
+/* eof */
