@@ -107,6 +107,9 @@ class ATSContext(CommonContext):
         self._pending_money_bonuses: List[int] = []
         self._pending_xp_bonuses: List[str] = []
 
+        # Track how many items we have applied so we can skip them on reconnect/resync
+        self._applied_item_count: int = 0
+
     # ── Archipelago callbacks ──────────────────────────────────────────────────
 
     async def server_auth(self, password_requested: bool = False) -> None:
@@ -121,7 +124,7 @@ class ATSContext(CommonContext):
             self.slot_data = args.get("slot_data", {})
             self._on_connected()
         elif cmd == "ReceivedItems":
-            self._on_items_received(args["items"])
+            self._on_items_received(args.get("index", 0), args["items"])
 
     def _on_connected(self) -> None:
         logger.info(f"[ATS] Connected to Archipelago server as {self.username}")
@@ -130,11 +133,17 @@ class ATSContext(CommonContext):
         _write_json(SLOT_DATA_FILE, self.slot_data)
         self._write_items_file()
 
-    def _on_items_received(self, items) -> None:
-        for item in items:
+    def _on_items_received(self, start_index: int, items) -> None:
+        applied_any = False
+        for i, item in enumerate(items):
+            if start_index + i < self._applied_item_count:
+                continue  # already applied on a previous receive/resync
             item_name = self.item_names.lookup_in_game(item.item)
             self._apply_item(item_name)
-        self._write_items_file()
+            self._applied_item_count += 1
+            applied_any = True
+        if applied_any:
+            self._write_items_file()
 
     def _apply_item(self, item_name: str) -> None:
         if item_name.startswith("Unlock "):
@@ -151,9 +160,12 @@ class ATSContext(CommonContext):
                 self._unlocked_states.add(state_id)
                 logger.info(f"[ATS] Unlocked state: {rest}")
             else:
-                # Truck model unlock — find game_id from item name
-                self._unlocked_trucks.add(item_name)
-                logger.info(f"[ATS] Unlocked truck: {rest}")
+                # Truck model unlock — store game_id (e.g. "kenworth_w900") not display name
+                from worlds.american_truck_simulator.items import ALL_ITEMS
+                item_data = ALL_ITEMS.get(item_name)
+                truck_game_id = item_data.game_id if item_data else item_name
+                self._unlocked_trucks.add(truck_game_id)
+                logger.info(f"[ATS] Unlocked truck: {rest} ({truck_game_id})")
 
         elif item_name in ("Engine Tier 2", "Engine Tier 3", "Engine Tier 4", "Engine Tier 5"):
             tier = int(item_name.split()[-1])
@@ -388,23 +400,18 @@ async def game_watcher(ctx: ATSContext) -> None:
 def launch():
     async def main(args):
         ctx = ATSContext(args.connect, args.password)
-        ctx.server_task = asyncio.ensure_future(server_loop(ctx), loop=ctx.loop)
-        ctx.watcher_task = asyncio.ensure_future(game_watcher(ctx), loop=ctx.loop)
+        ctx.server_task = asyncio.ensure_future(server_loop(ctx))
+        ctx.watcher_task = asyncio.ensure_future(game_watcher(ctx))
 
         if gui_enabled:
-            input_task = None
-            from kvui import GameManager
-            ctx.ui = GameManager(ctx)
-            ctx.ui_task = asyncio.ensure_future(ctx.ui.async_run(), loop=ctx.loop)
-        else:
-            input_task = asyncio.ensure_future(
-                ctx.ui_task if hasattr(ctx, "ui_task") else asyncio.sleep(0),
-                loop=ctx.loop,
-            )
+            ctx.run_gui()
+        ctx.run_cli()
 
         await ctx.exit_event.wait()
         ctx.server_task.cancel()
         ctx.watcher_task.cancel()
+        if hasattr(ctx, "ui_task") and ctx.ui_task:
+            ctx.ui_task.cancel()
         await ctx.shutdown()
 
     parser = get_base_parser(description="American Truck Simulator Archipelago Client")
