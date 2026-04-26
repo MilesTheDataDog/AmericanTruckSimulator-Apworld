@@ -1,0 +1,8 @@
+{
+    "game": "American Truck Simulator",
+    "creator": "MilesTheDataDog",
+    "creator_url": "https://github.com/MilesTheDataDog/AmericanTruckSimulator-Apworld",
+    "supported_world_version": "0.6.7",
+    "min_client_version": [0, 5, 0],
+    "min_compatible_multiworld_version": [0, 5, 0]
+}
