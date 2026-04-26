@@ -1,17 +1,17 @@
 SiiNunit
 {
-mod_package : .package_name
+mod_package : .ats_archipelago
 {
-    # Package display info
-    package_name: "ATS Archipelago Integration"
+    package_version: 1
     display_name: "Archipelago Multiworld Mod"
     author: "ATS Archipelago Community"
-    version: "1.0.0"
-    description: "Integrates American Truck Simulator with the Archipelago multiworld randomizer.\nDo not enable without also running the ATSClient.py and having the ats_archipelago.dll plugin installed."
-
-    # This mod requires no special dependencies — it runs alongside the plugin DLL.
-    # Compatible with base game and all DLC map packs.
-
     category[]: "gameplay"
+    compatible_versions[]: "1.53.*"
+    compatible_versions[]: "1.52.*"
+    compatible_versions[]: "1.51.*"
+    compatible_versions[]: "1.50.*"
+    compatible_versions[]: "1.49.*"
+    compatible_versions[]: "1.48.*"
+    description: "Integrates American Truck Simulator with the Archipelago multiworld randomizer. Requires the ats_archipelago.dll plugin and ATSClient to be running."
 }
 }
