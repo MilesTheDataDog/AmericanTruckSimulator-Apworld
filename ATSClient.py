@@ -36,7 +36,7 @@ from colorama import Fore, Style
 
 # Archipelago imports — these work when run via the Archipelago launcher
 import Utils
-from CommonClient import CommonContext, server_loop, gui_enabled, ClientCommandProcessor, logger, get_base_parser
+from CommonClient import CommonContext, server_loop, ClientCommandProcessor, logger, get_base_parser
 from NetUtils import ClientStatus
 
 # Force-register our world with AutoWorldRegister so CommonContext can look it up.
@@ -720,15 +720,11 @@ def launch():
         ctx.server_task = asyncio.ensure_future(server_loop(ctx))
         ctx.watcher_task = asyncio.ensure_future(game_watcher(ctx))
 
-        if gui_enabled:
-            ctx.run_gui()
-        ctx.run_cli()
+        ctx.run_cli()  # console-only; no Kivy GUI in the bundled exe
 
         await ctx.exit_event.wait()
         ctx.server_task.cancel()
         ctx.watcher_task.cancel()
-        if hasattr(ctx, "ui_task") and ctx.ui_task:
-            ctx.ui_task.cancel()
         await ctx.shutdown()
 
     parser = get_base_parser(description="American Truck Simulator Archipelago Client")
