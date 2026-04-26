@@ -342,17 +342,21 @@ class ATSContext(CommonContext):
         await self.get_username()
         await self.send_connect()
 
-    def on_package(self, cmd: str, args: Dict) -> None:
+    async def on_package(self, cmd: str, args: Dict) -> None:
         logger.debug(f"[ATS] Packet in: {cmd}")
-        super().on_package(cmd, args)
+        # Await super() correctly regardless of whether this AP version uses
+        # async or sync on_package — unawaited coroutine = items_received never filled.
+        result = super().on_package(cmd, args)
+        if asyncio.iscoroutine(result):
+            await result
         if cmd == "Connected":
             self.slot_data = args.get("slot_data", {})
             self._on_connected()
-        elif cmd == "ReceivedItems":
-            idx = args.get("index", 0)
-            count = len(args.get("items", []))
-            logger.debug(f"[ATS] ReceivedItems: index={idx}, count={count}, _applied={self._applied_item_count}")
-            self._on_items_received(idx, args["items"])
+        # ReceivedItems is intentionally NOT handled here.
+        # args["items"] contains raw JSON lists, not NetworkItem objects.
+        # The base class converts them and appends to ctx.items_received;
+        # game_watcher polls that list and calls _on_items_received with
+        # proper NetworkItem objects.
 
     def _on_connected(self) -> None:
         logger.info(f"[ATS] Connected to Archipelago server as {self.username}")
@@ -773,11 +777,13 @@ async def game_watcher(ctx: ATSContext) -> None:
         except Exception:
             logger.error(f"[ATS] Error processing events file:\n{traceback.format_exc()}")
 
-        # Poll ctx.items_received as a fallback for AP versions where the
-        # ReceivedItems on_package callback doesn't fire reliably.
+        # Apply any items the server has sent.
+        # The base class populates ctx.items_received with proper NetworkItem
+        # objects once on_package correctly awaits super().on_package().
         received = list(getattr(ctx, "items_received", []))
-        logger.debug(f"[ATS] items_received={len(received)}, applied={ctx._applied_item_count}")
         if len(received) > ctx._applied_item_count:
+            logger.debug(f"[ATS] Applying {len(received) - ctx._applied_item_count} new item(s) "
+                         f"(have {len(received)}, applied {ctx._applied_item_count})")
             ctx._on_items_received(ctx._applied_item_count, received[ctx._applied_item_count:])
 
         now = time.monotonic()
