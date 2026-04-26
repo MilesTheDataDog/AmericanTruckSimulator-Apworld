@@ -35,12 +35,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: archipelago
-        run: pip install -r requirements.txt && pip install pyinstaller colorama
-
-      - name: Remove Kivy to prevent headless OpenGL crash during analysis
-        shell: pwsh
-        continue-on-error: true
-        run: pip uninstall kivy kivy-deps.sdl2 kivy-deps.glew kivy-deps.angle kivy-deps.gstreamer -y
+        run: pip install -r requirements.txt && pip install pyinstaller colorama "kivy[packaging]"
 
       - name: Copy ATS client files into Archipelago
         shell: pwsh
@@ -54,6 +49,9 @@ jobs:
       - name: Build ATSClient.exe
         working-directory: archipelago
         shell: pwsh
+        env:
+          KIVY_NO_ENV_CONFIG: "1"
+          KIVY_WINDOW: "headless"
         run: |
           pyinstaller ATSClient.py `
             --name ATSClient `
@@ -68,8 +66,7 @@ jobs:
             --hidden-import worlds.american_truck_simulator.options `
             "--add-data=worlds\__init__.py;worlds" `
             "--add-data=worlds\american_truck_simulator;worlds\american_truck_simulator" `
-            --exclude-module kivy `
-            --exclude-module kivymd
+            --collect-all kivy
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
