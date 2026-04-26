@@ -370,39 +370,81 @@ SCSAPI_VOID on_truck_placement(const scs_string_t name,
     }
 }
 
-// Config callbacks — called when job or truck config changes
-SCSAPI_VOID on_job_config(const scs_string_t name,
-                           const scs_u32_t index,
-                           const scs_value_t* const value,
-                           const scs_context_t context) {
-    // Job config changes: capture cargo id/name, source, dest
-    // The actual field names depend on the SCS SDK config channel keys
-    // We use the gameplay event system primarily; config is supplementary.
+// ── Configuration event (fires when job starts/clears) ────────────────────────
+// This is how we learn the cargo ID before a job.delivered event fires.
+SCSAPI_VOID telemetry_configuration(const scs_event_t event,
+                                     const void* const event_info,
+                                     const scs_context_t context) {
+    if (!event_info) return;
+    const scs_telemetry_configuration_t* const cfg =
+        static_cast<const scs_telemetry_configuration_t*>(event_info);
+    if (!cfg->id) return;
+
+    if (std::string(cfg->id) != SCS_TELEMETRY_CONFIG_job) return;
+
+    std::lock_guard<std::mutex> lock(g_state_mutex);
+    g_state.current_cargo_id.clear();
+    g_state.current_cargo_name.clear();
+    g_state.job_active = false;
+
+    for (const scs_named_value_t* attr = cfg->attributes; attr->name != nullptr; ++attr) {
+        const std::string attr_name(attr->name);
+        if (attr_name == SCS_TELEMETRY_CONFIG_ATTRIBUTE_cargo_id) {
+            if (attr->value.type == SCS_VALUE_TYPE_string && attr->value.value_string.value) {
+                g_state.current_cargo_id  = attr->value.value_string.value;
+                g_state.job_active        = true;
+            }
+        } else if (attr_name == SCS_TELEMETRY_CONFIG_ATTRIBUTE_cargo) {
+            if (attr->value.type == SCS_VALUE_TYPE_string && attr->value.value_string.value) {
+                g_state.current_cargo_name = attr->value.value_string.value;
+            }
+        }
+    }
+
+    if (g_state.job_active) {
+        log("Job started: cargo=" + g_state.current_cargo_id +
+            " name=" + g_state.current_cargo_name);
+    }
 }
 
-SCSAPI_VOID on_gameplay_event_channel(const scs_string_t name,
-                                       const scs_u32_t index,
-                                       const scs_value_t* const value,
-                                       const scs_context_t context) {
-    // Additional channel data
+// ── Paused / started events (track whether player is driving) ─────────────────
+SCSAPI_VOID telemetry_paused(const scs_event_t event,
+                              const void* const event_info,
+                              const scs_context_t context) {
+    std::lock_guard<std::mutex> lock(g_state_mutex);
+    g_state.in_game = false;
 }
 
+SCSAPI_VOID telemetry_started(const scs_event_t event,
+                               const void* const event_info,
+                               const scs_context_t context) {
+    std::lock_guard<std::mutex> lock(g_state_mutex);
+    g_state.in_game = true;
+}
 
-// ── Periodic poll (called from a Windows timer or a background thread) ─────────
-// This polls save-file-derived data: level, money, visited cities, garage states.
-// The save file is at: Documents\American Truck Simulator\profiles\<id>\save\<slot>\game.sii
-// Parsing is done on a 5-second interval to avoid I/O overhead.
+// ── Frame callback — drives all periodic operations ───────────────────────────
+// Called every frame (~50ms). Uses internal timers to rate-limit expensive work.
+static double g_last_poll_time  = 0.0;
+static double g_last_flush_time = 0.0;
+static const double POLL_INTERVAL_SECONDS  = 5.0;
+static const double FLUSH_INTERVAL_SECONDS = 2.0;
 
-static double g_last_poll_time = 0.0;
-static const double POLL_INTERVAL_SECONDS = 5.0;
-
-static void poll_save_file() {
+SCSAPI_VOID telemetry_frame_start(const scs_event_t event,
+                                   const void* const event_info,
+                                   const scs_context_t context) {
     double t = now_seconds();
-    if (t - g_last_poll_time < POLL_INTERVAL_SECONDS) return;
-    g_last_poll_time = t;
 
-    // Re-read items.json on same interval
-    read_items_file();
+    // Re-read items.json so newly unlocked items take effect in-game
+    if (t - g_last_poll_time >= POLL_INTERVAL_SECONDS) {
+        g_last_poll_time = t;
+        read_items_file();
+    }
+
+    // Flush events.json so the Python client sees plugin_alive heartbeat
+    if (t - g_last_flush_time >= FLUSH_INTERVAL_SECONDS) {
+        g_last_flush_time = t;
+        flush_events_file();
+    }
 }
 
 
@@ -434,8 +476,12 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
     // Read initial items state
     read_items_file();
 
-    // Register gameplay event callbacks
-    p->register_for_event(SCS_TELEMETRY_EVENT_gameplay, telemetry_gameplay_event, nullptr);
+    // Register event callbacks
+    p->register_for_event(SCS_TELEMETRY_EVENT_frame_start,   telemetry_frame_start,   nullptr);
+    p->register_for_event(SCS_TELEMETRY_EVENT_paused,        telemetry_paused,        nullptr);
+    p->register_for_event(SCS_TELEMETRY_EVENT_started,       telemetry_started,       nullptr);
+    p->register_for_event(SCS_TELEMETRY_EVENT_configuration, telemetry_configuration, nullptr);
+    p->register_for_event(SCS_TELEMETRY_EVENT_gameplay,      telemetry_gameplay_event, nullptr);
 
     // Register position channel (called each telemetry frame ~50ms)
     p->register_for_channel(
