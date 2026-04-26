@@ -1,0 +1,66 @@
+name: Build ATSClient.exe
+
+on:
+  push:
+    branches:
+      - main
+      - claude/ats-mod-files-Hkx9F
+    paths:
+      - ATSClient.py
+      - worlds/**
+      - .github/workflows/build-client.yml
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout ATS Apworld
+        uses: actions/checkout@v4
+        with:
+          path: ats-apworld
+
+      - name: Checkout Archipelago
+        uses: actions/checkout@v4
+        with:
+          repository: ArchipelagoMW/Archipelago
+          ref: main
+          path: archipelago
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: archipelago
+        run: pip install -r requirements.txt && pip install pyinstaller colorama
+
+      - name: Copy ATS client files into Archipelago
+        shell: pwsh
+        run: |
+          Copy-Item ats-apworld\ATSClient.py archipelago\ATSClient.py
+          New-Item -ItemType Directory -Force -Path archipelago\worlds\american_truck_simulator | Out-Null
+          Copy-Item -Recurse -Force ats-apworld\worlds\american_truck_simulator\* archipelago\worlds\american_truck_simulator\
+
+      - name: Build ATSClient.exe
+        working-directory: archipelago
+        shell: pwsh
+        run: |
+          pyinstaller ATSClient.py `
+            --name ATSClient `
+            --onefile `
+            --console `
+            --hidden-import worlds.american_truck_simulator `
+            --hidden-import worlds.american_truck_simulator.items `
+            "--add-data=worlds\american_truck_simulator\data\cities.json;worlds\american_truck_simulator\data" `
+            "--add-data=worlds\american_truck_simulator\data\cargo_types.json;worlds\american_truck_simulator\data" `
+            "--add-data=worlds\american_truck_simulator\data\trucks.json;worlds\american_truck_simulator\data"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ATSClient-Windows
+          path: archipelago\dist\ATSClient.exe
+          if-no-files-found: error
