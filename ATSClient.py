@@ -336,12 +336,16 @@ class ATSContext(CommonContext):
         await self.send_connect()
 
     def on_package(self, cmd: str, args: Dict) -> None:
+        logger.debug(f"[ATS] Packet in: {cmd}")
         super().on_package(cmd, args)
         if cmd == "Connected":
             self.slot_data = args.get("slot_data", {})
             self._on_connected()
         elif cmd == "ReceivedItems":
-            self._on_items_received(args.get("index", 0), args["items"])
+            idx = args.get("index", 0)
+            count = len(args.get("items", []))
+            logger.debug(f"[ATS] ReceivedItems: index={idx}, count={count}, _applied={self._applied_item_count}")
+            self._on_items_received(idx, args["items"])
 
     def _on_connected(self) -> None:
         logger.info(f"[ATS] Connected to Archipelago server as {self.username}")
@@ -353,10 +357,19 @@ class ATSContext(CommonContext):
     def _on_items_received(self, start_index: int, items) -> None:
         applied_any = False
         for i, item in enumerate(items):
-            if start_index + i < self._applied_item_count:
+            global_index = start_index + i
+            if global_index < self._applied_item_count:
                 continue  # already applied on a previous receive/resync
-            item_name = self.item_names.lookup_in_game(item.item)
-            self._apply_item(item_name)
+            try:
+                item_name = self.item_names.lookup_in_game(item.item)
+            except Exception:
+                item_name = str(item.item)
+                logger.warning(f"[ATS] Could not look up item name for id {item.item}")
+            logger.info(f"[ATS] Received item #{global_index}: {item_name}")
+            try:
+                self._apply_item(item_name)
+            except Exception:
+                logger.error(f"[ATS] Error applying item {item_name!r}:\n{traceback.format_exc()}")
             self._applied_item_count += 1
             applied_any = True
         if applied_any:
@@ -493,10 +506,9 @@ class ATSContext(CommonContext):
 
         for event in data.get("events", []):
             event_id = event.get("id")
-            logger.debug(f"[ATS] Processing event: {event_id}")
             if event_id in self._processed_event_ids:
-                logger.debug(f"[ATS] Already processed: {event_id}")
-                continue
+                continue  # silently skip already-processed events
+            logger.debug(f"[ATS] New event: {event_id}")
             self._processed_event_ids.add(event_id)
 
             try:
@@ -720,6 +732,7 @@ async def game_watcher(ctx: ATSContext) -> None:
         # Archipelago 0.6.x stores received items in ctx.items_received;
         # we poll it directly rather than relying on the _on_items_received callback.
         received = getattr(ctx, "items_received", [])
+        logger.debug(f"[ATS] items_received={len(received)}, applied={ctx._applied_item_count}")
         if len(received) > ctx._applied_item_count:
             applied_any = False
             for i in range(ctx._applied_item_count, len(received)):
