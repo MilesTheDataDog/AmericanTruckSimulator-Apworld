@@ -51,7 +51,8 @@ jobs:
         shell: pwsh
         env:
           KIVY_NO_ENV_CONFIG: "1"
-          KIVY_WINDOW: "headless"
+          SDL_VIDEODRIVER: "dummy"
+          SDL_AUDIODRIVER: "dummy"
         run: |
           pyinstaller ATSClient.py `
             --name ATSClient `
