@@ -37,6 +37,11 @@ jobs:
         working-directory: archipelago
         run: pip install -r requirements.txt && pip install pyinstaller colorama
 
+      - name: Remove Kivy to prevent headless OpenGL crash during analysis
+        shell: pwsh
+        continue-on-error: true
+        run: pip uninstall kivy kivy-deps.sdl2 kivy-deps.glew kivy-deps.angle kivy-deps.gstreamer -y
+
       - name: Copy ATS client files into Archipelago
         shell: pwsh
         run: |
