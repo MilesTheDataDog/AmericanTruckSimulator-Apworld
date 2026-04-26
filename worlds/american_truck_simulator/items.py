@@ -1,5 +1,5 @@
 import json
-import os
+import pkgutil
 from typing import Dict, List, NamedTuple, Optional
 from BaseClasses import ItemClassification
 
@@ -13,12 +13,12 @@ ATS_BASE_ID = 17_000_000
 # Recruitment offices:    ATS_BASE_ID + 2000  (slots 2000–2499)
 # Filler items:           ATS_BASE_ID + 9000  (slots 9000–9099)
 
-_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
-
 
 def _load(filename: str):
-    with open(os.path.join(_DATA_DIR, filename), encoding="utf-8") as f:
-        return json.load(f)
+    data = pkgutil.get_data(__name__, f"data/{filename}")
+    if data is None:
+        raise FileNotFoundError(f"Could not load data/{filename} from apworld")
+    return json.loads(data.decode("utf-8"))
 
 
 class ATSItemData(NamedTuple):
