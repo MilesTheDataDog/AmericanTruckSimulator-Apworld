@@ -293,8 +293,11 @@ class ATSContext(CommonContext):
     game = GAME_NAME
     items_handling = 0b111  # receive all items
 
-    def __init__(self, server_address: str, password: Optional[str]) -> None:
+    def __init__(self, server_address: str, password: Optional[str],
+                 auto_launch_game: bool = True) -> None:
         super().__init__(server_address, password)
+
+        self.auto_launch_game: bool = auto_launch_game
 
         # Slot data from server
         self.slot_data: Dict[str, Any] = {}
@@ -320,6 +323,10 @@ class ATSContext(CommonContext):
 
         # Track how many items we have applied so we can skip them on reconnect/resync
         self._applied_item_count: int = 0
+
+        # Notification queue for in-game popups (written to items.json)
+        self._notifications: List[Dict] = []
+        self._notification_counter: int = 0
 
         # Save file polling state
         self._save_last_mtime: float = 0.0
@@ -365,11 +372,29 @@ class ATSContext(CommonContext):
             except Exception:
                 item_name = str(item.item)
                 logger.warning(f"[ATS] Could not look up item name for id {item.item}")
-            logger.info(f"[ATS] Received item #{global_index}: {item_name}")
+            try:
+                sender_name = self.player_names.get(item.player, f"Player {item.player}")
+            except Exception:
+                sender_name = "Unknown"
+            if item.player == self.slot:
+                display_text = f"You found: {item_name}"
+            else:
+                display_text = f"{item_name} (from {sender_name})"
+            logger.info(f"[ATS] Received item #{global_index}: {display_text}")
             try:
                 self._apply_item(item_name)
             except Exception:
                 logger.error(f"[ATS] Error applying item {item_name!r}:\n{traceback.format_exc()}")
+            # Queue in-game notification popup (plugin reads item_notifications from items.json)
+            self._notifications.append({
+                "id": self._notification_counter,
+                "item_name": item_name,
+                "from_player": sender_name,
+                "text": display_text,
+            })
+            self._notification_counter += 1
+            if len(self._notifications) > 50:
+                self._notifications = self._notifications[-50:]
             self._applied_item_count += 1
             applied_any = True
         if applied_any:
@@ -466,6 +491,7 @@ class ATSContext(CommonContext):
             "shuffle_garages": self.slot_data.get("shuffle_garages", True),
             "shuffle_recruitment_offices": self.slot_data.get("shuffle_recruitment_offices", True),
             "shuffle_truck_upgrades": self.slot_data.get("shuffle_truck_upgrades", False),
+            "item_notifications": self._notifications,
         }
         _write_json(ITEMS_FILE, payload)
 
@@ -711,13 +737,32 @@ class ATSContext(CommonContext):
             return None
 
 
+# ── Steam launcher ─────────────────────────────────────────────────────────────
+
+ATS_STEAM_APP_ID = "270880"
+
+
+def _launch_ats_steam() -> None:
+    """Open American Truck Simulator via the Steam URI protocol."""
+    import webbrowser
+    try:
+        webbrowser.open(f"steam://rungameid/{ATS_STEAM_APP_ID}")
+        logger.info("[ATS] Sent launch request to Steam for American Truck Simulator.")
+    except Exception as exc:
+        logger.warning(f"[ATS] Could not send Steam launch request: {exc}")
+
+
 # ── Main game watcher loop ─────────────────────────────────────────────────────
 
 async def game_watcher(ctx: ATSContext) -> None:
     """Polls the plugin events file and ATS save file, managing game state."""
-    logger.info("[ATS] Game watcher started. Waiting for plugin...")
+    logger.info("[ATS] Game watcher started.")
     logger.info(f"[ATS] Communication folder: {COMM_DIR}")
-    logger.info("[ATS] Make sure the ATS Archipelago plugin DLL is installed and ATS is running.")
+
+    if ctx.auto_launch_game:
+        _launch_ats_steam()
+
+    logger.info("[ATS] Waiting for ATS plugin to connect...")
 
     _SAVE_POLL_INTERVAL = 5.0  # seconds between save file reads
     _last_save_poll = 0.0
@@ -728,29 +773,12 @@ async def game_watcher(ctx: ATSContext) -> None:
         except Exception:
             logger.error(f"[ATS] Error processing events file:\n{traceback.format_exc()}")
 
-        # Process any newly received items from the server.
-        # Archipelago 0.6.x stores received items in ctx.items_received;
-        # we poll it directly rather than relying on the _on_items_received callback.
-        received = getattr(ctx, "items_received", [])
+        # Poll ctx.items_received as a fallback for AP versions where the
+        # ReceivedItems on_package callback doesn't fire reliably.
+        received = list(getattr(ctx, "items_received", []))
         logger.debug(f"[ATS] items_received={len(received)}, applied={ctx._applied_item_count}")
         if len(received) > ctx._applied_item_count:
-            applied_any = False
-            for i in range(ctx._applied_item_count, len(received)):
-                network_item = received[i]
-                try:
-                    item_name = ctx.item_names.lookup_in_game(network_item.item)
-                except Exception:
-                    item_name = str(network_item.item)
-                    logger.warning(f"[ATS] Could not look up item name for id {network_item.item}")
-                logger.info(f"[ATS] Received item: {item_name}")
-                try:
-                    ctx._apply_item(item_name)
-                except Exception:
-                    logger.error(f"[ATS] Error applying item {item_name!r}:\n{traceback.format_exc()}")
-                ctx._applied_item_count += 1
-                applied_any = True
-            if applied_any:
-                ctx._write_items_file()
+            ctx._on_items_received(ctx._applied_item_count, received[ctx._applied_item_count:])
 
         now = time.monotonic()
         if now - _last_save_poll >= _SAVE_POLL_INTERVAL:
@@ -766,26 +794,46 @@ async def game_watcher(ctx: ATSContext) -> None:
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def launch():
-    async def main(args):
-        ctx = ATSContext(args.connect, args.password)
+    import logging
+    logging.basicConfig(level=logging.DEBUG)
+
+    parser = get_base_parser(description="American Truck Simulator Archipelago Client")
+    parser.add_argument(
+        "--no-launch",
+        action="store_true",
+        default=False,
+        help="Do not automatically launch American Truck Simulator via Steam.",
+    )
+    args, _ = parser.parse_known_args()
+    colorama.init()
+
+    async def main():
+        ctx = ATSContext(
+            args.connect,
+            args.password,
+            auto_launch_game=not args.no_launch,
+        )
         ctx.server_task = asyncio.ensure_future(server_loop(ctx))
         ctx.watcher_task = asyncio.ensure_future(game_watcher(ctx))
 
-        ctx.run_cli()  # console-only; no Kivy GUI in the bundled exe
+        try:
+            from Utils import gui_enabled
+        except ImportError:
+            gui_enabled = False
+
+        if gui_enabled:
+            try:
+                ctx.run_gui()
+            except Exception as exc:
+                logger.warning(f"[ATS] GUI unavailable, falling back to CLI: {exc}")
+        ctx.run_cli()
 
         await ctx.exit_event.wait()
         ctx.server_task.cancel()
         ctx.watcher_task.cancel()
         await ctx.shutdown()
 
-    parser = get_base_parser(description="American Truck Simulator Archipelago Client")
-    args, _ = parser.parse_known_args()
-    colorama.init()
-
-    import logging
-    logging.basicConfig(level=logging.DEBUG)
-
-    asyncio.run(main(args))
+    asyncio.run(main())
 
 
 # ── Utility ────────────────────────────────────────────────────────────────────

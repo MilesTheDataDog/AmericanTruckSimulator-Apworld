@@ -5,6 +5,24 @@ from typing import Any, Dict, List, Optional
 from BaseClasses import Item, ItemClassification, Tutorial
 from worlds.AutoWorld import World, WebWorld
 
+# Register the ATS client with the Archipelago Launcher.
+# Wrapped in try/except so the world still loads during server-side generation
+# where LauncherComponents may not be importable.
+try:
+    from worlds.LauncherComponents import Component, components
+
+    def _launch_ats_client():
+        from ATSClient import launch
+        launch()
+
+    components += [Component(
+        "American Truck Simulator Client",
+        "ATSClient",
+        func=_launch_ats_client,
+    )]
+except Exception:
+    pass
+
 from .items import (
     ATS_BASE_ID,
     ALL_ITEMS,
