@@ -65,8 +65,7 @@ jobs:
             --hidden-import worlds.american_truck_simulator.rules `
             --hidden-import worlds.american_truck_simulator.options `
             "--add-data=worlds\__init__.py;worlds" `
-            "--add-data=worlds\american_truck_simulator;worlds\american_truck_simulator" `
-            --collect-all kivy
+            "--add-data=worlds\american_truck_simulator;worlds\american_truck_simulator"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
