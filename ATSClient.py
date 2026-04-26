@@ -478,9 +478,11 @@ class ATSContext(CommonContext):
         try:
             data = _read_json(EVENTS_FILE)
         except Exception:
+            logger.error(f"[ATS] Failed to read events file: {traceback.format_exc()}")
             return
 
         if not isinstance(data, dict):
+            logger.warning("[ATS] events.json is not a dict — skipping")
             return
 
         self.plugin_connected = data.get("plugin_alive", False)
@@ -491,15 +493,28 @@ class ATSContext(CommonContext):
 
         for event in data.get("events", []):
             event_id = event.get("id")
+            logger.debug(f"[ATS] Processing event: {event_id}")
             if event_id in self._processed_event_ids:
+                logger.debug(f"[ATS] Already processed: {event_id}")
                 continue
             self._processed_event_ids.add(event_id)
 
-            location_id = self._resolve_event_to_location_id(event)
-            if location_id is not None and location_id not in self.checked_locations:
-                new_checks.append(location_id)
+            try:
+                location_id = self._resolve_event_to_location_id(event)
+            except Exception:
+                logger.error(f"[ATS] Error resolving event {event_id}:\n{traceback.format_exc()}")
+                continue
+
+            if location_id is None:
+                continue
+            if location_id in self.checked_locations:
+                logger.info(f"[ATS] Location already checked: {event_id}")
+                continue
+            logger.info(f"[ATS] Queuing check for location id {location_id} ({event_id})")
+            new_checks.append(location_id)
 
         if new_checks:
+            logger.info(f"[ATS] Sending {len(new_checks)} location check(s) to server.")
             asyncio.create_task(self.send_msgs([{
                 "cmd": "LocationChecks",
                 "locations": new_checks,
@@ -732,7 +747,7 @@ def launch():
     colorama.init()
 
     import logging
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
 
     asyncio.run(main(args))
 
