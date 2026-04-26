@@ -1,0 +1,33 @@
+name: Build ats_archipelago.scs
+
+on:
+  push:
+    branches:
+      - main
+      - claude/ats-mod-files-Hkx9F
+    paths:
+      - mod/**
+      - .github/workflows/build-mod.yml
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Package mod as .scs (zip archive)
+        run: |
+          cd mod
+          zip -r ../ats_archipelago.scs mod.sii scripts/
+          echo "Contents:"
+          unzip -l ../ats_archipelago.scs
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ats_archipelago-scs
+          path: ats_archipelago.scs
+          if-no-files-found: error
