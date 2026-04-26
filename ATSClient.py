@@ -40,12 +40,17 @@ from CommonClient import CommonContext, server_loop, gui_enabled, ClientCommandP
 from NetUtils import ClientStatus
 
 # Force-register our world with AutoWorldRegister so CommonContext can look it up.
-# Archipelago's file-system world scanner fails inside a PyInstaller bundle because
-# __init__.py isn't detectable on disk; importing explicitly triggers the metaclass.
+# In a PyInstaller bundle worlds.__path__ may point to a non-existent directory;
+# we fix it to include sys._MEIPASS/worlds so Python can find our subpackage.
 try:
-    import worlds.american_truck_simulator  # noqa: F401
-except Exception:
-    pass
+    import worlds as _worlds_pkg
+    if hasattr(sys, "_MEIPASS"):
+        _bundle_worlds = os.path.join(sys._MEIPASS, "worlds")
+        if _bundle_worlds not in _worlds_pkg.__path__:
+            _worlds_pkg.__path__.insert(0, _bundle_worlds)
+    import worlds.american_truck_simulator  # noqa: F401 — registers via AutoWorldRegister metaclass
+except Exception as _e:
+    print(f"[ATSClient] Warning: could not pre-register ATS world: {_e}")
 
 colorama.init()
 
