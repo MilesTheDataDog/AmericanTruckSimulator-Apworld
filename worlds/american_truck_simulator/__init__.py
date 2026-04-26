@@ -10,10 +10,23 @@ from worlds.AutoWorld import World, WebWorld
 # where LauncherComponents may not be importable.
 try:
     from worlds.LauncherComponents import Component, components
+    import subprocess
+    import sys
 
     def _launch_ats_client():
-        from ATSClient import launch
-        launch()
+        # ATSClient must run as a subprocess — the Archipelago Launcher is itself
+        # a Kivy app, and Kivy only supports one App instance per process.
+        # Calling run_gui() in-process would silently fail and fall back to CLI.
+        here = os.path.dirname(os.path.abspath(__file__))
+        archipelago_root = os.path.abspath(os.path.join(here, "..", ".."))
+
+        ats_script = os.path.join(archipelago_root, "ATSClient.py")
+        ats_exe = os.path.join(os.path.dirname(sys.executable), "ATSClient.exe")
+
+        if os.path.isfile(ats_script):
+            subprocess.Popen([sys.executable, ats_script])
+        elif os.path.isfile(ats_exe):
+            subprocess.Popen([ats_exe])
 
     components += [Component(
         "American Truck Simulator Client",
