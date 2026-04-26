@@ -56,7 +56,9 @@ jobs:
             --hidden-import worlds.american_truck_simulator.items `
             "--add-data=worlds\american_truck_simulator\data\cities.json;worlds\american_truck_simulator\data" `
             "--add-data=worlds\american_truck_simulator\data\cargo_types.json;worlds\american_truck_simulator\data" `
-            "--add-data=worlds\american_truck_simulator\data\trucks.json;worlds\american_truck_simulator\data"
+            "--add-data=worlds\american_truck_simulator\data\trucks.json;worlds\american_truck_simulator\data" `
+            --exclude-module kivy `
+            --exclude-module kivymd
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
