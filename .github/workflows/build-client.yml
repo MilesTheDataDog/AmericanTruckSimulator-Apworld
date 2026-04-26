@@ -35,7 +35,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: archipelago
-        run: pip install -r requirements.txt && pip install pyinstaller colorama "kivy[packaging]"
+        run: pip install -r requirements.txt && pip install pyinstaller colorama
 
       - name: Copy ATS client files into Archipelago
         shell: pwsh
@@ -49,10 +49,6 @@ jobs:
       - name: Build ATSClient.exe
         working-directory: archipelago
         shell: pwsh
-        env:
-          KIVY_NO_ENV_CONFIG: "1"
-          SDL_VIDEODRIVER: "dummy"
-          SDL_AUDIODRIVER: "dummy"
         run: |
           pyinstaller ATSClient.py `
             --name ATSClient `
@@ -66,7 +62,9 @@ jobs:
             --hidden-import worlds.american_truck_simulator.rules `
             --hidden-import worlds.american_truck_simulator.options `
             "--add-data=worlds\__init__.py;worlds" `
-            "--add-data=worlds\american_truck_simulator;worlds\american_truck_simulator"
+            "--add-data=worlds\american_truck_simulator;worlds\american_truck_simulator" `
+            --exclude-module kivy `
+            --exclude-module kivymd
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
