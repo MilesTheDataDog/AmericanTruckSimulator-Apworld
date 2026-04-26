@@ -45,10 +45,11 @@ def set_rules(world: "ATSWorld") -> None:
         unlock_item = f"Unlock {_dlc_name_for_state(state['id'])}"
         if unlock_item not in _DLC_KEY_MAP.values():
             pass  # lookup by display name
-        # Find the entrance in the region graph
-        entrance = multiworld.get_entrance(f"Menu -> {state_name}", player)
-        if entrance is None:
-            continue  # state not in this player's game
+        # Find the entrance in the region graph (raises KeyError if state not enabled)
+        try:
+            entrance = multiworld.get_entrance(f"Menu -> {state_name}", player)
+        except KeyError:
+            continue  # state not enabled in this player's game
 
         set_rule(entrance, lambda state, item=unlock_item: state.has(item, player))
 
