@@ -57,11 +57,7 @@ jobs:
             --name ATSClient `
             --onefile `
             --console `
-            --hidden-import worlds.american_truck_simulator `
-            --hidden-import worlds.american_truck_simulator.items `
-            "--add-data=worlds\american_truck_simulator\data\cities.json;worlds\american_truck_simulator\data" `
-            "--add-data=worlds\american_truck_simulator\data\cargo_types.json;worlds\american_truck_simulator\data" `
-            "--add-data=worlds\american_truck_simulator\data\trucks.json;worlds\american_truck_simulator\data" `
+            --collect-all worlds.american_truck_simulator `
             --exclude-module kivy `
             --exclude-module kivymd
 

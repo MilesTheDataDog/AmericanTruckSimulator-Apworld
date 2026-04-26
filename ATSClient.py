@@ -39,6 +39,14 @@ import Utils
 from CommonClient import CommonContext, server_loop, gui_enabled, ClientCommandProcessor, logger, get_base_parser
 from NetUtils import ClientStatus
 
+# Force-register our world with AutoWorldRegister so CommonContext can look it up.
+# Archipelago's file-system world scanner fails inside a PyInstaller bundle because
+# __init__.py isn't detectable on disk; importing explicitly triggers the metaclass.
+try:
+    import worlds.american_truck_simulator  # noqa: F401
+except Exception:
+    pass
+
 colorama.init()
 
 GAME_NAME = "American Truck Simulator"
