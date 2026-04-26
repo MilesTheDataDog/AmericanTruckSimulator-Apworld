@@ -1,17 +1,17 @@
 import json
-import os
+import pkgutil
 from typing import TYPE_CHECKING
 from BaseClasses import Region
 
 if TYPE_CHECKING:
     from . import ATSWorld
 
-_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
-
 
 def _load(filename: str):
-    with open(os.path.join(_DATA_DIR, filename), encoding="utf-8") as f:
-        return json.load(f)
+    data = pkgutil.get_data(__name__, f"data/{filename}")
+    if data is None:
+        raise FileNotFoundError(f"Could not load data/{filename} from apworld")
+    return json.loads(data.decode("utf-8"))
 
 
 _cities_data = _load("cities.json")
