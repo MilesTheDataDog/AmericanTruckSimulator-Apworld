@@ -84,9 +84,7 @@ def create_regions(world: "ATSWorld") -> None:
     # Connect Menu → each DLC state (access rules set later in rules.py)
     for state in _cities_data["states"]:
         if state["name"] in active_state_names and state["name"] not in ("California", "Nevada"):
-            entrance = menu.connect(regions[state["name"]])
-            # Store the DLC name on the entrance for rules.py to reference
-            entrance.name = f"Menu -> {state['name']}"
+            menu.connect(regions[state["name"]], name=f"Menu -> {state['name']}")
 
 
 class ATSLocation:
