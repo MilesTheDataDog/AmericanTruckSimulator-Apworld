@@ -48,6 +48,8 @@ jobs:
           Copy-Item ats-apworld\ATSClient.py archipelago\ATSClient.py
           New-Item -ItemType Directory -Force -Path archipelago\worlds\american_truck_simulator | Out-Null
           Copy-Item -Recurse -Force ats-apworld\worlds\american_truck_simulator\* archipelago\worlds\american_truck_simulator\
+          New-Item -ItemType Directory -Force -Path archipelago\hooks | Out-Null
+          Copy-Item ats-apworld\hooks\rthook_ats_worlds.py archipelago\hooks\rthook_ats_worlds.py
 
       - name: Build ATSClient.exe
         working-directory: archipelago
@@ -57,7 +59,16 @@ jobs:
             --name ATSClient `
             --onefile `
             --console `
-            --collect-all worlds.american_truck_simulator `
+            --runtime-hook hooks\rthook_ats_worlds.py `
+            --hidden-import worlds.american_truck_simulator `
+            --hidden-import worlds.american_truck_simulator.items `
+            --hidden-import worlds.american_truck_simulator.locations `
+            --hidden-import worlds.american_truck_simulator.regions `
+            --hidden-import worlds.american_truck_simulator.rules `
+            --hidden-import worlds.american_truck_simulator.options `
+            "--add-data=worlds\american_truck_simulator\data\cities.json;worlds\american_truck_simulator\data" `
+            "--add-data=worlds\american_truck_simulator\data\cargo_types.json;worlds\american_truck_simulator\data" `
+            "--add-data=worlds\american_truck_simulator\data\trucks.json;worlds\american_truck_simulator\data" `
             --exclude-module kivy `
             --exclude-module kivymd
 
