@@ -43,6 +43,9 @@ local g_notification_queue = {}
 local g_current_job_dest_state = nil
 local g_job_was_cancelled = false
 local g_initialized     = false
+-- Tracks the highest item_notification id we have already shown the player,
+-- so we only show each received-item popup once across polls.
+local g_last_shown_notification_id = -1
 
 -- City → state mapping (abbreviated; extended version will be auto-generated)
 -- Format: city_id = "state_id"
@@ -208,18 +211,61 @@ local function json_bool(json_str, key)
     return val == "true"
 end
 
+-- Parse the item_notifications array written by the Python client.
+-- Returns a list of {id=<int>, text=<string>} tables sorted by id.
+local function json_notification_items(json_str)
+    local result = {}
+    -- %b[] uses Lua's balanced-match to capture the whole array, including
+    -- multi-line content, without a full JSON parser.
+    local arr = json_str:match('"item_notifications"%s*:%s*(%b[])')
+    if not arr then return result end
+    -- Each notification is a balanced { } object in the array.
+    for obj in arr:gmatch('%b{}') do
+        local id   = tonumber(obj:match('"id"%s*:%s*(%d+)'))
+        local text = obj:match('"text"%s*:%s*"([^"]*)"')
+        if id ~= nil and text then
+            -- Unescape basic JSON string escapes that appear in item names
+            text = text:gsub('\\"', '"'):gsub('\\\\', '\\')
+            table.insert(result, { id = id, text = text })
+        end
+    end
+    table.sort(result, function(a, b) return a.id < b.id end)
+    return result
+end
+
 
 -- ── Notification system ────────────────────────────────────────────────────────
 
+-- Display a message immediately via whatever ATS API is available.
+local function display_message(text)
+    if message_manager then
+        -- Try the most capable API first; fall back gracefully.
+        local ok = pcall(function()
+            if message_manager.push_message then
+                message_manager:push_message(text, NOTIFY_DURATION)
+            elseif message_manager.show_message then
+                message_manager:show_message(text)
+            end
+        end)
+        if ok then return end
+    end
+    -- Last resort: write to the game log so the player can at least see it there.
+    print("[ATS-Archipelago] " .. text)
+end
+
 local function push_notification(message, color)
+    -- Display immediately so the popup appears right away.
+    display_message(message)
+    -- Also track in the internal queue for any future fallback rendering.
     table.insert(g_notification_queue, {
-        text = message,
-        color = color or 0xFFFFFF,
+        text   = message,
+        color  = color or 0xFFFFFF,
         expire = os.clock() + NOTIFY_DURATION,
     })
 end
 
 local function update_notifications()
+    -- Expire old entries from the queue; display_message is called in push_notification.
     local now = os.clock()
     local active = {}
     for _, n in ipairs(g_notification_queue) do
@@ -228,14 +274,6 @@ local function update_notifications()
         end
     end
     g_notification_queue = active
-
-    if #g_notification_queue > 0 then
-        local n = g_notification_queue[1]
-        -- ATS uses message_manager for on-screen text if available
-        if message_manager then
-            message_manager:show_message(n.text)
-        end
-    end
 end
 
 
@@ -246,8 +284,6 @@ local function poll_items_file()
 
     local content = read_json_file(g_items_file_path)
     if not content then return end
-
-    local prev_states = g_unlocked_states
 
     g_unlocked_states  = json_string_array(content, "unlocked_states")
     g_unlocked_trucks  = json_string_array(content, "unlocked_trucks")
@@ -261,19 +297,19 @@ local function poll_items_file()
     local goal_k       = json_number(content, "goal_money_thousands") or 1000
     g_goal_money       = goal_k * 1000
 
-    -- Notify player when a new state is unlocked
-    for state_id, _ in pairs(g_unlocked_states) do
-        if not prev_states[state_id] then
-            local display = state_id:gsub("_", " "):gsub("(%a)([%a]*)", function(a,b)
-                return a:upper() .. b
-            end)
-            push_notification("Archipelago: " .. display .. " is now unlocked!", 0x00FF00)
+    -- Base-game states are always accessible.
+    g_unlocked_states["california"] = true
+    g_unlocked_states["nevada"]     = true
+
+    -- Show in-game popups for items received from the Archipelago multiworld.
+    -- The Python client writes item_notifications; we show each id exactly once.
+    local notifications = json_notification_items(content)
+    for _, notif in ipairs(notifications) do
+        if notif.id > g_last_shown_notification_id then
+            push_notification("AP: " .. notif.text, 0x00DDFF)
+            g_last_shown_notification_id = notif.id
         end
     end
-
-    -- Always unlocked
-    g_unlocked_states["california"] = true
-    g_unlocked_states["nevada"] = true
 end
 
 

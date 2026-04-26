@@ -233,6 +233,25 @@ static void read_items_file() {
             g_items.pending_money_bonuses.push_back(m.get<int>());
         }
 
+        // Parse upgrade tier limits sent by the client.
+        // Keys: "engine", "transmission", "chassis", "cab", "accessories"
+        g_items.upgrade_tiers.clear();
+        if (j.contains("upgrade_tiers") && j["upgrade_tiers"].is_object()) {
+            for (auto& [k, v] : j["upgrade_tiers"].items()) {
+                if (v.is_number_integer()) {
+                    g_items.upgrade_tiers[k] = v.get<int>();
+                }
+            }
+        }
+
+        // Log notification count for diagnostics (display is handled by the Lua mod)
+        if (j.contains("item_notifications") && j["item_notifications"].is_array()) {
+            std::size_t n = j["item_notifications"].size();
+            if (n > 0) {
+                log("items.json: " + std::to_string(n) + " notification(s) queued for Lua mod");
+            }
+        }
+
         g_items.last_read_time = now_seconds();
     } catch (const std::exception& e) {
         log(std::string("Failed to read items.json: ") + e.what(), SCS_LOG_TYPE_warning);

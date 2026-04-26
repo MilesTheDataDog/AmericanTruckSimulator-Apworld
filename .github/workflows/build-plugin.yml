@@ -1,0 +1,49 @@
+name: Build ats_archipelago.dll
+
+on:
+  push:
+    branches:
+      - main
+      - claude/ats-mod-files-Hkx9F
+    paths:
+      - plugin/**
+      - .github/workflows/build-plugin.yml
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install MinGW-w64 cross-compiler
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y mingw-w64 cmake
+
+      - name: Download nlohmann/json single-header
+        run: |
+          mkdir -p plugin/vendor/nlohmann
+          curl -fsSL \
+            https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp \
+            -o plugin/vendor/nlohmann/json.hpp
+
+      - name: Configure (MinGW cross-compile for Windows x64)
+        working-directory: plugin
+        run: |
+          cmake -B build \
+            -DCMAKE_TOOLCHAIN_FILE=mingw-w64-x86_64.cmake \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        working-directory: plugin
+        run: cmake --build build --config Release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ats_archipelago-dll
+          path: plugin/build/ats_archipelago.dll
+          if-no-files-found: error
