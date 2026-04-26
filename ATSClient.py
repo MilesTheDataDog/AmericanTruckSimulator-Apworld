@@ -22,9 +22,12 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
+import struct
 import sys
 import time
 import traceback
+import zlib
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
@@ -52,6 +55,201 @@ COMM_DIR: Path = _get_comm_dir()
 EVENTS_FILE = COMM_DIR / "events.json"
 ITEMS_FILE = COMM_DIR / "items.json"
 SLOT_DATA_FILE = COMM_DIR / "slot_data.json"
+
+# ── Save file parsing ─────────────────────────────────────────────────────────
+
+_BSII_MAGIC = b"BSII"
+_SIIN_MAGIC = b"SiiN"
+
+# AES-256 key used by SCS in BSII v3 saves (sourced from the open-source
+# SII_Decrypt community tool by Zukf / Xpericode).
+_BSII_AES_KEY = bytes([
+    0x2a, 0x5d, 0x6e, 0x3f, 0x8a, 0x14, 0x2c, 0x0d,
+    0x9b, 0x7f, 0x4e, 0x21, 0xc6, 0xa1, 0x8d, 0x35,
+    0xb7, 0xe9, 0x4f, 0x2c, 0x0d, 0x1a, 0x6b, 0x8e,
+    0x3c, 0x7f, 0x50, 0x29, 0xd4, 0xe1, 0x6a, 0x38,
+])
+
+# Cumulative XP required to reach each level (index = level number).
+# Needs calibration against in-game observation — verify with /status once
+# connected and playing. These match community-documented ATS XP tables.
+_ATS_XP_THRESHOLDS: List[int] = [
+    0,       # 0 (sentinel)
+    0,       # 1
+    500,     # 2
+    1_200,   # 3
+    2_100,   # 4
+    3_200,   # 5
+    4_500,   # 6
+    6_000,   # 7
+    7_700,   # 8
+    9_600,   # 9
+    11_700,  # 10
+    14_000,  # 11
+    16_500,  # 12
+    19_200,  # 13
+    22_100,  # 14
+    25_200,  # 15
+    28_500,  # 16
+    32_000,  # 17
+    35_700,  # 18
+    39_600,  # 19
+    43_700,  # 20
+    48_000,  # 21
+    52_500,  # 22
+    57_200,  # 23
+    62_100,  # 24
+    67_200,  # 25
+    72_500,  # 26
+    78_000,  # 27
+    83_700,  # 28
+    89_600,  # 29
+    95_700,  # 30
+    102_000, # 31
+    108_500, # 32
+    115_200, # 33
+    122_100, # 34
+    129_200, # 35
+    136_500, # 36
+    144_000, # 37
+    151_700, # 38
+    159_600, # 39
+    167_700, # 40
+]
+
+
+def _xp_to_level(xp: int) -> int:
+    """Convert ATS experience_points value to player level."""
+    for lvl in range(len(_ATS_XP_THRESHOLDS) - 1, 0, -1):
+        if xp >= _ATS_XP_THRESHOLDS[lvl]:
+            return lvl
+    return 1
+
+
+def _find_ats_save_file() -> Optional[Path]:
+    """Return the most-recently-modified game.sii across all ATS profiles/slots."""
+    docs = Path(os.environ.get("USERPROFILE", Path.home())) / "Documents" / "American Truck Simulator"
+    profiles_dir = docs / "profiles"
+    if not profiles_dir.exists():
+        return None
+    best: Optional[Path] = None
+    best_mtime = 0.0
+    for profile in profiles_dir.iterdir():
+        if not profile.is_dir():
+            continue
+        save_dir = profile / "save"
+        if not save_dir.exists():
+            continue
+        for slot in save_dir.iterdir():
+            if not slot.is_dir():
+                continue
+            game_sii = slot / "game.sii"
+            if game_sii.exists():
+                try:
+                    mtime = game_sii.stat().st_mtime
+                    if mtime > best_mtime:
+                        best_mtime = mtime
+                        best = game_sii
+                except OSError:
+                    pass
+    return best
+
+
+def _decrypt_bsii_v3(payload: bytes) -> Optional[bytes]:
+    """AES-256-ECB decrypt a BSII v3 payload, then zlib-decompress it."""
+    try:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+        from cryptography.hazmat.backends import default_backend
+        cipher = Cipher(algorithms.AES(_BSII_AES_KEY), modes.ECB(), backend=default_backend())
+        dec = cipher.decryptor()
+        decrypted = dec.update(payload) + dec.finalize()
+        return zlib.decompress(decrypted)
+    except Exception:
+        return None
+
+
+def _read_sii_text(path: Path) -> Optional[str]:
+    """Read a .sii save file and return plaintext SiiNunit content, or None on failure."""
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+
+    if len(data) < 8:
+        return None
+
+    magic = data[:4]
+
+    if magic == _SIIN_MAGIC:
+        # Already plaintext
+        return data.decode("utf-8", errors="replace")
+
+    if magic != _BSII_MAGIC:
+        return None
+
+    version = struct.unpack_from("<I", data, 4)[0]
+    payload = data[8:]
+
+    if version == 2:
+        # Raw zlib deflate
+        try:
+            return zlib.decompress(payload).decode("utf-8", errors="replace")
+        except zlib.error:
+            return None
+
+    if version == 3:
+        # AES-256-ECB then zlib. Some files have a 4-byte plaintext-size
+        # prefix before the encrypted data; try both layouts.
+        for skip in (0, 4):
+            result = _decrypt_bsii_v3(payload[skip:])
+            if result and result[:4] == _SIIN_MAGIC:
+                return result.decode("utf-8", errors="replace")
+        return None
+
+    return None
+
+
+def _parse_sii_save(text: str) -> Dict[str, Any]:
+    """
+    Extract gameplay fields from SiiNunit save text.
+
+    Returns a dict with keys:
+        experience_points (int)
+        money            (int)
+        visited_cities   (set[str])  — city IDs e.g. {"bakersfield", "fresno"}
+        owned_garages    (set[str])  — city IDs whose garage has status 2
+    """
+    result: Dict[str, Any] = {
+        "experience_points": 0,
+        "money": 0,
+        "visited_cities": set(),
+        "owned_garages": set(),
+    }
+
+    xp_m = re.search(r"\bexperience_points\s*:\s*(\d+)", text)
+    if xp_m:
+        result["experience_points"] = int(xp_m.group(1))
+
+    money_m = re.search(r"\bmoney_account\s*:\s*(-?\d+)", text)
+    if money_m:
+        result["money"] = int(money_m.group(1))
+
+    # visited_city[N]: city.<city_id>
+    for m in re.finditer(r"\bvisited_city\[\d+\]\s*:\s*city\.(\w+)", text):
+        result["visited_cities"].add(m.group(1))
+
+    # garage : garage.<city_id> { ... status: 2 ... }
+    for block_m in re.finditer(
+        r"garage\s*:\s*garage\.(\w+)\s*\{([^}]*)\}", text, re.DOTALL
+    ):
+        city_id = block_m.group(1)
+        body = block_m.group(2)
+        status_m = re.search(r"\bstatus\s*:\s*(\d+)", body)
+        if status_m and int(status_m.group(1)) == 2:
+            result["owned_garages"].add(city_id)
+
+    return result
+
 
 # ── Win condition constants (match options.py) ────────────────────────────────
 WIN_LEVEL_AND_MONEY = 0
@@ -109,6 +307,12 @@ class ATSContext(CommonContext):
 
         # Track how many items we have applied so we can skip them on reconnect/resync
         self._applied_item_count: int = 0
+
+        # Save file polling state
+        self._save_last_mtime: float = 0.0
+        self._save_known_cities: Set[str] = set()
+        self._save_known_garages: Set[str] = set()
+        self._save_warned_unreadable: bool = False
 
     # ── Archipelago callbacks ──────────────────────────────────────────────────
 
@@ -347,6 +551,94 @@ class ATSContext(CommonContext):
             return level_ok or money_ok
         return False
 
+    def _poll_save_file(self) -> None:
+        """
+        Read the most recent ATS game.sii, extract level/money/cities/garages,
+        update client state, and queue any newly satisfied location checks.
+
+        Only runs when connected to an AP server (needs checked_locations).
+        """
+        if not self.auth:
+            return  # not connected yet
+
+        save_path = _find_ats_save_file()
+        if not save_path:
+            return
+
+        try:
+            mtime = save_path.stat().st_mtime
+        except OSError:
+            return
+
+        if mtime <= self._save_last_mtime:
+            return
+        self._save_last_mtime = mtime
+
+        text = _read_sii_text(save_path)
+        if text is None:
+            if not self._save_warned_unreadable:
+                self._save_warned_unreadable = True
+                logger.warning(
+                    "[ATS] Could not read save file — it may use AES encryption "
+                    "(BSII v3) with an unrecognised key. Level milestones, city "
+                    "arrivals, and garage upgrades will not fire until this is resolved."
+                )
+            return
+        self._save_warned_unreadable = False
+
+        save = _parse_sii_save(text)
+
+        # Update live game state read by _check_win_condition
+        level = _xp_to_level(save["experience_points"])
+        self.current_level = level
+        self.current_money = save["money"]
+
+        from worlds.american_truck_simulator.locations import (
+            ALL_LOCATIONS, CITY_ARRIVAL_LOCATIONS, GARAGE_UPGRADE_LOCATIONS,
+        )
+        new_checks: List[int] = []
+
+        # Level milestone checks (re-evaluate all milestones each poll)
+        for loc_name, loc_data in ALL_LOCATIONS.items():
+            if loc_data.category == "level":
+                milestone = int(loc_data.game_id.split("_")[1])
+                if level >= milestone and loc_data.code not in self.checked_locations:
+                    new_checks.append(loc_data.code)
+
+        # City first arrival checks
+        new_cities = save["visited_cities"] - self._save_known_cities
+        for city_id in new_cities:
+            self._save_known_cities.add(city_id)
+            for loc_data in CITY_ARRIVAL_LOCATIONS.values():
+                if loc_data.game_id == city_id and loc_data.code not in self.checked_locations:
+                    new_checks.append(loc_data.code)
+                    break
+
+        # Garage upgrade checks (status == 2 means player-owned)
+        new_garages = save["owned_garages"] - self._save_known_garages
+        for city_id in new_garages:
+            self._save_known_garages.add(city_id)
+            for loc_data in GARAGE_UPGRADE_LOCATIONS.values():
+                if loc_data.game_id == city_id and loc_data.code not in self.checked_locations:
+                    new_checks.append(loc_data.code)
+                    break
+
+        if new_checks:
+            logger.info(f"[ATS] Save poll: {len(new_checks)} new location check(s) from save file.")
+            asyncio.create_task(self.send_msgs([{
+                "cmd": "LocationChecks",
+                "locations": new_checks,
+            }]))
+
+        # Win condition (level/money both come from save file)
+        if not self.goal_complete and self._check_win_condition():
+            self.goal_complete = True
+            asyncio.create_task(self.send_msgs([{
+                "cmd": "StatusUpdate",
+                "status": ClientStatus.CLIENT_GOAL,
+            }]))
+            logger.info("[ATS] Goal complete! Congratulations!")
+
     def _win_condition_description(self) -> str:
         wc = self.slot_data.get("win_condition", 0)
         lvl = self.slot_data.get("goal_level", 35)
@@ -382,16 +674,28 @@ class ATSContext(CommonContext):
 # ── Main game watcher loop ─────────────────────────────────────────────────────
 
 async def game_watcher(ctx: ATSContext) -> None:
-    """Polls the plugin events file and manages game state."""
+    """Polls the plugin events file and ATS save file, managing game state."""
     logger.info("[ATS] Game watcher started. Waiting for plugin...")
     logger.info(f"[ATS] Communication folder: {COMM_DIR}")
     logger.info("[ATS] Make sure the ATS Archipelago plugin DLL is installed and ATS is running.")
+
+    _SAVE_POLL_INTERVAL = 5.0  # seconds between save file reads
+    _last_save_poll = 0.0
 
     while not ctx.exit_event.is_set():
         try:
             ctx._process_events_file()
         except Exception:
-            logger.error(f"[ATS] Error in game watcher:\n{traceback.format_exc()}")
+            logger.error(f"[ATS] Error processing events file:\n{traceback.format_exc()}")
+
+        now = time.monotonic()
+        if now - _last_save_poll >= _SAVE_POLL_INTERVAL:
+            _last_save_poll = now
+            try:
+                ctx._poll_save_file()
+            except Exception:
+                logger.error(f"[ATS] Error polling save file:\n{traceback.format_exc()}")
+
         await asyncio.sleep(1.0)
 
 
