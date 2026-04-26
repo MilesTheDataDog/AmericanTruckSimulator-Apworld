@@ -66,15 +66,11 @@ def set_rules(world: "ATSWorld") -> None:
             add_rule(location, lambda state, deed=deed_name: state.has(deed, player))
 
     # ── Recruitment office location rules ─────────────────────────────────────
-    if options.shuffle_recruitment_offices:
-        for loc_name, loc_data in _iter_active_locations(world, "office"):
-            office_item_name = _office_item_name_for_id(loc_data.game_id)
-            if office_item_name is None:
-                continue
-            location = multiworld.get_location(loc_name, player)
-            if location is None:
-                continue
-            add_rule(location, lambda state, item=office_item_name: state.has(item, player))
+    # No item rule needed: "Found Office" locations are accessible just by
+    # visiting the city. The "Recruitment Office" items are rewards placed
+    # elsewhere in the multiworld that unlock office usage in-game.
+    # (Adding a per-office item requirement here creates a circular dependency
+    # and makes those locations permanently inaccessible.)
 
     # ── Goal location rule ─────────────────────────────────────────────────────
     # The goal location is an event; the client handles actual win detection.
