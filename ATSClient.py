@@ -831,7 +831,7 @@ def launch():
             try:
                 ctx.run_gui()
             except Exception as exc:
-                logger.warning(f"[ATS] GUI unavailable, falling back to CLI: {exc}")
+                logger.info(f"[ATS] Running in CLI mode (GUI requires launching via the Archipelago Launcher).")
         ctx.run_cli()
 
         await ctx.exit_event.wait()
