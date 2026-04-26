@@ -716,6 +716,29 @@ async def game_watcher(ctx: ATSContext) -> None:
         except Exception:
             logger.error(f"[ATS] Error processing events file:\n{traceback.format_exc()}")
 
+        # Process any newly received items from the server.
+        # Archipelago 0.6.x stores received items in ctx.items_received;
+        # we poll it directly rather than relying on the _on_items_received callback.
+        received = getattr(ctx, "items_received", [])
+        if len(received) > ctx._applied_item_count:
+            applied_any = False
+            for i in range(ctx._applied_item_count, len(received)):
+                network_item = received[i]
+                try:
+                    item_name = ctx.item_names.lookup_in_game(network_item.item)
+                except Exception:
+                    item_name = str(network_item.item)
+                    logger.warning(f"[ATS] Could not look up item name for id {network_item.item}")
+                logger.info(f"[ATS] Received item: {item_name}")
+                try:
+                    ctx._apply_item(item_name)
+                except Exception:
+                    logger.error(f"[ATS] Error applying item {item_name!r}:\n{traceback.format_exc()}")
+                ctx._applied_item_count += 1
+                applied_any = True
+            if applied_any:
+                ctx._write_items_file()
+
         now = time.monotonic()
         if now - _last_save_poll >= _SAVE_POLL_INTERVAL:
             _last_save_poll = now
