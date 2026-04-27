@@ -16,10 +16,15 @@ import sys as _sys
 # Kivy writes to stderr during its __init__.py import; without valid streams
 # Python's logging StreamHandler raises AttributeError which cascades into
 # infinite recursion and a RecursionError before the GUI ever opens.
-if _sys.stdout is None:
-    _sys.stdout = open(_os.devnull, "w")
-if _sys.stderr is None:
-    _sys.stderr = open(_os.devnull, "w")
+# Redirect to a log file so startup errors are visible for debugging.
+if _sys.stdout is None or _sys.stderr is None:
+    _log_dir = _os.path.dirname(_sys.executable)
+    _log_path = _os.path.join(_log_dir, "ATSClient_startup.log")
+    _log_file = open(_log_path, "w", encoding="utf-8", errors="replace")
+    if _sys.stdout is None:
+        _sys.stdout = _log_file
+    if _sys.stderr is None:
+        _sys.stderr = _log_file
 
 _orig_scandir = _os.scandir
 _orig_listdir = _os.listdir
