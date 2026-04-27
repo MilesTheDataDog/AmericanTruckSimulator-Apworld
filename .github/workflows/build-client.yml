@@ -8,6 +8,7 @@ on:
     paths:
       - ATSClient.py
       - worlds/**
+      - hooks/**
       - .github/workflows/build-client.yml
   workflow_dispatch:
 
