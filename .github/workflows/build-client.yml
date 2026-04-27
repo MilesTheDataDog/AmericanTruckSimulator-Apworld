@@ -59,6 +59,8 @@ jobs:
         working-directory: archipelago
         shell: pwsh
         run: |
+          $kivyDir = python -c "import kivy, os; print(os.path.dirname(kivy.__file__))"
+          $kivymdDir = python -c "import kivymd, os; print(os.path.dirname(kivymd.__file__))"
           pyinstaller ATSClient.py `
             --name ATSClient `
             --onefile `
@@ -72,7 +74,9 @@ jobs:
             --hidden-import worlds.american_truck_simulator.rules `
             --hidden-import worlds.american_truck_simulator.options `
             "--add-data=worlds\__init__.py;worlds" `
-            "--add-data=worlds\american_truck_simulator;worlds\american_truck_simulator"
+            "--add-data=worlds\american_truck_simulator;worlds\american_truck_simulator" `
+            "--add-data=$kivyDir\data;data" `
+            "--add-data=$kivymdDir;kivymd"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
