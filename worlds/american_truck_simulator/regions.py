@@ -48,11 +48,12 @@ def create_regions(world: "ATSWorld") -> None:
 
     active_location_names = set(get_locations_for_options(options))
 
-    # Determine which state regions to create
-    enabled_state_ids = {_DLC_KEY_MAP[dlc] for dlc in options.enabled_dlc.value if dlc in _DLC_KEY_MAP}
+    # Determine which state regions to create — only reachable states get regions
+    from .items import get_reachable_state_ids
+    reachable_state_ids = get_reachable_state_ids(options.enabled_dlc.value)
     active_state_names = {"California", "Nevada"}
     for state in _cities_data["states"]:
-        if state["id"] in enabled_state_ids:
+        if state["id"] in reachable_state_ids:
             active_state_names.add(state["name"])
 
     # Create all active regions

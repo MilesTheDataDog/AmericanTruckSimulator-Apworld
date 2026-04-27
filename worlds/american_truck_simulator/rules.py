@@ -29,29 +29,54 @@ def set_rules(world: "ATSWorld") -> None:
         the logic rule here only confirms minimum progression).
     """
     from worlds.generic.Rules import set_rule, add_rule
-    from .items import _DLC_KEY_MAP, GARAGE_DEED_ITEMS, RECRUITMENT_OFFICE_ITEMS
+    from .items import _DLC_KEY_MAP, GARAGE_DEED_ITEMS, RECRUITMENT_OFFICE_ITEMS, STATE_ADJACENCY
 
     multiworld = world.multiworld
     player = world.player
     options = world.options
 
+    # States whose adjacency requirement is inherently satisfied because they
+    # share a border with always-accessible California or Nevada.
+    _CA_NV_ADJACENT = frozenset({"arizona", "oregon", "utah", "idaho"})
+
+    reachable_ids = {_DLC_KEY_MAP[dlc] for dlc in options.enabled_dlc.value if dlc in _DLC_KEY_MAP}
+
     # ── State entrance rules ───────────────────────────────────────────────────
-    # Each DLC state entrance requires the player to have received its unlock item.
+    # Each DLC state requires its unlock item.  States that are not directly
+    # adjacent to California/Nevada also require at least one adjacent state to
+    # already be accessible, enforcing connected progression.
     for state in _cities_data["states"]:
         state_name = state["name"]
+        state_id = state["id"]
         if state_name in ("California", "Nevada"):
             continue  # always accessible
 
-        unlock_item = f"Unlock {_dlc_name_for_state(state['id'])}"
-        if unlock_item not in _DLC_KEY_MAP.values():
-            pass  # lookup by display name
-        # Find the entrance in the region graph (raises KeyError if state not enabled)
         try:
             entrance = multiworld.get_entrance(f"Menu -> {state_name}", player)
         except KeyError:
             continue  # state not enabled in this player's game
 
-        set_rule(entrance, lambda state, item=unlock_item: state.has(item, player))
+        unlock_item = f"Unlock {_dlc_name_for_state(state_id)}"
+
+        if state_id in _CA_NV_ADJACENT:
+            # Directly reachable from always-accessible base states — no adjacency check needed
+            set_rule(entrance, lambda s, item=unlock_item: s.has(item, player))
+        else:
+            # Build list of enabled adjacent state region names that could provide access
+            adj_regions = [
+                _dlc_name_for_state(adj_id)
+                for adj_id in STATE_ADJACENCY.get(state_id, [])
+                if adj_id in reachable_ids
+            ]
+            if adj_regions:
+                set_rule(entrance, lambda s, item=unlock_item, adj=adj_regions: (
+                    s.has(item, player) and
+                    any(s.can_reach(r, "Region", player) for r in adj)
+                ))
+            else:
+                # No enabled adjacent states — isolated state should have been
+                # filtered by get_reachable_state_ids(); apply unlock-only as fallback
+                set_rule(entrance, lambda s, item=unlock_item: s.has(item, player))
 
     # ── Garage upgrade location rules ──────────────────────────────────────────
     if options.shuffle_garages:

@@ -47,6 +47,10 @@ class EnabledDLC(OptionSet):
     Only cities, garages, and recruitment offices from enabled DLC states are included.
     Arizona is a free DLC and is safe to include for all players.
     California and Nevada (base game) are always included and do not need to be listed here.
+    State unlocks follow geographic adjacency — you can only unlock a state once an
+    adjacent state is already accessible.  Any enabled state that has no reachable
+    path from California/Nevada (through other enabled states) will be silently
+    removed from the pool.
     """
     display_name = "Enabled DLC States"
     valid_keys = {

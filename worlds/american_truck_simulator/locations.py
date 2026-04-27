@@ -140,8 +140,7 @@ def get_locations_for_options(options) -> List[str]:
     """Return the list of location names to include given player options."""
     locations: List[str] = []
 
-    _enabled_state_ids = _get_enabled_state_ids(options)
-    _active_regions = _get_active_regions(options, _enabled_state_ids)
+    _active_regions = _get_active_regions(options)
 
     if options.level_milestone_checks:
         locations.extend(LEVEL_MILESTONE_LOCATIONS.keys())
@@ -172,15 +171,12 @@ def get_locations_for_options(options) -> List[str]:
     return locations
 
 
-def _get_enabled_state_ids(options) -> set:
-    from .items import _DLC_KEY_MAP
-    return {_DLC_KEY_MAP[dlc] for dlc in options.enabled_dlc.value if dlc in _DLC_KEY_MAP}
-
-
-def _get_active_regions(options, enabled_state_ids: set) -> set:
-    """Return region names (state names) that are active given options."""
+def _get_active_regions(options) -> set:
+    """Return region names (state display names) that are active given options."""
+    from .items import get_reachable_state_ids
+    reachable = get_reachable_state_ids(options.enabled_dlc.value)
     active = {"California", "Nevada"}  # always active
     for _state in _cities_data["states"]:
-        if _state["id"] in enabled_state_ids:
+        if _state["id"] in reachable:
             active.add(_state["name"])
     return active

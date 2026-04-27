@@ -56,6 +56,51 @@ _DLC_KEY_MAP: Dict[str, str] = {
     "Louisiana":    "louisiana",
 }
 
+# Adjacency map — US states that share a driveable border within ATS.
+# Only lists states present in ATS; states outside the game (SD, ND, etc.) are omitted.
+# California and Nevada are always accessible (base game) and act as the starting seeds.
+STATE_ADJACENCY: Dict[str, List[str]] = {
+    "california": ["nevada", "oregon", "arizona"],
+    "nevada":     ["california", "oregon", "idaho", "utah", "arizona"],
+    "arizona":    ["california", "nevada", "utah", "colorado", "new_mexico"],
+    "new_mexico": ["arizona", "colorado", "oklahoma", "texas"],
+    "oregon":     ["california", "nevada", "idaho", "washington"],
+    "washington": ["oregon", "idaho"],
+    "utah":       ["nevada", "idaho", "wyoming", "colorado", "arizona"],
+    "idaho":      ["washington", "oregon", "nevada", "utah", "wyoming", "montana"],
+    "colorado":   ["utah", "wyoming", "nebraska", "kansas", "oklahoma", "new_mexico", "arizona"],
+    "wyoming":    ["idaho", "montana", "nebraska", "colorado", "utah"],
+    "montana":    ["idaho", "wyoming"],
+    "texas":      ["new_mexico", "oklahoma", "arkansas", "louisiana"],
+    "oklahoma":   ["texas", "new_mexico", "colorado", "kansas", "missouri", "arkansas"],
+    "kansas":     ["colorado", "nebraska", "missouri", "oklahoma"],
+    "nebraska":   ["wyoming", "iowa", "missouri", "kansas", "colorado"],
+    "arkansas":   ["texas", "oklahoma", "missouri", "louisiana"],
+    "missouri":   ["iowa", "nebraska", "kansas", "oklahoma", "arkansas"],
+    "iowa":       ["nebraska", "missouri"],
+    "louisiana":  ["texas", "arkansas"],
+}
+
+
+def get_reachable_state_ids(enabled_dlc_names) -> set:
+    """
+    BFS from the always-accessible base states (California, Nevada) through the
+    enabled DLC states, following the STATE_ADJACENCY graph.  Any enabled state
+    that has no path back to California/Nevada is silently excluded.
+
+    Returns only the DLC state IDs that are both enabled and reachable.
+    """
+    enabled_ids = {_DLC_KEY_MAP[dlc] for dlc in enabled_dlc_names if dlc in _DLC_KEY_MAP}
+    reachable: set = {"california", "nevada"}
+    changed = True
+    while changed:
+        changed = False
+        for state_id in list(enabled_ids - reachable):
+            if any(adj in reachable for adj in STATE_ADJACENCY.get(state_id, [])):
+                reachable.add(state_id)
+                changed = True
+    return reachable & enabled_ids  # exclude the always-accessible base states
+
 # ── State unlock items ─────────────────────────────────────────────────────────
 # California and Nevada are always accessible (base game), so they have no item.
 _STATE_UNLOCK_ORDER = list(_DLC_KEY_MAP.keys())  # stable order = stable IDs
@@ -196,9 +241,10 @@ def get_items_for_options(options) -> List[str]:
     """Return the list of item names to place into the pool given player options."""
     items: List[str] = []
 
-    # State unlocks — only for enabled DLC states (skip always-accessible ones)
+    # State unlocks — only for DLC states reachable from California/Nevada
+    _reachable_ids = get_reachable_state_ids(options.enabled_dlc.value)
     for dlc_name in _STATE_UNLOCK_ORDER:
-        if dlc_name in options.enabled_dlc.value:
+        if _DLC_KEY_MAP.get(dlc_name) in _reachable_ids:
             items.append(f"Unlock {dlc_name}")
 
     # Truck unlocks
@@ -209,21 +255,19 @@ def get_items_for_options(options) -> List[str]:
     if options.shuffle_truck_upgrades:
         items.extend(TRUCK_UPGRADE_ITEMS.keys())
 
-    # Garage deeds — only for enabled states
+    # Garage deeds — only for reachable states
     if options.shuffle_garages:
-        _enabled_state_ids = _get_enabled_state_ids(options)
         for name, data in GARAGE_DEED_ITEMS.items():
             city_state = _city_state_map.get(data.game_id)
-            if city_state in _enabled_state_ids or city_state in ("california", "nevada"):
+            if city_state in _reachable_ids or city_state in ("california", "nevada"):
                 items.append(name)
 
-    # Recruitment office items — only for enabled states
+    # Recruitment office items — only for reachable states
     if options.shuffle_recruitment_offices:
-        _enabled_state_ids = _get_enabled_state_ids(options)
         for name, data in RECRUITMENT_OFFICE_ITEMS.items():
             city_id = data.game_id.rsplit("_office_", 1)[0]
             city_state = _city_state_map.get(city_id)
-            if city_state in _enabled_state_ids or city_state in ("california", "nevada"):
+            if city_state in _reachable_ids or city_state in ("california", "nevada"):
                 items.append(name)
 
     return items

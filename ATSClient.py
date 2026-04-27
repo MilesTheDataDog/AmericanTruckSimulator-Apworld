@@ -288,10 +288,22 @@ class ATSCommandProcessor(ClientCommandProcessor):
         ctx._process_events_file(force=True)
 
 
+try:
+    from kvui import GameManager as _GameManager
+
+    class ATSManager(_GameManager):
+        base_title = "American Truck Simulator Client"
+
+except ImportError:
+    ATSManager = None  # type: ignore[assignment,misc]
+
+
 class ATSContext(CommonContext):
     command_processor = ATSCommandProcessor
     game = GAME_NAME
     items_handling = 0b111  # receive all items
+    if ATSManager is not None:
+        game_manager_class = ATSManager
 
     def __init__(self, server_address: str, password: Optional[str],
                  auto_launch_game: bool = True) -> None:
@@ -473,10 +485,27 @@ class ATSContext(CommonContext):
 
     # ── Items file (client → plugin) ───────────────────────────────────────────
 
+    def _compute_active_states(self) -> set:
+        """
+        BFS from always-accessible base states through received state unlocks,
+        following geographic adjacency.  A received state unlock only becomes
+        active (and is written to items.json) once an adjacent state is already
+        active, preventing the plugin from granting access to unreachable states.
+        """
+        from worlds.american_truck_simulator.items import STATE_ADJACENCY
+        active = {"california", "nevada"}
+        changed = True
+        while changed:
+            changed = False
+            for state_id in list(self._unlocked_states - active):
+                if any(adj in active for adj in STATE_ADJACENCY.get(state_id, [])):
+                    active.add(state_id)
+                    changed = True
+        return active
+
     def _write_items_file(self) -> None:
         """Write the current unlocked-items state for the plugin/mod to read."""
-        # California and Nevada are always unlocked
-        all_unlocked_states = {"california", "nevada"} | self._unlocked_states
+        all_unlocked_states = self._compute_active_states()
 
         payload = {
             "version": 1,
