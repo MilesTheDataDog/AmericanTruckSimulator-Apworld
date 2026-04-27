@@ -61,8 +61,9 @@ jobs:
           pyinstaller ATSClient.py `
             --name ATSClient `
             --onefile `
-            --console `
+            --windowed `
             --runtime-hook hooks\rthook_ats_worlds.py `
+            --hidden-import kvui `
             --hidden-import worlds.american_truck_simulator `
             --hidden-import worlds.american_truck_simulator.items `
             --hidden-import worlds.american_truck_simulator.locations `
