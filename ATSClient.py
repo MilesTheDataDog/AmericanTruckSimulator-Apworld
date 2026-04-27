@@ -827,11 +827,26 @@ def launch():
         except ImportError:
             gui_enabled = False
 
+        _gui_log = os.path.join(os.path.dirname(sys.executable), "ATSClient_gui_debug.log")
         if gui_enabled:
             try:
+                with open(_gui_log, "w", encoding="utf-8") as _f:
+                    _f.write(f"gui_enabled={gui_enabled}\n")
+                    _f.write(f"sys.stdout={sys.stdout!r}\n")
+                    _f.write(f"sys.stderr={sys.stderr!r}\n")
+                    _f.write("calling run_gui()...\n")
                 ctx.run_gui()
+                with open(_gui_log, "a", encoding="utf-8") as _f:
+                    _f.write("run_gui() returned normally\n")
             except Exception as exc:
+                with open(_gui_log, "a", encoding="utf-8") as _f:
+                    _f.write(f"run_gui() raised: {exc!r}\n")
+                    _f.write(traceback.format_exc())
                 logger.warning(f"[ATS] GUI failed to start ({exc!r}), running in CLI mode.")
+        else:
+            with open(_gui_log, "w", encoding="utf-8") as _f:
+                _f.write(f"gui_enabled={gui_enabled} — skipping GUI\n")
+                _f.write(f"sys.stdout={sys.stdout!r}\n")
         ctx.run_cli()
 
         await ctx.exit_event.wait()
