@@ -10,17 +10,30 @@ from worlds.AutoWorld import World, WebWorld
 # where LauncherComponents may not be importable.
 try:
     from worlds.LauncherComponents import Component, components
+    import shutil
     import subprocess
     import sys
 
     def _launch_ats_client():
-        from Utils import local_path
-        script = local_path("ATSClient.py")
+        from Utils import local_path, is_frozen
         exe = local_path("ATSClient.exe")
-        if os.path.isfile(script):
-            subprocess.Popen([sys.executable, script])
-        elif os.path.isfile(exe):
-            subprocess.Popen([exe])
+        script = local_path("ATSClient.py")
+
+        if is_frozen():
+            # sys.executable is Archipelago.exe — it cannot run .py scripts.
+            # Prefer a pre-built ATSClient.exe; fall back to any Python on PATH.
+            if os.path.isfile(exe):
+                subprocess.Popen([exe])
+            else:
+                python = shutil.which("python") or shutil.which("python3")
+                if python and os.path.isfile(script):
+                    subprocess.Popen([python, script])
+        else:
+            # Running from source — sys.executable is python.exe.
+            if os.path.isfile(script):
+                subprocess.Popen([sys.executable, script])
+            elif os.path.isfile(exe):
+                subprocess.Popen([exe])
 
     components += [Component(
         "American Truck Simulator Client",

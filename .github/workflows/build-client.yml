@@ -35,12 +35,15 @@ jobs:
 
       - name: Install dependencies
         working-directory: archipelago
-        run: pip install -r requirements.txt && pip install pyinstaller colorama
+        run: pip install -r requirements.txt && pip install pyinstaller colorama "kivy[packaging]"
 
-      - name: Remove Kivy to prevent OpenGL crash during PyInstaller analysis
+      - name: Install Mesa OpenGL software renderer
         shell: pwsh
-        continue-on-error: true
-        run: pip uninstall kivy kivymd kivy-deps.sdl2 kivy-deps.glew kivy-deps.angle kivy-deps.gstreamer -y
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest -Uri https://github.com/pal1000/mesa-dist-win/releases/download/23.3.3/mesa3d-23.3.3-release-msvc.7z -OutFile mesa.7z
+          7z x mesa.7z -omesa -y
+          .\mesa\systemwidedeploy.cmd 1
 
       - name: Copy ATS client files into Archipelago
         shell: pwsh
@@ -67,9 +70,7 @@ jobs:
             --hidden-import worlds.american_truck_simulator.rules `
             --hidden-import worlds.american_truck_simulator.options `
             "--add-data=worlds\__init__.py;worlds" `
-            "--add-data=worlds\american_truck_simulator;worlds\american_truck_simulator" `
-            --exclude-module kivy `
-            --exclude-module kivymd
+            "--add-data=worlds\american_truck_simulator;worlds\american_truck_simulator"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

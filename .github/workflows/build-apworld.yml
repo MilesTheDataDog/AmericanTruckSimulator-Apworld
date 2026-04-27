@@ -1,0 +1,57 @@
+name: Build american_truck_simulator.apworld
+
+on:
+  push:
+    branches:
+      - main
+      - claude/ats-mod-files-Hkx9F
+    paths:
+      - worlds/american_truck_simulator/**
+      - .github/workflows/build-apworld.yml
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout ATS Apworld
+        uses: actions/checkout@v4
+        with:
+          path: ats-apworld
+
+      - name: Checkout Archipelago
+        uses: actions/checkout@v4
+        with:
+          repository: ArchipelagoMW/Archipelago
+          ref: main
+          path: archipelago
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: archipelago
+        run: pip install -r requirements.txt
+
+      - name: Install xvfb
+        run: sudo apt-get install -y xvfb
+
+      - name: Copy world into Archipelago
+        run: cp -r ats-apworld/worlds/american_truck_simulator archipelago/worlds/
+
+      - name: Build .apworld
+        working-directory: archipelago
+        env:
+          KIVY_NO_ENV_CONFIG: "1"
+          KIVY_WINDOW: "headless"
+        run: xvfb-run -a python Launcher.py "Build APWorlds" -- "American Truck Simulator"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: american_truck_simulator-apworld
+          path: archipelago/build/apworlds/american_truck_simulator.apworld
+          if-no-files-found: error
