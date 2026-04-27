@@ -76,7 +76,8 @@ jobs:
             "--add-data=worlds\__init__.py;worlds" `
             "--add-data=worlds\american_truck_simulator;worlds\american_truck_simulator" `
             "--add-data=$kivyDir\data;data" `
-            "--add-data=$kivymdDir;kivymd"
+            "--add-data=$kivymdDir;kivymd" `
+            "--add-data=data;data"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
