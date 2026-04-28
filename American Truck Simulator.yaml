@@ -3,7 +3,7 @@
 # ══════════════════════════════════════════════════════════════════════════════
 #
 #  Drive across the American West, delivering cargo and discovering cities.
-#  Unlock states, trucks, and upgrades through the multiworld item pool.
+#  Trucks, garages, and offices are shuffled into the multiworld item pool.
 #
 #  Instructions:
 #   1. Set your player name below.
@@ -44,9 +44,8 @@ American Truck Simulator:
   # Arizona is FREE DLC for all players and is enabled by default.
   #
   # Only enabled states will contribute city arrivals, garages, recruitment offices,
-  # and DLC-specific cargo types as location checks. Each enabled DLC state also
-  # adds an "Unlock [State]" progression item to the pool that must be received
-  # before you can accept jobs to or from that state.
+  # and DLC-specific cargo types as location checks. All enabled states are
+  # accessible from the start — no unlock items are required to enter them.
   #
   # Full list of available DLC states:
   #   Arizona, New Mexico, Oregon, Washington, Utah, Idaho, Colorado, Wyoming,
@@ -70,14 +69,6 @@ American Truck Simulator:
   #   - Missouri
   #   - Iowa
   #   - Louisiana
-
-  # ── Starting State ────────────────────────────────────────────────────────────
-  # Which state your home garage is located in at the start.
-  # California and Nevada are always accessible regardless of this setting.
-  #
-  #   california : Start with a home garage in California (default).
-  #   nevada     : Start with a home garage in Nevada.
-  starting_state: california
 
   # ── Item Shuffles ─────────────────────────────────────────────────────────────
   # Shuffle truck models into the multiworld item pool.
@@ -118,6 +109,11 @@ American Truck Simulator:
   # Discovering a recruitment office for the first time counts as a check.
   # Only offices in California, Nevada, and your enabled DLC states are included.
   recruitment_office_checks: true
+
+  # Entering a DLC state for the first time counts as a check.
+  # Fires when you arrive in the first city in that state. California and Nevada
+  # are excluded since they are always accessible from the start.
+  state_arrival_checks: true
 
   # ── Death Link ────────────────────────────────────────────────────────────────
   # When enabled, crashing your truck sends a "death" event to all Death Link
