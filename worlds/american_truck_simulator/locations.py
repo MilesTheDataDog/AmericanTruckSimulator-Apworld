@@ -173,10 +173,10 @@ def get_locations_for_options(options) -> List[str]:
 
 def _get_active_regions(options) -> set:
     """Return region names (state display names) that are active given options."""
-    from .items import get_reachable_state_ids
-    reachable = get_reachable_state_ids(options.enabled_dlc.value)
+    from .items import _DLC_KEY_MAP
+    enabled_ids = {_DLC_KEY_MAP[dlc] for dlc in options.enabled_dlc.value if dlc in _DLC_KEY_MAP}
     active = {"California", "Nevada"}  # always active
     for _state in _cities_data["states"]:
-        if _state["id"] in reachable:
+        if _state["id"] in enabled_ids:
             active.add(_state["name"])
     return active

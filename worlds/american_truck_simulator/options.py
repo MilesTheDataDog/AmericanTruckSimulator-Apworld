@@ -44,13 +44,9 @@ class GoalMoney(Range):
 class EnabledDLC(OptionSet):
     """
     Which DLC map packs you own and want included in the randomizer.
-    Only cities, garages, and recruitment offices from enabled DLC states are included.
+    Only cities, garages, and recruitment offices from enabled DLC states are included
+    as location checks. California and Nevada (base game) are always included.
     Arizona is a free DLC and is safe to include for all players.
-    California and Nevada (base game) are always included and do not need to be listed here.
-    State unlocks follow geographic adjacency — you can only unlock a state once an
-    adjacent state is already accessible.  Any enabled state that has no reachable
-    path from California/Nevada (through other enabled states) will be silently
-    removed from the pool.
     """
     display_name = "Enabled DLC States"
     valid_keys = {
@@ -115,18 +111,6 @@ class ShuffleRecruitmentOffices(Toggle):
     default = 1
 
 
-class StartingState(Choice):
-    """
-    Which state the player starts in. California is always accessible regardless
-    of this setting. Nevada (base game) is also always accessible.
-    This controls which state the player's home garage begins in.
-    """
-    display_name = "Starting State"
-    option_california = 0
-    option_nevada = 1
-    default = 0
-
-
 class LevelMilestoneChecks(Toggle):
     """
     If enabled, reaching driver levels 5, 10, 15, 20, 25, and 30 each count as
@@ -178,7 +162,6 @@ class ATSOptions(PerGameCommonOptions):
     goal_level: GoalLevel
     goal_money: GoalMoney
     enabled_dlc: EnabledDLC
-    starting_state: StartingState
     shuffle_trucks: ShuffleTrucks
     shuffle_truck_upgrades: ShuffleTruckUpgrades
     shuffle_garages: ShuffleGarages

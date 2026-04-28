@@ -326,13 +326,10 @@ class ATSContext(CommonContext):
         self.goal_complete: bool = False
 
         # Items received from server (sent to plugin)
-        self._unlocked_states: Set[str] = set()
         self._unlocked_trucks: Set[str] = set()
         self._unlocked_upgrade_tiers: Dict[str, int] = {}
         self._unlocked_garages: Set[str] = set()
         self._unlocked_offices: Set[str] = set()
-        self._pending_money_bonuses: List[int] = []
-        self._pending_xp_bonuses: List[str] = []
 
         # Track how many items we have applied so we can skip them on reconnect/resync
         self._applied_item_count: int = 0
@@ -420,25 +417,12 @@ class ATSContext(CommonContext):
 
     def _apply_item(self, item_name: str) -> None:
         if item_name.startswith("Unlock "):
-            rest = item_name[len("Unlock "):]
-            # Distinguish state vs truck by checking DLC names
-            _dlc_states = {
-                "Arizona", "New Mexico", "Oregon", "Washington", "Utah", "Idaho",
-                "Colorado", "Wyoming", "Montana", "Texas", "Oklahoma", "Kansas",
-                "Nebraska", "Arkansas", "Missouri", "Iowa", "Louisiana",
-            }
-            if rest in _dlc_states:
-                # State unlock — extract state_id from rest
-                state_id = rest.lower().replace(" ", "_")
-                self._unlocked_states.add(state_id)
-                logger.info(f"[ATS] Unlocked state: {rest}")
-            else:
-                # Truck model unlock — store game_id (e.g. "kenworth_w900") not display name
-                from worlds.american_truck_simulator.items import ALL_ITEMS
-                item_data = ALL_ITEMS.get(item_name)
-                truck_game_id = item_data.game_id if item_data else item_name
-                self._unlocked_trucks.add(truck_game_id)
-                logger.info(f"[ATS] Unlocked truck: {rest} ({truck_game_id})")
+            # Truck model unlock — store game_id (e.g. "kenworth_w900") not display name
+            from worlds.american_truck_simulator.items import ALL_ITEMS
+            item_data = ALL_ITEMS.get(item_name)
+            truck_game_id = item_data.game_id if item_data else item_name
+            self._unlocked_trucks.add(truck_game_id)
+            logger.info(f"[ATS] Unlocked truck: {item_name} ({truck_game_id})")
 
         elif item_name in ("Engine Tier 2", "Engine Tier 3", "Engine Tier 4", "Engine Tier 5"):
             tier = int(item_name.split()[-1])
@@ -475,50 +459,18 @@ class ATSContext(CommonContext):
                 self._unlocked_offices.add(city_id)
                 logger.info(f"[ATS] Office unlocked: {city_id}")
 
-        elif item_name.startswith("Money Bonus"):
-            amount = self._parse_money_bonus(item_name)
-            if amount:
-                self._pending_money_bonuses.append(amount)
-                logger.info(f"[ATS] Money bonus queued: ${amount:,}")
-
-        elif item_name.startswith("XP Bonus"):
-            self._pending_xp_bonuses.append(item_name)
-            logger.info(f"[ATS] XP bonus queued: {item_name}")
 
     # ── Items file (client → plugin) ───────────────────────────────────────────
 
-    def _compute_active_states(self) -> set:
-        """
-        BFS from always-accessible base states through received state unlocks,
-        following geographic adjacency.  A received state unlock only becomes
-        active (and is written to items.json) once an adjacent state is already
-        active, preventing the plugin from granting access to unreachable states.
-        """
-        from worlds.american_truck_simulator.items import STATE_ADJACENCY
-        active = {"california", "nevada"}
-        changed = True
-        while changed:
-            changed = False
-            for state_id in list(self._unlocked_states - active):
-                if any(adj in active for adj in STATE_ADJACENCY.get(state_id, [])):
-                    active.add(state_id)
-                    changed = True
-        return active
-
     def _write_items_file(self) -> None:
         """Write the current unlocked-items state for the plugin/mod to read."""
-        all_unlocked_states = self._compute_active_states()
-
         payload = {
             "version": 1,
             "timestamp": time.time(),
-            "unlocked_states": sorted(all_unlocked_states),
             "unlocked_trucks": sorted(self._unlocked_trucks),
             "upgrade_tiers": self._unlocked_upgrade_tiers,
             "unlocked_garages": sorted(self._unlocked_garages),
             "unlocked_offices": sorted(self._unlocked_offices),
-            "pending_money_bonuses": self._pending_money_bonuses[:],
-            "pending_xp_bonuses": self._pending_xp_bonuses[:],
             "win_condition": self.slot_data.get("win_condition", 0),
             "goal_level": self.slot_data.get("goal_level", 35),
             "goal_money_thousands": self.slot_data.get("goal_money", 1000),
@@ -601,12 +553,6 @@ class ATSContext(CommonContext):
                 "status": ClientStatus.CLIENT_GOAL,
             }]))
             logger.info("[ATS] Goal complete! Congratulations!")
-
-        # Clear delivered bonuses (plugin acknowledges via events file)
-        delivered = data.get("delivered_bonuses", [])
-        for bonus in delivered:
-            if bonus in self._pending_money_bonuses:
-                self._pending_money_bonuses.remove(bonus)
 
     def _resolve_event_to_location_id(self, event: Dict) -> Optional[int]:
         """Map a plugin event to an Archipelago location ID."""
@@ -776,14 +722,6 @@ class ATSContext(CommonContext):
         if data:
             return data.game_id
         return None
-
-    @staticmethod
-    def _parse_money_bonus(item_name: str) -> Optional[int]:
-        try:
-            return int(item_name.split("$")[1].replace(",", ""))
-        except (IndexError, ValueError):
-            return None
-
 
 # ── Steam launcher ─────────────────────────────────────────────────────────────
 

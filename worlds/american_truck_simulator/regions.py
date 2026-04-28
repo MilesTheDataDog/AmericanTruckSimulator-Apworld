@@ -48,12 +48,11 @@ def create_regions(world: "ATSWorld") -> None:
 
     active_location_names = set(get_locations_for_options(options))
 
-    # Determine which state regions to create — only reachable states get regions
-    from .items import get_reachable_state_ids
-    reachable_state_ids = get_reachable_state_ids(options.enabled_dlc.value)
+    # All enabled DLC states get regions — no adjacency or unlock gating
+    enabled_state_ids = {_DLC_KEY_MAP[dlc] for dlc in options.enabled_dlc.value if dlc in _DLC_KEY_MAP}
     active_state_names = {"California", "Nevada"}
     for state in _cities_data["states"]:
-        if state["id"] in reachable_state_ids:
+        if state["id"] in enabled_state_ids:
             active_state_names.add(state["name"])
 
     # Create all active regions
@@ -77,15 +76,10 @@ def create_regions(world: "ATSWorld") -> None:
         location = ATSLocation(player, loc_name, loc_data.code, regions[target_region_name])
         regions[target_region_name].locations.append(location)
 
-    # Connect Menu → California and Menu → Nevada (always accessible)
+    # Connect Menu → all active state regions (all always accessible)
     menu = regions["Menu"]
-    menu.connect(regions["California"])
-    menu.connect(regions["Nevada"])
-
-    # Connect Menu → each DLC state (access rules set later in rules.py)
-    for state in _cities_data["states"]:
-        if state["name"] in active_state_names and state["name"] not in ("California", "Nevada"):
-            menu.connect(regions[state["name"]], name=f"Menu -> {state['name']}")
+    for state_name in active_state_names:
+        menu.connect(regions[state_name])
 
 
 class ATSLocation:

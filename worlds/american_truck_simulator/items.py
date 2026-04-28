@@ -6,7 +6,6 @@ from BaseClasses import ItemClassification
 ATS_BASE_ID = 17_000_000
 
 # ── Item ID offsets ────────────────────────────────────────────────────────────
-# State unlocks:          ATS_BASE_ID + 0     (slots 0–29)
 # Truck model unlocks:    ATS_BASE_ID + 100   (slots 100–149)
 # Truck upgrade packs:    ATS_BASE_ID + 200   (slots 200–219)
 # Garage deeds:           ATS_BASE_ID + 1000  (slots 1000–1499)
@@ -35,7 +34,8 @@ class ATSItemData(NamedTuple):
 _cities_data = _load("cities.json")
 _trucks_data = _load("trucks.json")
 
-# DLC name → state id mapping (matches cities.json dlc field)
+# DLC name → state id mapping (matches cities.json dlc field).
+# Used to map the EnabledDLC option values to state IDs for location filtering.
 _DLC_KEY_MAP: Dict[str, str] = {
     "Arizona":      "arizona",
     "New Mexico":   "new_mexico",
@@ -55,65 +55,6 @@ _DLC_KEY_MAP: Dict[str, str] = {
     "Iowa":         "iowa",
     "Louisiana":    "louisiana",
 }
-
-# Adjacency map — US states that share a driveable border within ATS.
-# Only lists states present in ATS; states outside the game (SD, ND, etc.) are omitted.
-# California and Nevada are always accessible (base game) and act as the starting seeds.
-STATE_ADJACENCY: Dict[str, List[str]] = {
-    "california": ["nevada", "oregon", "arizona"],
-    "nevada":     ["california", "oregon", "idaho", "utah", "arizona"],
-    "arizona":    ["california", "nevada", "utah", "colorado", "new_mexico"],
-    "new_mexico": ["arizona", "colorado", "oklahoma", "texas"],
-    "oregon":     ["california", "nevada", "idaho", "washington"],
-    "washington": ["oregon", "idaho"],
-    "utah":       ["nevada", "idaho", "wyoming", "colorado", "arizona"],
-    "idaho":      ["washington", "oregon", "nevada", "utah", "wyoming", "montana"],
-    "colorado":   ["utah", "wyoming", "nebraska", "kansas", "oklahoma", "new_mexico", "arizona"],
-    "wyoming":    ["idaho", "montana", "nebraska", "colorado", "utah"],
-    "montana":    ["idaho", "wyoming"],
-    "texas":      ["new_mexico", "oklahoma", "arkansas", "louisiana"],
-    "oklahoma":   ["texas", "new_mexico", "colorado", "kansas", "missouri", "arkansas"],
-    "kansas":     ["colorado", "nebraska", "missouri", "oklahoma"],
-    "nebraska":   ["wyoming", "iowa", "missouri", "kansas", "colorado"],
-    "arkansas":   ["texas", "oklahoma", "missouri", "louisiana"],
-    "missouri":   ["iowa", "nebraska", "kansas", "oklahoma", "arkansas"],
-    "iowa":       ["nebraska", "missouri"],
-    "louisiana":  ["texas", "arkansas"],
-}
-
-
-def get_reachable_state_ids(enabled_dlc_names) -> set:
-    """
-    BFS from the always-accessible base states (California, Nevada) through the
-    enabled DLC states, following the STATE_ADJACENCY graph.  Any enabled state
-    that has no path back to California/Nevada is silently excluded.
-
-    Returns only the DLC state IDs that are both enabled and reachable.
-    """
-    enabled_ids = {_DLC_KEY_MAP[dlc] for dlc in enabled_dlc_names if dlc in _DLC_KEY_MAP}
-    reachable: set = {"california", "nevada"}
-    changed = True
-    while changed:
-        changed = False
-        for state_id in list(enabled_ids - reachable):
-            if any(adj in reachable for adj in STATE_ADJACENCY.get(state_id, [])):
-                reachable.add(state_id)
-                changed = True
-    return reachable & enabled_ids  # exclude the always-accessible base states
-
-# ── State unlock items ─────────────────────────────────────────────────────────
-# California and Nevada are always accessible (base game), so they have no item.
-_STATE_UNLOCK_ORDER = list(_DLC_KEY_MAP.keys())  # stable order = stable IDs
-
-STATE_UNLOCK_ITEMS: Dict[str, ATSItemData] = {}
-for _i, _dlc_name in enumerate(_STATE_UNLOCK_ORDER):
-    _state_id = _DLC_KEY_MAP[_dlc_name]
-    STATE_UNLOCK_ITEMS[f"Unlock {_dlc_name}"] = ATSItemData(
-        code=ATS_BASE_ID + _i,
-        classification=ItemClassification.progression,
-        category="state_unlock",
-        game_id=_state_id,
-    )
 
 # ── Truck model unlock items ───────────────────────────────────────────────────
 TRUCK_UNLOCK_ITEMS: Dict[str, ATSItemData] = {}
@@ -176,41 +117,11 @@ for _state in _cities_data["states"]:
 
 # ── Filler items ───────────────────────────────────────────────────────────────
 FILLER_ITEMS: Dict[str, ATSItemData] = {
-    "Money Bonus - $5,000": ATSItemData(
+    "Trucking Permit": ATSItemData(
         code=ATS_BASE_ID + 9000,
         classification=ItemClassification.filler,
-        category="money_bonus",
-        game_id="money_5000",
-    ),
-    "Money Bonus - $10,000": ATSItemData(
-        code=ATS_BASE_ID + 9001,
-        classification=ItemClassification.filler,
-        category="money_bonus",
-        game_id="money_10000",
-    ),
-    "Money Bonus - $25,000": ATSItemData(
-        code=ATS_BASE_ID + 9002,
-        classification=ItemClassification.filler,
-        category="money_bonus",
-        game_id="money_25000",
-    ),
-    "Money Bonus - $50,000": ATSItemData(
-        code=ATS_BASE_ID + 9003,
-        classification=ItemClassification.filler,
-        category="money_bonus",
-        game_id="money_50000",
-    ),
-    "XP Bonus - Small": ATSItemData(
-        code=ATS_BASE_ID + 9004,
-        classification=ItemClassification.filler,
-        category="xp_bonus",
-        game_id="xp_small",
-    ),
-    "XP Bonus - Large": ATSItemData(
-        code=ATS_BASE_ID + 9005,
-        classification=ItemClassification.filler,
-        category="xp_bonus",
-        game_id="xp_large",
+        category="filler",
+        game_id="filler",
     ),
 }
 
@@ -225,7 +136,6 @@ VICTORY_ITEM = ATSItemData(
 
 # ── Combined lookup tables ─────────────────────────────────────────────────────
 ALL_ITEMS: Dict[str, ATSItemData] = {
-    **STATE_UNLOCK_ITEMS,
     **TRUCK_UNLOCK_ITEMS,
     **TRUCK_UPGRADE_ITEMS,
     **GARAGE_DEED_ITEMS,
@@ -241,11 +151,7 @@ def get_items_for_options(options) -> List[str]:
     """Return the list of item names to place into the pool given player options."""
     items: List[str] = []
 
-    # State unlocks — only for DLC states reachable from California/Nevada
-    _reachable_ids = get_reachable_state_ids(options.enabled_dlc.value)
-    for dlc_name in _STATE_UNLOCK_ORDER:
-        if _DLC_KEY_MAP.get(dlc_name) in _reachable_ids:
-            items.append(f"Unlock {dlc_name}")
+    enabled_state_ids = _get_enabled_state_ids(options)
 
     # Truck unlocks
     if options.shuffle_trucks:
@@ -255,19 +161,19 @@ def get_items_for_options(options) -> List[str]:
     if options.shuffle_truck_upgrades:
         items.extend(TRUCK_UPGRADE_ITEMS.keys())
 
-    # Garage deeds — only for reachable states
+    # Garage deeds — only for enabled states
     if options.shuffle_garages:
         for name, data in GARAGE_DEED_ITEMS.items():
             city_state = _city_state_map.get(data.game_id)
-            if city_state in _reachable_ids or city_state in ("california", "nevada"):
+            if city_state in enabled_state_ids or city_state in ("california", "nevada"):
                 items.append(name)
 
-    # Recruitment office items — only for reachable states
+    # Recruitment office items — only for enabled states
     if options.shuffle_recruitment_offices:
         for name, data in RECRUITMENT_OFFICE_ITEMS.items():
             city_id = data.game_id.rsplit("_office_", 1)[0]
             city_state = _city_state_map.get(city_id)
-            if city_state in _reachable_ids or city_state in ("california", "nevada"):
+            if city_state in enabled_state_ids or city_state in ("california", "nevada"):
                 items.append(name)
 
     return items

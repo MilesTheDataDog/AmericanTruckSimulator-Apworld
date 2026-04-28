@@ -52,7 +52,6 @@ from .items import (
     VICTORY_ITEM_NAME,
     VICTORY_ITEM,
     get_items_for_options,
-    _DLC_KEY_MAP,
 )
 from .locations import (
     ALL_LOCATIONS,
@@ -106,10 +105,7 @@ class ATSWorld(World):
 
     # Expose item and location groups for hint purposes
     item_name_groups = {
-        "State Unlocks": {name for name in ALL_ITEMS if name.startswith("Unlock ") and
-                          any(s in name for s in _DLC_KEY_MAP.keys())},
-        "Trucks": {name for name in ALL_ITEMS if name.startswith("Unlock ") and
-                   not any(s in name for s in _DLC_KEY_MAP.keys())},
+        "Trucks": {name for name in ALL_ITEMS if name.startswith("Unlock ")},
         "Garage Deeds": {name for name in ALL_ITEMS if name.startswith("Garage Deed")},
         "Recruitment Offices": {name for name in ALL_ITEMS if name.startswith("Recruitment Office")},
         "Truck Upgrades": {name for name in ALL_ITEMS if any(
@@ -119,7 +115,6 @@ class ATSWorld(World):
                 "Chassis Upgrade Pack", "Cab Upgrade Pack", "Accessories Pack",
             ]
         )},
-        "Money Bonuses": {name for name in FILLER_ITEMS if "Money" in name},
     }
 
     def create_item(self, name: str) -> ATSItem:
@@ -180,13 +175,11 @@ class ATSWorld(World):
         Data sent to the client via the Archipelago server after connection.
         The client uses this to know the player's exact win condition and options.
         """
-        from .items import _DLC_KEY_MAP
         return {
             "game_version": "1.0.0",
             "win_condition": self.options.win_condition.value,
             "goal_level": self.options.goal_level.value,
             "goal_money": self.options.goal_money.value,  # in thousands
-            "enabled_dlc": sorted(self.options.enabled_dlc.value),
             "shuffle_trucks": bool(self.options.shuffle_trucks),
             "shuffle_truck_upgrades": bool(self.options.shuffle_truck_upgrades),
             "shuffle_garages": bool(self.options.shuffle_garages),

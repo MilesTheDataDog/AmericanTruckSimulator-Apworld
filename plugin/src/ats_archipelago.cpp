@@ -7,10 +7,8 @@
  *  1. Receives game events (job delivered, level-up, city visited, etc.)
  *  2. Writes those events to a JSON file the Python client reads.
  *  3. Reads the unlocked-items JSON file the Python client writes.
- *  4. Enforces state boundaries: if the player enters a locked state,
- *     their truck is warped back to the nearest safe position and a
- *     rejection job event is triggered.
- *  5. Filters job acceptance: jobs to/from locked-state cities are blocked.
+ *  4. Filters job acceptance: jobs to/from cities whose garage/office is locked
+ *     are handled by the Lua mod layer.
  *
  * Build requirements:
  *  - Windows x64 (ATS is Windows-only)
@@ -93,12 +91,10 @@ static GameState g_state;
 
 // ── Item state (read from items.json) ─────────────────────────────────────────
 struct ItemState {
-    std::set<std::string> unlocked_states;
     std::set<std::string> unlocked_trucks;
     std::set<std::string> unlocked_garages;
     std::set<std::string> unlocked_offices;
     std::map<std::string, int> upgrade_tiers;
-    std::vector<int> pending_money_bonuses;
     bool shuffle_trucks = false;
     bool shuffle_garages = false;
     bool shuffle_recruitment_offices = false;
@@ -121,48 +117,6 @@ struct GameEvent {
 
 static std::vector<GameEvent> g_event_queue;
 static std::set<std::string>  g_sent_event_ids;  // prevent re-queuing
-
-// ── Boundary violation state ───────────────────────────────────────────────────
-static float g_last_safe_x = 0.0f;
-static float g_last_safe_z = 0.0f;
-static std::string g_last_safe_state;
-static bool g_boundary_violation_active = false;
-
-// ── City→state mapping (populated from items.json's unlocked_states data) ─────
-// In a full implementation this would be loaded from a bundled JSON file.
-// For now the plugin uses the items.json to know which states are locked/unlocked,
-// and the Lua mod (reading the same file) handles the job-market filtering.
-// The C++ plugin enforces position-based boundary when the player crosses into
-// a state whose id is NOT in g_items.unlocked_states.
-
-// Approximate state bounding boxes (X/Z in ATS world coordinates).
-// These are rough and need calibration against actual ATS map data.
-// Format: {state_id, {min_x, max_x, min_z, max_z}}
-// NOTE: ATS uses a left-handed coordinate system; Y is altitude.
-// These values are placeholders and MUST be measured in-game or from map data.
-static const std::map<std::string, std::array<float,4>> STATE_BOUNDS = {
-    // {state_id, {min_x, max_x, min_z, max_z}}
-    // Values below are rough estimates — calibrate with in-game measurement.
-    {"california",  {-94000.f, -60000.f, -33000.f,  20000.f}},
-    {"nevada",      {-60000.f, -30000.f, -33000.f,  15000.f}},
-    {"arizona",     {-75000.f, -40000.f, -70000.f, -33000.f}},
-    {"new_mexico",  {-20000.f,  15000.f, -75000.f, -35000.f}},
-    {"oregon",      {-94000.f, -55000.f,  20000.f,  60000.f}},
-    {"washington",  {-94000.f, -50000.f,  60000.f, 100000.f}},
-    {"utah",        {-30000.f,   5000.f, -33000.f,  10000.f}},
-    {"idaho",       {-55000.f, -20000.f,  10000.f,  60000.f}},
-    {"colorado",    {  5000.f,  50000.f, -35000.f,  10000.f}},
-    {"wyoming",     {-10000.f,  50000.f,  10000.f,  55000.f}},
-    {"montana",     {-30000.f,  80000.f,  55000.f, 105000.f}},
-    {"texas",       { 20000.f, 120000.f, -80000.f, -35000.f}},
-    {"oklahoma",    { 20000.f,  90000.f, -35000.f, -10000.f}},
-    {"kansas",      { 20000.f,  90000.f, -10000.f,  25000.f}},
-    {"nebraska",    { 20000.f,  90000.f,  25000.f,  55000.f}},
-    {"arkansas",    { 70000.f, 120000.f, -35000.f,   0000.f}},
-    {"missouri",    { 70000.f, 130000.f,   0000.f,  35000.f}},
-    {"iowa",        { 50000.f, 110000.f,  35000.f,  65000.f}},
-    {"louisiana",   { 70000.f, 130000.f, -80000.f, -50000.f}},
-};
 
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -197,14 +151,6 @@ static void read_items_file() {
         std::ifstream f(g_items_file);
         json j = json::parse(f);
 
-        g_items.unlocked_states.clear();
-        for (auto& s : j.value("unlocked_states", json::array())) {
-            g_items.unlocked_states.insert(s.get<std::string>());
-        }
-        // Base game states always unlocked
-        g_items.unlocked_states.insert("california");
-        g_items.unlocked_states.insert("nevada");
-
         g_items.unlocked_trucks.clear();
         for (auto& t : j.value("unlocked_trucks", json::array())) {
             g_items.unlocked_trucks.insert(t.get<std::string>());
@@ -228,13 +174,6 @@ static void read_items_file() {
         g_items.goal_level                  = j.value("goal_level", 35);
         g_items.goal_money                  = (long long)(j.value("goal_money_thousands", 1000)) * 1000;
 
-        g_items.pending_money_bonuses.clear();
-        for (auto& m : j.value("pending_money_bonuses", json::array())) {
-            g_items.pending_money_bonuses.push_back(m.get<int>());
-        }
-
-        // Parse upgrade tier limits sent by the client.
-        // Keys: "engine", "transmission", "chassis", "cab", "accessories"
         g_items.upgrade_tiers.clear();
         if (j.contains("upgrade_tiers") && j["upgrade_tiers"].is_object()) {
             for (auto& [k, v] : j["upgrade_tiers"].items()) {
@@ -244,7 +183,6 @@ static void read_items_file() {
             }
         }
 
-        // Log notification count for diagnostics (display is handled by the Lua mod)
         if (j.contains("item_notifications") && j["item_notifications"].is_array()) {
             std::size_t n = j["item_notifications"].size();
             if (n > 0) {
@@ -283,7 +221,6 @@ static void flush_events_file() {
         events.push_back(entry);
     }
     j["events"] = events;
-    j["delivered_bonuses"] = json::array(); // filled by plugin when bonuses are applied
 
     // Atomic write via temp file
     fs::path tmp = g_events_file;
@@ -307,21 +244,6 @@ static void queue_event(const std::string& type, const std::string& game_id,
     g_event_queue.push_back({eid, type, game_id, std::move(extra)});
 }
 
-// ── State boundary enforcement ─────────────────────────────────────────────────
-static std::string get_state_at(float x, float z) {
-    for (const auto& [state_id, bounds] : STATE_BOUNDS) {
-        if (x >= bounds[0] && x <= bounds[1] && z >= bounds[2] && z <= bounds[3]) {
-            return state_id;
-        }
-    }
-    return "";
-}
-
-static bool is_state_locked(const std::string& state_id) {
-    if (state_id.empty()) return false;
-    return g_items.unlocked_states.find(state_id) == g_items.unlocked_states.end();
-}
-
 // ── SCS SDK telemetry callbacks ────────────────────────────────────────────────
 
 SCSAPI_VOID telemetry_gameplay_event(const scs_event_t event,
@@ -336,7 +258,6 @@ SCSAPI_VOID telemetry_gameplay_event(const scs_event_t event,
     if (event_name == SCS_TELEMETRY_GAMEPLAY_EVENT_job_delivered) {
         std::lock_guard<std::mutex> lock(g_state_mutex);
 
-        // Cargo delivery check
         if (!g_state.current_cargo_id.empty()) {
             json extra;
             extra["cargo_name"] = g_state.current_cargo_name;
@@ -344,7 +265,6 @@ SCSAPI_VOID telemetry_gameplay_event(const scs_event_t event,
                         g_state.current_cargo_id, extra);
         }
 
-        // Garage upgrade check is polled separately — delivery completes the job
         flush_events_file();
     }
 
@@ -354,7 +274,7 @@ SCSAPI_VOID telemetry_gameplay_event(const scs_event_t event,
     }
 }
 
-// Channel callbacks — called each telemetry frame (~50ms)
+// Channel callback — position tracking
 SCSAPI_VOID on_truck_placement(const scs_string_t name,
                                 const scs_u32_t index,
                                 const scs_value_t* const value,
@@ -364,33 +284,9 @@ SCSAPI_VOID on_truck_placement(const scs_string_t name,
     g_state.truck_x = static_cast<float>(value->value_dplacement.position.x);
     g_state.truck_y = static_cast<float>(value->value_dplacement.position.y);
     g_state.truck_z = static_cast<float>(value->value_dplacement.position.z);
-
-    // Boundary check: determine current state from position
-    std::string cur_state = get_state_at(g_state.truck_x, g_state.truck_z);
-    if (!cur_state.empty() && is_state_locked(cur_state)) {
-        // Player is in a locked state — record violation event
-        if (!g_boundary_violation_active) {
-            g_boundary_violation_active = true;
-            log("BOUNDARY VIOLATION: Player entered locked state: " + cur_state, SCS_LOG_TYPE_warning);
-            json extra;
-            extra["locked_state"] = cur_state;
-            extra["safe_x"] = g_last_safe_x;
-            extra["safe_z"] = g_last_safe_z;
-            // Queue a boundary_violation event so the Python client can show a warning
-            queue_event("boundary_violation", cur_state, cur_state, extra);
-        }
-    } else {
-        g_boundary_violation_active = false;
-        if (!cur_state.empty()) {
-            g_last_safe_x = g_state.truck_x;
-            g_last_safe_z = g_state.truck_z;
-            g_last_safe_state = cur_state;
-        }
-    }
 }
 
 // ── Configuration event (fires when job starts/clears) ────────────────────────
-// This is how we learn the cargo ID before a job.delivered event fires.
 SCSAPI_VOID telemetry_configuration(const scs_event_t event,
                                      const void* const event_info,
                                      const scs_context_t context) {
@@ -426,7 +322,7 @@ SCSAPI_VOID telemetry_configuration(const scs_event_t event,
     }
 }
 
-// ── Paused / started events (track whether player is driving) ─────────────────
+// ── Paused / started events ───────────────────────────────────────────────────
 SCSAPI_VOID telemetry_paused(const scs_event_t event,
                               const void* const event_info,
                               const scs_context_t context) {
@@ -442,7 +338,6 @@ SCSAPI_VOID telemetry_started(const scs_event_t event,
 }
 
 // ── Frame callback — drives all periodic operations ───────────────────────────
-// Called every frame (~50ms). Uses internal timers to rate-limit expensive work.
 static double g_last_poll_time  = 0.0;
 static double g_last_flush_time = 0.0;
 static const double POLL_INTERVAL_SECONDS  = 5.0;
@@ -453,13 +348,11 @@ SCSAPI_VOID telemetry_frame_start(const scs_event_t event,
                                    const scs_context_t context) {
     double t = now_seconds();
 
-    // Re-read items.json so newly unlocked items take effect in-game
     if (t - g_last_poll_time >= POLL_INTERVAL_SECONDS) {
         g_last_poll_time = t;
         read_items_file();
     }
 
-    // Flush events.json so the Python client sees plugin_alive heartbeat
     if (t - g_last_flush_time >= FLUSH_INTERVAL_SECONDS) {
         g_last_flush_time = t;
         flush_events_file();
@@ -481,7 +374,6 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
     g_log = p->common.log;
     log("Archipelago plugin initializing v" + std::string(PLUGIN_VERSION));
 
-    // Set up communication directory
     g_comm_dir    = get_documents_path() / "American Truck Simulator" / "archipelago";
     g_events_file = g_comm_dir / "events.json";
     g_items_file  = g_comm_dir / "items.json";
@@ -492,17 +384,14 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
 
     log("Communication folder: " + g_comm_dir.string());
 
-    // Read initial items state
     read_items_file();
 
-    // Register event callbacks
     p->register_for_event(SCS_TELEMETRY_EVENT_frame_start,   telemetry_frame_start,   nullptr);
     p->register_for_event(SCS_TELEMETRY_EVENT_paused,        telemetry_paused,        nullptr);
     p->register_for_event(SCS_TELEMETRY_EVENT_started,       telemetry_started,       nullptr);
     p->register_for_event(SCS_TELEMETRY_EVENT_configuration, telemetry_configuration, nullptr);
     p->register_for_event(SCS_TELEMETRY_EVENT_gameplay,      telemetry_gameplay_event, nullptr);
 
-    // Register position channel (called each telemetry frame ~50ms)
     p->register_for_channel(
         SCS_TELEMETRY_TRUCK_CHANNEL_world_placement,
         SCS_U32_NIL,
@@ -512,7 +401,6 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
         nullptr
     );
 
-    // Write initial alive signal
     {
         std::lock_guard<std::mutex> lock(g_state_mutex);
         g_state.plugin_alive = true;
