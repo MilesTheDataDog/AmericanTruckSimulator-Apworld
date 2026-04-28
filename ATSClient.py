@@ -293,6 +293,7 @@ try:
 
     class ATSManager(_GameManager):
         base_title = "American Truck Simulator Client"
+        title = f"American Truck Simulator Client {Utils.__version__}"
 
 except ImportError:
     ATSManager = None  # type: ignore[assignment,misc]
@@ -878,8 +879,11 @@ def launch():
         ctx.run_cli()
 
         await ctx.exit_event.wait()
-        ctx.server_task.cancel()
-        ctx.watcher_task.cancel()
+        # server_loop sets ctx.server_task = None on exit; guard before cancelling.
+        if ctx.server_task is not None:
+            ctx.server_task.cancel()
+        if ctx.watcher_task is not None:
+            ctx.watcher_task.cancel()
         await ctx.shutdown()
 
     asyncio.run(main())
