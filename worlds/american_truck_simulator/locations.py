@@ -11,6 +11,7 @@ from .items import ATS_BASE_ID
 # Level milestones:       ATS_BASE_ID + 12000   (slots 12000–12009)
 # Garage upgrades:        ATS_BASE_ID + 13000   (slots 13000–13499)
 # Recruitment office find:ATS_BASE_ID + 14000   (slots 14000–14499)
+# State first visit:      ATS_BASE_ID + 15000   (slots 15000–15049)
 # Goal location:          ATS_BASE_ID + 19999
 
 
@@ -112,6 +113,22 @@ for _state in _cities_data["states"]:
             )
             _office_loc_index += 1
 
+# ── State first visit locations ────────────────────────────────────────────────
+# One location per DLC state (California and Nevada excluded — always accessible).
+# Fires the first time the player arrives in any city within that state.
+STATE_ARRIVAL_LOCATIONS: Dict[str, ATSLocationData] = {}
+_state_arrival_index = 0
+for _state in _cities_data["states"]:
+    if _state["name"] in ("California", "Nevada"):
+        continue
+    STATE_ARRIVAL_LOCATIONS[f"First Visit - {_state['name']}"] = ATSLocationData(
+        code=ATS_BASE_ID + 15000 + _state_arrival_index,
+        region=_state["name"],
+        category="state_arrival",
+        game_id=_state["id"],
+    )
+    _state_arrival_index += 1
+
 # ── Goal location (always exists, victory item placed here) ───────────────────
 GOAL_LOCATION_NAME = "Complete the Run"
 GOAL_LOCATION = ATSLocationData(
@@ -128,6 +145,7 @@ ALL_LOCATIONS: Dict[str, ATSLocationData] = {
     **CITY_ARRIVAL_LOCATIONS,
     **GARAGE_UPGRADE_LOCATIONS,
     **RECRUITMENT_OFFICE_LOCATIONS,
+    **STATE_ARRIVAL_LOCATIONS,
     GOAL_LOCATION_NAME: GOAL_LOCATION,
 }
 
@@ -162,6 +180,11 @@ def get_locations_for_options(options) -> List[str]:
 
     if options.recruitment_office_checks:
         for name, data in RECRUITMENT_OFFICE_LOCATIONS.items():
+            if data.region in _active_regions:
+                locations.append(name)
+
+    if options.state_arrival_checks:
+        for name, data in STATE_ARRIVAL_LOCATIONS.items():
             if data.region in _active_regions:
                 locations.append(name)
 

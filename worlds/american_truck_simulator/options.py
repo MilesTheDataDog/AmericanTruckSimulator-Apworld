@@ -156,6 +156,16 @@ class RecruitmentOfficeChecks(Toggle):
     default = 1
 
 
+class StateArrivalChecks(Toggle):
+    """
+    If enabled, entering a DLC state for the first time is a location check.
+    One check fires per enabled DLC state the first time you arrive in any city
+    within it. California and Nevada are excluded as they are always accessible.
+    """
+    display_name = "State First Visit Checks"
+    default = 1
+
+
 @dataclass
 class ATSOptions(PerGameCommonOptions):
     win_condition: WinCondition
@@ -171,4 +181,5 @@ class ATSOptions(PerGameCommonOptions):
     city_arrival_checks: CityArrivalChecks
     garage_upgrade_checks: GarageUpgradeChecks
     recruitment_office_checks: RecruitmentOfficeChecks
+    state_arrival_checks: StateArrivalChecks
     death_link: DeathLink

@@ -342,6 +342,7 @@ class ATSContext(CommonContext):
         self._save_last_mtime: float = 0.0
         self._save_known_cities: Set[str] = set()
         self._save_known_garages: Set[str] = set()
+        self._save_known_states: Set[str] = set()
         self._save_warned_unreadable: bool = False
         self._fresh_save_checked: bool = False
 
@@ -655,6 +656,7 @@ class ATSContext(CommonContext):
 
         from worlds.american_truck_simulator.locations import (
             ALL_LOCATIONS, CITY_ARRIVAL_LOCATIONS, GARAGE_UPGRADE_LOCATIONS,
+            STATE_ARRIVAL_LOCATIONS,
         )
         new_checks: List[int] = []
 
@@ -665,13 +667,22 @@ class ATSContext(CommonContext):
                 if level >= milestone and loc_data.code not in self.checked_locations:
                     new_checks.append(loc_data.code)
 
-        # City first arrival checks
+        # City first arrival checks + state first visit checks
         new_cities = save["visited_cities"] - self._save_known_cities
         for city_id in new_cities:
             self._save_known_cities.add(city_id)
             for loc_data in CITY_ARRIVAL_LOCATIONS.values():
                 if loc_data.game_id == city_id and loc_data.code not in self.checked_locations:
                     new_checks.append(loc_data.code)
+                    # Check if this city reveals a new state
+                    state_name = loc_data.region  # region == state display name
+                    if state_name not in self._save_known_states:
+                        self._save_known_states.add(state_name)
+                        for sa_data in STATE_ARRIVAL_LOCATIONS.values():
+                            if sa_data.region == state_name and sa_data.code not in self.checked_locations:
+                                new_checks.append(sa_data.code)
+                                logger.info(f"[ATS] First visit to state: {state_name}")
+                                break
                     break
 
         # Garage upgrade checks (status == 2 means player-owned)
