@@ -345,6 +345,7 @@ class ATSContext(CommonContext):
         self._save_known_cities: Set[str] = set()
         self._save_known_garages: Set[str] = set()
         self._save_warned_unreadable: bool = False
+        self._fresh_save_checked: bool = False
 
     # ── Archipelago callbacks ──────────────────────────────────────────────────
 
@@ -686,6 +687,19 @@ class ATSContext(CommonContext):
         self._save_warned_unreadable = False
 
         save = _parse_sii_save(text)
+
+        # One-time fresh-save check. Only warn when the server has no checked
+        # locations yet — if it does, the player is resuming a legitimate run.
+        if not self._fresh_save_checked:
+            self._fresh_save_checked = True
+            if not self.checked_locations:
+                level_at_check = _xp_to_level(save["experience_points"])
+                if level_at_check > 1:
+                    logger.warning(
+                        "[ATS] WARNING: Your save file does not appear to be from a fresh "
+                        f"profile (current level: {level_at_check}). For a proper Archipelago "
+                        "run please start a new profile in American Truck Simulator."
+                    )
 
         # Update live game state read by _check_win_condition
         level = _xp_to_level(save["experience_points"])
