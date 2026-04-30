@@ -1815,7 +1815,7 @@
         "drop_deck"
       ],
       "dlc_introduced": "Texas",
-      "required_dlc": "texas",
+      "required_dlc": null,
       "needs_verification": false
     },
     {
@@ -1825,7 +1825,7 @@
         "drop_deck"
       ],
       "dlc_introduced": "Texas",
-      "required_dlc": "texas",
+      "required_dlc": null,
       "needs_verification": false
     },
     {
