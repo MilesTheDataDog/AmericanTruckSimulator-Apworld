@@ -21,7 +21,7 @@ jobs:
       - name: Package mod as .scs (zip archive)
         run: |
           cd mod
-          zip -r ../ats_archipelago.scs mod.sii lua_scripts/
+          zip -r ../ats_archipelago.scs manifest.sii lua_scripts/
           echo "Contents:"
           unzip -l ../ats_archipelago.scs
 

@@ -140,31 +140,42 @@ def _xp_to_level(xp: int) -> int:
 
 
 def _find_ats_save_file() -> Optional[Path]:
-    """Return the most-recently-modified game.sii across all ATS profiles/slots."""
+    """Return the most-recently-modified game.sii across all ATS profiles/slots.
+
+    ATS stores saves in one of two locations depending on whether Steam Cloud
+    sync is enabled:
+      - <Documents>/American Truck Simulator/profiles/          (local)
+      - <Documents>/American Truck Simulator/steam/profiles/    (Steam Cloud)
+    We search both and return whichever game.sii was modified most recently.
+    """
     docs = Path(os.environ.get("USERPROFILE", Path.home())) / "Documents" / "American Truck Simulator"
-    profiles_dir = docs / "profiles"
-    if not profiles_dir.exists():
-        return None
+    candidate_roots = [
+        docs / "profiles",
+        docs / "steam" / "profiles",
+    ]
     best: Optional[Path] = None
     best_mtime = 0.0
-    for profile in profiles_dir.iterdir():
-        if not profile.is_dir():
+    for profiles_dir in candidate_roots:
+        if not profiles_dir.exists():
             continue
-        save_dir = profile / "save"
-        if not save_dir.exists():
-            continue
-        for slot in save_dir.iterdir():
-            if not slot.is_dir():
+        for profile in profiles_dir.iterdir():
+            if not profile.is_dir():
                 continue
-            game_sii = slot / "game.sii"
-            if game_sii.exists():
-                try:
-                    mtime = game_sii.stat().st_mtime
-                    if mtime > best_mtime:
-                        best_mtime = mtime
-                        best = game_sii
-                except OSError:
-                    pass
+            save_dir = profile / "save"
+            if not save_dir.exists():
+                continue
+            for slot in save_dir.iterdir():
+                if not slot.is_dir():
+                    continue
+                game_sii = slot / "game.sii"
+                if game_sii.exists():
+                    try:
+                        mtime = game_sii.stat().st_mtime
+                        if mtime > best_mtime:
+                            best_mtime = mtime
+                            best = game_sii
+                    except OSError:
+                        pass
     return best
 
 
