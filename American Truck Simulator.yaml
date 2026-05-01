@@ -95,7 +95,8 @@ American Truck Simulator:
   level_milestone_checks: true
 
   # Completing the first delivery of each cargo type counts as a check.
-  # Cargo types tied to a DLC state are only active if that state is enabled.
+  # All cargo types are included regardless of which DLC states are enabled,
+  # since ATS job markets can offer any cargo type across all owned states.
   cargo_delivery_checks: true
 
   # Arriving in a city for the first time counts as a check.

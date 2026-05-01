@@ -356,6 +356,7 @@ class ATSContext(CommonContext):
         self._save_known_states: Set[str] = set()
         self._save_warned_unreadable: bool = False
         self._fresh_save_checked: bool = False
+        self._save_path_logged: bool = False
 
     # ── Archipelago callbacks ──────────────────────────────────────────────────
 
@@ -622,7 +623,12 @@ class ATSContext(CommonContext):
 
         save_path = _find_ats_save_file()
         if not save_path:
+            logger.debug("[ATS] No ATS save file found; city/garage/level checks skipped.")
             return
+        if not self._save_path_logged:
+            self._save_path_logged = True
+            logger.info(f"[ATS] Found save file: {save_path}")
+        logger.debug(f"[ATS] Watching save file: {save_path}")
 
         try:
             mtime = save_path.stat().st_mtime

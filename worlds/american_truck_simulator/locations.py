@@ -51,16 +51,14 @@ for _i, _lvl in enumerate(_MILESTONE_LEVELS):
     )
 
 # ── Cargo delivery locations ───────────────────────────────────────────────────
-# Base game cargo (required_dlc = null) lands in "Menu" — always reachable.
-# DLC state cargo (required_dlc = state_id) lands in that state's region so it
-# is automatically excluded when the DLC state is not enabled.
+# All cargo types land in "Menu" (always reachable) regardless of required_dlc.
+# ATS job markets can offer any cargo type even without owning the DLC state
+# where it was introduced, so filtering by DLC would silently block valid checks.
 CARGO_DELIVERY_LOCATIONS: Dict[str, ATSLocationData] = {}
 for _i, _cargo in enumerate(_cargo_data["cargo_types"]):
-    _req = _cargo.get("required_dlc")
-    _region = _state_id_to_name.get(_req, "Menu") if _req else "Menu"
     CARGO_DELIVERY_LOCATIONS[f"Delivered - {_cargo['name']}"] = ATSLocationData(
         code=ATS_BASE_ID + 10000 + _i,
-        region=_region,
+        region="Menu",
         category="cargo",
         game_id=_cargo["id"],
     )
