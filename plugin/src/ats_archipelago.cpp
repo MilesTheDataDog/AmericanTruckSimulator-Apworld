@@ -358,8 +358,8 @@ struct ScanMatch {
     uintptr_t   address;
     std::string target;
     // nearby_vals[i] = {byte_offset_from_string_start, uint32_value}
-    // only entries where value <= 10 are recorded (status/flag fields)
     std::vector<std::pair<int, uint32_t>> nearby_vals;
+    std::string hex_context;  // raw bytes [-16..+32) from string start, "|" marks offset 0
 };
 
 // Read 4 bytes from src into out. We only call this after VirtualQuery confirms
@@ -369,9 +369,16 @@ static bool safe_read32(const uint8_t* src, uint32_t& out) {
     return true;
 }
 
+// near_range: scan ±N bytes from string start (must be multiple of 4)
+// min_val / max_val: only record nearby uint32 values in [min_val, max_val]
+// include_hex: if true, capture raw bytes [-16..+32) around string start
 static std::vector<ScanMatch> scan_heap_for_strings(
         const std::vector<std::string>& targets,
-        size_t max_results = 200)
+        size_t   max_results = 200,
+        int      near_range  = 128,
+        uint32_t min_val     = 1,
+        uint32_t max_val     = 10,
+        bool     include_hex = false)
 {
     std::vector<ScanMatch> results;
     MEMORY_BASIC_INFORMATION mbi;
@@ -405,14 +412,31 @@ static std::vector<ScanMatch> scan_heap_for_strings(
                     m.address = reinterpret_cast<uintptr_t>(region + i);
                     m.target  = tgt;
 
-                    // Sample every 4 bytes in the window [-128, +128).
-                    for (int off = -128; off < 128; off += 4) {
+                    // Sample every 4 bytes in ±near_range, record values in [min_val, max_val].
+                    for (int off = -near_range; off < near_range; off += 4) {
                         intptr_t abs = static_cast<intptr_t>(i) + off;
                         if (abs < 0 || abs + 4 > static_cast<intptr_t>(rsize)) continue;
                         uint32_t v = 0;
-                        if (safe_read32(region + abs, v) && v <= 10) {
+                        if (safe_read32(region + abs, v) && v >= min_val && v <= max_val) {
                             m.nearby_vals.push_back({off, v});
                         }
+                    }
+
+                    // Raw hex dump: 16 bytes before + 32 at/after string start.
+                    // "|" marks offset 0 (start of the string itself).
+                    if (include_hex) {
+                        std::ostringstream hex;
+                        for (int h = -16; h < 32; ++h) {
+                            if (h == 0) hex << "|";
+                            intptr_t abs_h = static_cast<intptr_t>(i) + h;
+                            if (abs_h >= 0 && abs_h < static_cast<intptr_t>(rsize)) {
+                                hex << std::hex << std::setw(2) << std::setfill('0')
+                                    << static_cast<int>(region[abs_h]);
+                            } else {
+                                hex << "??";
+                            }
+                        }
+                        m.hex_context = hex.str();
                     }
 
                     results.push_back(std::move(m));
@@ -428,73 +452,74 @@ static std::vector<ScanMatch> scan_heap_for_strings(
     return results;
 }
 
+static void log_match(const std::string& prefix, const ScanMatch& m) {
+    std::ostringstream oss;
+    oss << prefix << "[" << m.target << "] 0x"
+        << std::hex << std::setw(12) << std::setfill('0') << m.address
+        << std::dec;
+    for (const auto& [off, v] : m.nearby_vals) {
+        oss << "  " << (off >= 0 ? "+" : "") << off << "=" << v;
+    }
+    log(oss.str());
+    if (!m.hex_context.empty()) {
+        log("  hex: " + m.hex_context);
+    }
+}
+
 static void run_discovery() {
     log("=== ATS-AP DISCOVERY MODE START ===");
-    log("Scanning heap for garage, office, and truck strings. Share game.log with the developer.");
+    log("Scanning heap for garage/office/truck objects. Share game.log with the developer.");
 
-    // ── Garage city IDs ────────────────────────────────────────────────────────
-    // Try both bare city IDs and "garage.<city>" compound IDs.
+    // ── Garage compound IDs only ───────────────────────────────────────────────
+    // Bare city IDs ("san_francisco") land in navigation/routing arrays (32-byte
+    // stride, values 3-10) — those are NOT ownership objects.
+    // The "garage.X" compound IDs are the actual save-game garage records.
+    // San Francisco is the OWNED garage (home base); all others should be status 0.
     std::vector<std::string> garage_targets = {
-        // bare city IDs
-        "los_angeles", "san_francisco", "sacramento", "fresno",
-        "bakersfield", "stockton", "eureka", "redding", "san_diego",
-        "las_vegas", "reno", "elko",
-        "flagstaff", "phoenix", "tucson", "prescott",
-        // compound IDs (SII format uses these as object names)
-        "garage.los_angeles", "garage.san_francisco", "garage.sacramento",
-        "garage.fresno", "garage.bakersfield", "garage.stockton",
-        "garage.eureka", "garage.redding", "garage.san_diego",
-        "garage.las_vegas", "garage.reno", "garage.elko",
-        "garage.flagstaff", "garage.phoenix", "garage.tucson", "garage.prescott",
+        "garage.san_francisco",  // OWNED — must show a non-zero status nearby
+        "garage.los_angeles",    // not owned
+        "garage.sacramento",     "garage.fresno",
+        "garage.bakersfield",    "garage.stockton",
+        "garage.eureka",         "garage.redding",
+        "garage.san_diego",      "garage.las_vegas",
+        "garage.reno",           "garage.elko",
+        "garage.flagstaff",      "garage.phoenix",
+        "garage.tucson",         "garage.prescott",
     };
 
-    auto garage_matches = scan_heap_for_strings(garage_targets, 150);
+    // Wide range (±256), values 1–10, with hex dump to see raw object layout.
+    auto garage_matches = scan_heap_for_strings(garage_targets, 100, 256, 1, 10, true);
 
     log("--- GARAGE RESULTS (" + std::to_string(garage_matches.size()) + " matches) ---");
-    for (const auto& m : garage_matches) {
-        std::ostringstream oss;
-        oss << "G[" << m.target << "] 0x"
-            << std::hex << std::setw(12) << std::setfill('0') << m.address
-            << std::dec;
-        // Print small-value neighbours — the status field (0=none,2=owned)
-        // will appear here.
-        for (const auto& [off, v] : m.nearby_vals) {
-            oss << "  " << (off >= 0 ? "+" : "") << off << "=" << v;
-        }
-        log(oss.str());
-    }
+    for (const auto& m : garage_matches) log_match("G", m);
 
     // ── Recruitment office IDs ─────────────────────────────────────────────────
-    // SCS save format uses "recruitment_agency.<city>" or "agency.<city>".
-    // Also try bare city IDs with "agency" nearby and "driver_agency" prefix.
+    // "recruitment_agency.X" is the canonical object prefix (confirmed by scan 1).
+    // All offices will show zeros until the player drives past one (status 0 = undiscovered).
+    // Run a second scan AFTER visiting at least one office to see the flag flip.
     std::vector<std::string> office_targets = {
-        "recruitment_agency.los_angeles", "recruitment_agency.san_francisco",
-        "recruitment_agency.sacramento",  "recruitment_agency.fresno",
-        "recruitment_agency.bakersfield", "recruitment_agency.stockton",
-        "recruitment_agency.eureka",      "recruitment_agency.redding",
-        "recruitment_agency.san_diego",   "recruitment_agency.las_vegas",
-        "recruitment_agency.reno",        "recruitment_agency.elko",
-        "recruitment_agency.flagstaff",   "recruitment_agency.phoenix",
-        "recruitment_agency.tucson",      "recruitment_agency.prescott",
-        // alternate prefixes observed in some SCS titles
-        "agency.los_angeles",   "agency.san_francisco", "agency.sacramento",
-        "agency.las_vegas",     "agency.reno",          "agency.flagstaff",
-        "driver_agency.los_angeles", "driver_agency.san_francisco",
+        "recruitment_agency.san_francisco",
+        "recruitment_agency.los_angeles",
+        "recruitment_agency.sacramento",
+        "recruitment_agency.fresno",
+        "recruitment_agency.bakersfield",
+        "recruitment_agency.stockton",
+        "recruitment_agency.eureka",
+        "recruitment_agency.redding",
+        "recruitment_agency.san_diego",
+        "recruitment_agency.las_vegas",
+        "recruitment_agency.reno",
+        "recruitment_agency.elko",
+        "recruitment_agency.flagstaff",
+        "recruitment_agency.phoenix",
+        "recruitment_agency.tucson",
+        "recruitment_agency.prescott",
     };
 
-    auto office_matches = scan_heap_for_strings(office_targets, 150);
+    auto office_matches = scan_heap_for_strings(office_targets, 100, 256, 1, 10, true);
 
     log("--- OFFICE RESULTS (" + std::to_string(office_matches.size()) + " matches) ---");
-    for (const auto& m : office_matches) {
-        std::ostringstream oss;
-        oss << "O[" << m.target << "] 0x"
-            << std::hex << std::setw(12) << std::setfill('0') << m.address
-            << std::dec;
-        for (const auto& [off, v] : m.nearby_vals) {
-            oss << "  " << (off >= 0 ? "+" : "") << off << "=" << v;
-        }
-        log(oss.str());
-    }
+    for (const auto& m : office_matches) log_match("O", m);
 
     // ── Truck model IDs ────────────────────────────────────────────────────────
     std::vector<std::string> truck_targets = {
@@ -504,24 +529,14 @@ static void run_discovery() {
         "freightliner_114sd", "freightliner_coronado",
         "mack_anthem", "mack_pinnacle",
         "international_lt",
-        // also try with "vehicle." or "truck." prefix
         "vehicle.kenworth_w900", "vehicle.peterbilt_389",
         "vehicle.western_star_49x", "vehicle.freightliner_coronado",
     };
 
-    auto truck_matches = scan_heap_for_strings(truck_targets, 100);
+    auto truck_matches = scan_heap_for_strings(truck_targets, 100, 128, 1, 10, false);
 
     log("--- TRUCK RESULTS (" + std::to_string(truck_matches.size()) + " matches) ---");
-    for (const auto& m : truck_matches) {
-        std::ostringstream oss;
-        oss << "T[" << m.target << "] 0x"
-            << std::hex << std::setw(12) << std::setfill('0') << m.address
-            << std::dec;
-        for (const auto& [off, v] : m.nearby_vals) {
-            oss << "  " << (off >= 0 ? "+" : "") << off << "=" << v;
-        }
-        log(oss.str());
-    }
+    for (const auto& m : truck_matches) log_match("T", m);
 
     log("=== ATS-AP DISCOVERY MODE END ===");
     g_discovery_done = true;
