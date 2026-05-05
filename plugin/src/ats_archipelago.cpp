@@ -505,7 +505,7 @@ static std::string hex_addr(uintptr_t addr) {
 //
 //   Garage:  "garage.X"\0<pad-to-4-align>\uint32_status
 //            status_offset = ((strlen("garage.X")+1)+3)&~3
-//            status=2  →  garage accessible/owned (observed for visited cities)
+//            status=3  →  owned small garage (testing; 2 = visited/unlocked)
 //
 //   Office:  "recruitment_agency.X"\0\uint8_discovered
 //            flag_offset = strlen("recruitment_agency.X")+1
@@ -534,9 +534,9 @@ static bool grant_garage_memory(const std::string& city_id) {
         if (mbi.State != MEM_COMMIT || mbi.Protect != PAGE_READWRITE)
             continue;
 
-        uint32_t status = 2;
+        uint32_t status = 3;
         memcpy(reinterpret_cast<void*>(wr_addr), &status, sizeof(status));
-        log("grant_garage: " + target + " status=2 @ " + hex_addr(wr_addr));
+        log("grant_garage: " + target + " status=3 @ " + hex_addr(wr_addr));
         ++written;
     }
 
