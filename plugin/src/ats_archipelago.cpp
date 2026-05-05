@@ -533,10 +533,7 @@ static void maybe_run_discovery(double now) {
     if (now - g_startup_time < 15.0) return;
 
     fs::path flag = g_comm_dir / "discovery_mode.txt";
-    if (!fs::exists(flag)) {
-        g_discovery_done = true; // No file — skip forever this session.
-        return;
-    }
+    if (!fs::exists(flag)) return;  // Keep checking every frame — file may appear later.
 
     run_discovery();
     try { fs::remove(flag); } catch (...) {}
