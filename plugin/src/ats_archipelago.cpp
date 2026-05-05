@@ -22,7 +22,9 @@
  * See plugin/INSTALL.md for full build and install instructions.
  */
 
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #include <shlobj.h>    // SHGetFolderPathW
 #include <filesystem>
@@ -360,15 +362,11 @@ struct ScanMatch {
     std::vector<std::pair<int, uint32_t>> nearby_vals;
 };
 
-// Safely read 4 bytes from an address that might be partially at a page boundary.
-// Returns false on access violation.
+// Read 4 bytes from src into out. We only call this after VirtualQuery confirms
+// the region is PAGE_READWRITE + MEM_COMMIT, so direct memcpy is safe.
 static bool safe_read32(const uint8_t* src, uint32_t& out) {
-    __try {
-        memcpy(&out, src, 4);
-        return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
+    memcpy(&out, src, 4);
+    return true;
 }
 
 static std::vector<ScanMatch> scan_heap_for_strings(
@@ -398,13 +396,10 @@ static std::vector<ScanMatch> scan_heap_for_strings(
                 size_t tlen = tgt.size();
 
                 for (size_t i = 0; i + tlen + 1 < rsize; ++i) {
-                    __try {
-                        if (region[i] != (uint8_t)tgt[0]) continue;
-                        if (region[i + tlen] != '\0')      continue;
-                        if (memcmp(region + i, tgt.c_str(), tlen) != 0) continue;
-                    } __except (EXCEPTION_EXECUTE_HANDLER) {
-                        break; // Skip rest of this region if we fault
-                    }
+                    // Region is confirmed PAGE_READWRITE by VirtualQuery above.
+                    if (region[i] != (uint8_t)tgt[0]) continue;
+                    if (region[i + tlen] != '\0')      continue;
+                    if (memcmp(region + i, tgt.c_str(), tlen) != 0) continue;
 
                     ScanMatch m;
                     m.address = reinterpret_cast<uintptr_t>(region + i);
