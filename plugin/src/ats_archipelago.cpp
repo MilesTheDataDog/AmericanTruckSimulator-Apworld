@@ -338,15 +338,189 @@ SCSAPI_VOID telemetry_started(const scs_event_t event,
 }
 
 // ── Frame callback — drives all periodic operations ───────────────────────────
-static double g_last_poll_time  = 0.0;
-static double g_last_flush_time = 0.0;
+static double g_last_poll_time    = 0.0;
+static double g_last_flush_time   = 0.0;
+static double g_startup_time      = 0.0;
 static const double POLL_INTERVAL_SECONDS  = 5.0;
 static const double FLUSH_INTERVAL_SECONDS = 2.0;
+
+// ── Memory discovery ───────────────────────────────────────────────────────────
+// When "discovery_mode.txt" exists in the comm folder, the DLL scans its own
+// heap memory for garage and truck strings and logs offsets to game.log.
+// This reveals the memory layout needed to implement garage granting and truck
+// hiding without requiring external Cheat Engine work.
+
+static bool g_discovery_done = false;
+
+struct ScanMatch {
+    uintptr_t   address;
+    std::string target;
+    // nearby_vals[i] = {byte_offset_from_string_start, uint32_value}
+    // only entries where value <= 10 are recorded (status/flag fields)
+    std::vector<std::pair<int, uint32_t>> nearby_vals;
+};
+
+// Safely read 4 bytes from an address that might be partially at a page boundary.
+// Returns false on access violation.
+static bool safe_read32(const uint8_t* src, uint32_t& out) {
+    __try {
+        memcpy(&out, src, 4);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+static std::vector<ScanMatch> scan_heap_for_strings(
+        const std::vector<std::string>& targets,
+        size_t max_results = 200)
+{
+    std::vector<ScanMatch> results;
+    MEMORY_BASIC_INFORMATION mbi;
+    uintptr_t addr = 0x10000;
+
+    while (results.size() < max_results &&
+           VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi)) == sizeof(mbi))
+    {
+        // Only private read-write heap pages; skip very large regions (mapped files).
+        bool scannable = (mbi.State   == MEM_COMMIT)  &&
+                         (mbi.Type    == MEM_PRIVATE)  &&
+                         (mbi.Protect == PAGE_READWRITE) &&
+                         (mbi.RegionSize > 0)            &&
+                         (mbi.RegionSize < 128 * 1024 * 1024);
+
+        if (scannable) {
+            const uint8_t* region = reinterpret_cast<const uint8_t*>(mbi.BaseAddress);
+            size_t         rsize  = mbi.RegionSize;
+
+            for (const auto& tgt : targets) {
+                if (results.size() >= max_results) break;
+                size_t tlen = tgt.size();
+
+                for (size_t i = 0; i + tlen + 1 < rsize; ++i) {
+                    __try {
+                        if (region[i] != (uint8_t)tgt[0]) continue;
+                        if (region[i + tlen] != '\0')      continue;
+                        if (memcmp(region + i, tgt.c_str(), tlen) != 0) continue;
+                    } __except (EXCEPTION_EXECUTE_HANDLER) {
+                        break; // Skip rest of this region if we fault
+                    }
+
+                    ScanMatch m;
+                    m.address = reinterpret_cast<uintptr_t>(region + i);
+                    m.target  = tgt;
+
+                    // Sample every 4 bytes in the window [-128, +128).
+                    for (int off = -128; off < 128; off += 4) {
+                        intptr_t abs = static_cast<intptr_t>(i) + off;
+                        if (abs < 0 || abs + 4 > static_cast<intptr_t>(rsize)) continue;
+                        uint32_t v = 0;
+                        if (safe_read32(region + abs, v) && v <= 10) {
+                            m.nearby_vals.push_back({off, v});
+                        }
+                    }
+
+                    results.push_back(std::move(m));
+                    if (results.size() >= max_results) break;
+                }
+            }
+        }
+
+        if (mbi.RegionSize == 0) break;
+        addr += mbi.RegionSize;
+    }
+
+    return results;
+}
+
+static void run_discovery() {
+    log("=== ATS-AP DISCOVERY MODE START ===");
+    log("Scanning heap for garage and truck strings. Share game.log with the developer.");
+
+    // ── Garage city IDs ────────────────────────────────────────────────────────
+    // Try both bare city IDs and "garage.<city>" compound IDs.
+    std::vector<std::string> garage_targets = {
+        // bare city IDs
+        "los_angeles", "san_francisco", "sacramento", "fresno",
+        "bakersfield", "stockton", "eureka", "redding", "san_diego",
+        "las_vegas", "reno", "elko",
+        "flagstaff", "phoenix", "tucson", "prescott",
+        // compound IDs (SII format uses these as object names)
+        "garage.los_angeles", "garage.san_francisco", "garage.sacramento",
+        "garage.fresno", "garage.bakersfield", "garage.stockton",
+        "garage.eureka", "garage.redding", "garage.san_diego",
+        "garage.las_vegas", "garage.reno", "garage.elko",
+        "garage.flagstaff", "garage.phoenix", "garage.tucson", "garage.prescott",
+    };
+
+    auto garage_matches = scan_heap_for_strings(garage_targets, 150);
+
+    log("--- GARAGE RESULTS (" + std::to_string(garage_matches.size()) + " matches) ---");
+    for (const auto& m : garage_matches) {
+        std::ostringstream oss;
+        oss << "G[" << m.target << "] 0x"
+            << std::hex << std::setw(12) << std::setfill('0') << m.address
+            << std::dec;
+        // Print small-value neighbours — the status field (0=none,2=owned)
+        // will appear here.
+        for (const auto& [off, v] : m.nearby_vals) {
+            oss << "  " << (off >= 0 ? "+" : "") << off << "=" << v;
+        }
+        log(oss.str());
+    }
+
+    // ── Truck model IDs ────────────────────────────────────────────────────────
+    std::vector<std::string> truck_targets = {
+        "kenworth_w900", "kenworth_t800", "kenworth_t660", "kenworth_k100e",
+        "peterbilt_389", "peterbilt_388", "peterbilt_367",
+        "western_star_49x", "western_star_57x",
+        "freightliner_114sd", "freightliner_coronado",
+        "mack_anthem", "mack_pinnacle",
+        "international_lt",
+        // also try with "vehicle." or "truck." prefix
+        "vehicle.kenworth_w900", "vehicle.peterbilt_389",
+        "vehicle.western_star_49x", "vehicle.freightliner_coronado",
+    };
+
+    auto truck_matches = scan_heap_for_strings(truck_targets, 100);
+
+    log("--- TRUCK RESULTS (" + std::to_string(truck_matches.size()) + " matches) ---");
+    for (const auto& m : truck_matches) {
+        std::ostringstream oss;
+        oss << "T[" << m.target << "] 0x"
+            << std::hex << std::setw(12) << std::setfill('0') << m.address
+            << std::dec;
+        for (const auto& [off, v] : m.nearby_vals) {
+            oss << "  " << (off >= 0 ? "+" : "") << off << "=" << v;
+        }
+        log(oss.str());
+    }
+
+    log("=== ATS-AP DISCOVERY MODE END ===");
+    g_discovery_done = true;
+}
+
+static void maybe_run_discovery(double now) {
+    if (g_discovery_done) return;
+    // Wait 15 s after plugin init so the game has fully loaded the save.
+    if (now - g_startup_time < 15.0) return;
+
+    fs::path flag = g_comm_dir / "discovery_mode.txt";
+    if (!fs::exists(flag)) {
+        g_discovery_done = true; // No file — skip forever this session.
+        return;
+    }
+
+    run_discovery();
+    try { fs::remove(flag); } catch (...) {}
+}
 
 SCSAPI_VOID telemetry_frame_start(const scs_event_t event,
                                    const void* const event_info,
                                    const scs_context_t context) {
     double t = now_seconds();
+
+    maybe_run_discovery(t);
 
     if (t - g_last_poll_time >= POLL_INTERVAL_SECONDS) {
         g_last_poll_time = t;
@@ -408,6 +582,7 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
     }
     flush_events_file();
 
+    g_startup_time = now_seconds();
     log("Archipelago plugin initialized. Waiting for Python client...");
     return SCS_RESULT_ok;
 }
