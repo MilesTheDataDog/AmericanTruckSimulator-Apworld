@@ -143,58 +143,99 @@ static fs::path get_documents_path() {
     return fs::path(getenv("USERPROFILE")) / "Documents";
 }
 
+// Applied-grants sets: cities whose memory writes succeeded this session.
+// Failed writes (string not yet in heap) are retried on the next 5 s poll.
+static std::set<std::string> g_applied_garage_grants;
+static std::set<std::string> g_applied_office_discovers;
+
+// Forward declarations — bodies are after the scan helpers they depend on.
+static bool grant_garage_memory(const std::string& city_id);
+static bool discover_office_memory(const std::string& city_id);
+
 // ── Read items.json (written by Python client) ─────────────────────────────────
 static void read_items_file() {
-    std::lock_guard<std::mutex> lock(g_state_mutex);
+    // Collect items that need memory grants (processed after lock release).
+    std::vector<std::string> pending_garages, pending_offices;
 
-    if (!fs::exists(g_items_file)) return;
+    {
+        std::lock_guard<std::mutex> lock(g_state_mutex);
 
-    try {
-        std::ifstream f(g_items_file);
-        json j = json::parse(f);
+        if (!fs::exists(g_items_file)) return;
 
-        g_items.unlocked_trucks.clear();
-        for (auto& t : j.value("unlocked_trucks", json::array())) {
-            g_items.unlocked_trucks.insert(t.get<std::string>());
-        }
+        try {
+            std::ifstream f(g_items_file);
+            json j = json::parse(f);
 
-        g_items.unlocked_garages.clear();
-        for (auto& g : j.value("unlocked_garages", json::array())) {
-            g_items.unlocked_garages.insert(g.get<std::string>());
-        }
+            g_items.unlocked_trucks.clear();
+            for (auto& t : j.value("unlocked_trucks", json::array())) {
+                g_items.unlocked_trucks.insert(t.get<std::string>());
+            }
 
-        g_items.unlocked_offices.clear();
-        for (auto& o : j.value("unlocked_offices", json::array())) {
-            g_items.unlocked_offices.insert(o.get<std::string>());
-        }
+            g_items.unlocked_garages.clear();
+            for (auto& g : j.value("unlocked_garages", json::array())) {
+                g_items.unlocked_garages.insert(g.get<std::string>());
+            }
 
-        g_items.shuffle_trucks              = j.value("shuffle_trucks", false);
-        g_items.shuffle_garages             = j.value("shuffle_garages", false);
-        g_items.shuffle_recruitment_offices = j.value("shuffle_recruitment_offices", false);
-        g_items.shuffle_truck_upgrades      = j.value("shuffle_truck_upgrades", false);
-        g_items.win_condition               = j.value("win_condition", 0);
-        g_items.goal_level                  = j.value("goal_level", 35);
-        g_items.goal_money                  = (long long)(j.value("goal_money_thousands", 1000)) * 1000;
+            g_items.unlocked_offices.clear();
+            for (auto& o : j.value("unlocked_offices", json::array())) {
+                g_items.unlocked_offices.insert(o.get<std::string>());
+            }
 
-        g_items.upgrade_tiers.clear();
-        if (j.contains("upgrade_tiers") && j["upgrade_tiers"].is_object()) {
-            for (auto& [k, v] : j["upgrade_tiers"].items()) {
-                if (v.is_number_integer()) {
-                    g_items.upgrade_tiers[k] = v.get<int>();
+            g_items.shuffle_trucks              = j.value("shuffle_trucks", false);
+            g_items.shuffle_garages             = j.value("shuffle_garages", false);
+            g_items.shuffle_recruitment_offices = j.value("shuffle_recruitment_offices", false);
+            g_items.shuffle_truck_upgrades      = j.value("shuffle_truck_upgrades", false);
+            g_items.win_condition               = j.value("win_condition", 0);
+            g_items.goal_level                  = j.value("goal_level", 35);
+            g_items.goal_money                  = (long long)(j.value("goal_money_thousands", 1000)) * 1000;
+
+            g_items.upgrade_tiers.clear();
+            if (j.contains("upgrade_tiers") && j["upgrade_tiers"].is_object()) {
+                for (auto& [k, v] : j["upgrade_tiers"].items()) {
+                    if (v.is_number_integer()) {
+                        g_items.upgrade_tiers[k] = v.get<int>();
+                    }
                 }
             }
-        }
 
-        if (j.contains("item_notifications") && j["item_notifications"].is_array()) {
-            std::size_t n = j["item_notifications"].size();
-            if (n > 0) {
-                log("items.json: " + std::to_string(n) + " notification(s) queued for Lua mod");
+            if (j.contains("item_notifications") && j["item_notifications"].is_array()) {
+                std::size_t n = j["item_notifications"].size();
+                if (n > 0) {
+                    log("items.json: " + std::to_string(n) + " notification(s) queued for Lua mod");
+                }
             }
-        }
 
-        g_items.last_read_time = now_seconds();
-    } catch (const std::exception& e) {
-        log(std::string("Failed to read items.json: ") + e.what(), SCS_LOG_TYPE_warning);
+            // Collect items whose memory grants haven't been applied yet.
+            // grant_*_memory() retries are driven by absence from g_applied_* sets,
+            // so failed writes (string not yet in heap) are retried on the next poll.
+            for (const auto& city : g_items.unlocked_garages) {
+                if (!g_applied_garage_grants.count(city))
+                    pending_garages.push_back(city);
+            }
+            for (const auto& city : g_items.unlocked_offices) {
+                if (!g_applied_office_discovers.count(city))
+                    pending_offices.push_back(city);
+            }
+
+            g_items.last_read_time = now_seconds();
+        } catch (const std::exception& e) {
+            log(std::string("Failed to read items.json: ") + e.what(), SCS_LOG_TYPE_warning);
+        }
+    }
+
+    // Apply pending Archipelago items to live game memory (outside lock — heap
+    // scanning can take a few milliseconds).
+    for (const auto& city : pending_garages) {
+        if (grant_garage_memory(city)) {
+            std::lock_guard<std::mutex> lock(g_state_mutex);
+            g_applied_garage_grants.insert(city);
+        }
+    }
+    for (const auto& city : pending_offices) {
+        if (discover_office_memory(city)) {
+            std::lock_guard<std::mutex> lock(g_state_mutex);
+            g_applied_office_discovers.insert(city);
+        }
     }
 }
 
@@ -450,6 +491,95 @@ static std::vector<ScanMatch> scan_heap_for_strings(
     }
 
     return results;
+}
+
+static std::string hex_addr(uintptr_t addr) {
+    std::ostringstream oss;
+    oss << "0x" << std::hex << std::uppercase << addr;
+    return oss.str();
+}
+
+// ── Mid-session memory grants ──────────────────────────────────────────────────
+//
+// Memory layout discovered by run_discovery() scan v2:
+//
+//   Garage:  "garage.X"\0<pad-to-4-align>\uint32_status
+//            status_offset = ((strlen("garage.X")+1)+3)&~3
+//            status=2  →  garage accessible/owned (observed for visited cities)
+//
+//   Office:  "recruitment_agency.X"\0\uint8_discovered
+//            flag_offset = strlen("recruitment_agency.X")+1
+//            flag=0x01  →  office discovered (confirmed from flagstaff hex dump)
+
+static bool grant_garage_memory(const std::string& city_id) {
+    const std::string target = "garage." + city_id;
+    const size_t tlen        = target.size();
+    // Next 4-byte-aligned offset after the null terminator
+    const size_t wr_offset   = (tlen + 1 + 3) & ~3;
+
+    // near_range=0: just find the string, skip nearby-value sampling (perf)
+    auto matches = scan_heap_for_strings({target}, 10, 0, 1, 10, false);
+    if (matches.empty()) {
+        log("grant_garage: '" + target + "' not found in heap", SCS_LOG_TYPE_warning);
+        return false;
+    }
+
+    int written = 0;
+    for (const auto& m : matches) {
+        uintptr_t wr_addr = m.address + wr_offset;
+
+        MEMORY_BASIC_INFORMATION mbi;
+        if (VirtualQuery(reinterpret_cast<LPCVOID>(wr_addr), &mbi, sizeof(mbi)) != sizeof(mbi))
+            continue;
+        if (mbi.State != MEM_COMMIT || mbi.Protect != PAGE_READWRITE)
+            continue;
+
+        uint32_t status = 2;
+        memcpy(reinterpret_cast<void*>(wr_addr), &status, sizeof(status));
+        log("grant_garage: " + target + " status=2 @ " + hex_addr(wr_addr));
+        ++written;
+    }
+
+    if (written == 0) {
+        log("grant_garage: no writable copy for " + target, SCS_LOG_TYPE_warning);
+        return false;
+    }
+    return true;
+}
+
+static bool discover_office_memory(const std::string& city_id) {
+    const std::string target = "recruitment_agency." + city_id;
+    const size_t tlen        = target.size();
+    // Discovered flag byte is immediately after the null terminator
+    const size_t wr_offset   = tlen + 1;
+
+    auto matches = scan_heap_for_strings({target}, 10, 0, 1, 10, false);
+    if (matches.empty()) {
+        log("discover_office: '" + target + "' not found in heap", SCS_LOG_TYPE_warning);
+        return false;
+    }
+
+    int written = 0;
+    for (const auto& m : matches) {
+        uintptr_t wr_addr = m.address + wr_offset;
+
+        MEMORY_BASIC_INFORMATION mbi;
+        if (VirtualQuery(reinterpret_cast<LPCVOID>(wr_addr), &mbi, sizeof(mbi)) != sizeof(mbi))
+            continue;
+        if (mbi.State != MEM_COMMIT || mbi.Protect != PAGE_READWRITE)
+            continue;
+
+        uint8_t flag = 0x01;
+        memcpy(reinterpret_cast<void*>(wr_addr), &flag, sizeof(flag));
+        log("discover_office: " + target + " flag=1 @ " + hex_addr(wr_addr));
+        ++written;
+    }
+
+    if (written == 0) {
+        log("discover_office: no writable copy for " + target, SCS_LOG_TYPE_warning);
+        return false;
+    }
+    return true;
 }
 
 static void log_match(const std::string& prefix, const ScanMatch& m) {
