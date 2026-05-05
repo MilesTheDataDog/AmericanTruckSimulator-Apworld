@@ -430,7 +430,7 @@ static std::vector<ScanMatch> scan_heap_for_strings(
 
 static void run_discovery() {
     log("=== ATS-AP DISCOVERY MODE START ===");
-    log("Scanning heap for garage and truck strings. Share game.log with the developer.");
+    log("Scanning heap for garage, office, and truck strings. Share game.log with the developer.");
 
     // ── Garage city IDs ────────────────────────────────────────────────────────
     // Try both bare city IDs and "garage.<city>" compound IDs.
@@ -458,6 +458,38 @@ static void run_discovery() {
             << std::dec;
         // Print small-value neighbours — the status field (0=none,2=owned)
         // will appear here.
+        for (const auto& [off, v] : m.nearby_vals) {
+            oss << "  " << (off >= 0 ? "+" : "") << off << "=" << v;
+        }
+        log(oss.str());
+    }
+
+    // ── Recruitment office IDs ─────────────────────────────────────────────────
+    // SCS save format uses "recruitment_agency.<city>" or "agency.<city>".
+    // Also try bare city IDs with "agency" nearby and "driver_agency" prefix.
+    std::vector<std::string> office_targets = {
+        "recruitment_agency.los_angeles", "recruitment_agency.san_francisco",
+        "recruitment_agency.sacramento",  "recruitment_agency.fresno",
+        "recruitment_agency.bakersfield", "recruitment_agency.stockton",
+        "recruitment_agency.eureka",      "recruitment_agency.redding",
+        "recruitment_agency.san_diego",   "recruitment_agency.las_vegas",
+        "recruitment_agency.reno",        "recruitment_agency.elko",
+        "recruitment_agency.flagstaff",   "recruitment_agency.phoenix",
+        "recruitment_agency.tucson",      "recruitment_agency.prescott",
+        // alternate prefixes observed in some SCS titles
+        "agency.los_angeles",   "agency.san_francisco", "agency.sacramento",
+        "agency.las_vegas",     "agency.reno",          "agency.flagstaff",
+        "driver_agency.los_angeles", "driver_agency.san_francisco",
+    };
+
+    auto office_matches = scan_heap_for_strings(office_targets, 150);
+
+    log("--- OFFICE RESULTS (" + std::to_string(office_matches.size()) + " matches) ---");
+    for (const auto& m : office_matches) {
+        std::ostringstream oss;
+        oss << "O[" << m.target << "] 0x"
+            << std::hex << std::setw(12) << std::setfill('0') << m.address
+            << std::dec;
         for (const auto& [off, v] : m.nearby_vals) {
             oss << "  " << (off >= 0 ? "+" : "") << off << "=" << v;
         }
