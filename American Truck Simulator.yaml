@@ -3,7 +3,8 @@
 # ══════════════════════════════════════════════════════════════════════════════
 #
 #  Drive across the American West, delivering cargo and discovering cities.
-#  Trucks, garages, and offices are shuffled into the multiworld item pool.
+#  Trucks and upgrades are shuffled into the multiworld item pool; money and
+#  XP grants fill the remaining slots so every check rewards something useful.
 #
 #  Instructions:
 #   1. Set your player name below.
@@ -44,8 +45,8 @@ American Truck Simulator:
   # Arizona is FREE DLC for all players and is enabled by default.
   #
   # Only enabled states will contribute city arrivals, garages, recruitment offices,
-  # and DLC-specific cargo types as location checks. All enabled states are
-  # accessible from the start — no unlock items are required to enter them.
+  # and state first-visit checks. All enabled states are accessible from the start —
+  # no unlock items are required to enter them.
   #
   # Full list of available DLC states:
   #   Arizona, New Mexico, Oregon, Washington, Utah, Idaho, Colorado, Wyoming,
@@ -80,15 +81,6 @@ American Truck Simulator:
   # Engine (Tiers 2–5), Transmission (Tiers 2–4), Chassis, Cab, and Accessories.
   # You start with Tier 1 options only; higher tiers unlock as items are received.
   shuffle_truck_upgrades: false
-
-  # Shuffle garage deeds into the pool.
-  # You must receive a city's garage deed before you can purchase that garage.
-  shuffle_garages: true
-
-  # Shuffle recruitment offices into the pool.
-  # Driving past an office is always a location check, but you must receive the
-  # matching office item before you can use it to hire drivers.
-  shuffle_recruitment_offices: true
 
   # ── Location Checks ───────────────────────────────────────────────────────────
   # Reaching driver levels 5, 10, 15, 20, 25, and 30 each count as a check.
