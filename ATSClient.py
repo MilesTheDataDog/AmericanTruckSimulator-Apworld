@@ -572,14 +572,25 @@ class ATSContext(CommonContext):
 
     def _resolve_event_to_location_id(self, event: Dict) -> Optional[int]:
         """Map a plugin event to an Archipelago location ID."""
-        from worlds.american_truck_simulator.locations import ALL_LOCATIONS
+        from worlds.american_truck_simulator.locations import ALL_LOCATIONS, CARGO_DELIVERY_LOCATIONS
 
         etype = event.get("type")
         game_id = event.get("game_id", "")
 
         if etype == "cargo_delivered":
-            loc_name = f"Delivered - {event.get('cargo_name', '')}"
-        elif etype == "city_arrived":
+            # Match by cargo game_id (stable internal ID) rather than display name,
+            # which can differ between game versions and localizations.
+            for loc_data in CARGO_DELIVERY_LOCATIONS.values():
+                if loc_data.game_id == game_id:
+                    return loc_data.code
+            logger.warning(
+                f"[ATS] No cargo location for id={game_id!r} "
+                f"(cargo_name={event.get('cargo_name', '')!r}) — "
+                f"this cargo may not be included in the randomizer for this seed."
+            )
+            return None
+
+        if etype == "city_arrived":
             loc_name = f"First Arrival - {event.get('city_display', '')}"
         elif etype == "level_reached":
             loc_name = f"Reached Level {event.get('level', 0)}"

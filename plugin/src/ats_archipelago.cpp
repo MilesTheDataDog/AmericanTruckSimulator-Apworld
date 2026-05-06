@@ -249,7 +249,11 @@ static bool grant_money_memory(int64_t amount) {
     }
     uintptr_t addr = follow_chain(g_module_base, 0x02D6FA58, {0x10}, 0x10);
     if (addr == 0) {
-        log("grant_money: pointer chain failed", SCS_LOG_TYPE_warning);
+        static bool s_warned = false;
+        if (!s_warned) {
+            s_warned = true;
+            log("grant_money: pointer chain failed — offsets may need recalibration for this ATS version", SCS_LOG_TYPE_warning);
+        }
         return false;
     }
     MEMORY_BASIC_INFORMATION mbi;
@@ -274,7 +278,11 @@ static bool grant_xp_memory(int32_t amount) {
     }
     uintptr_t addr = follow_chain(g_module_base, 0x02B3FBB0, {0x10, 0x28, 0x08, 0x18}, 0x4D0);
     if (addr == 0) {
-        log("grant_xp: pointer chain failed", SCS_LOG_TYPE_warning);
+        static bool s_warned = false;
+        if (!s_warned) {
+            s_warned = true;
+            log("grant_xp: pointer chain failed — offsets may need recalibration for this ATS version", SCS_LOG_TYPE_warning);
+        }
         return false;
     }
     MEMORY_BASIC_INFORMATION mbi;

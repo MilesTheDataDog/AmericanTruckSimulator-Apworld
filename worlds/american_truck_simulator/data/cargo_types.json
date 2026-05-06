@@ -2258,6 +2258,17 @@
       "dlc_introduced": "Louisiana",
       "required_dlc": "louisiana",
       "needs_verification": false
+    },
+    {
+      "id": "coil",
+      "name": "Cable Reel",
+      "trailer_types": [
+        "flatbed",
+        "drop_deck"
+      ],
+      "dlc_introduced": "1.0",
+      "required_dlc": null,
+      "needs_verification": true
     }
   ]
 }
