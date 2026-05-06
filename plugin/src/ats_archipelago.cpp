@@ -156,6 +156,7 @@ static bool discover_office_memory(const std::string& city_id);
 static void read_items_file() {
     // Collect items that need memory grants (processed after lock release).
     std::vector<std::string> pending_garages, pending_offices;
+    bool apply_grants = false;
 
     {
         std::lock_guard<std::mutex> lock(g_state_mutex);
@@ -205,16 +206,21 @@ static void read_items_file() {
                 }
             }
 
-            // Collect items whose memory grants haven't been applied yet.
-            // grant_*_memory() retries are driven by absence from g_applied_* sets,
-            // so failed writes (string not yet in heap) are retried on the next poll.
-            for (const auto& city : g_items.unlocked_garages) {
-                if (!g_applied_garage_grants.count(city))
-                    pending_garages.push_back(city);
-            }
-            for (const auto& city : g_items.unlocked_offices) {
-                if (!g_applied_office_discovers.count(city))
-                    pending_offices.push_back(city);
+            // Only queue grants when the simulation is running (in_game=true means
+            // telemetry_started has fired, which happens after the save is fully loaded).
+            // Grants that fire during plugin init (in_game=false) would be overwritten
+            // when ATS subsequently reads garage status from the save file.
+            apply_grants = g_state.in_game;
+
+            if (apply_grants) {
+                for (const auto& city : g_items.unlocked_garages) {
+                    if (!g_applied_garage_grants.count(city))
+                        pending_garages.push_back(city);
+                }
+                for (const auto& city : g_items.unlocked_offices) {
+                    if (!g_applied_office_discovers.count(city))
+                        pending_offices.push_back(city);
+                }
             }
 
             g_items.last_read_time = now_seconds();
@@ -505,7 +511,7 @@ static std::string hex_addr(uintptr_t addr) {
 //
 //   Garage:  "garage.X"\0<pad-to-4-align>\uint32_status
 //            status_offset = ((strlen("garage.X")+1)+3)&~3
-//            status=3  →  owned small garage (testing; 2 = visited/unlocked)
+//            status=1  →  small garage owned (SCS format: 0=none,1=small,2=medium,3=large)
 //
 //   Office:  "recruitment_agency.X"\0\uint8_discovered
 //            flag_offset = strlen("recruitment_agency.X")+1
@@ -534,9 +540,9 @@ static bool grant_garage_memory(const std::string& city_id) {
         if (mbi.State != MEM_COMMIT || mbi.Protect != PAGE_READWRITE)
             continue;
 
-        uint32_t status = 3;
+        uint32_t status = 1;
         memcpy(reinterpret_cast<void*>(wr_addr), &status, sizeof(status));
-        log("grant_garage: " + target + " status=3 @ " + hex_addr(wr_addr));
+        log("grant_garage: " + target + " status=1 @ " + hex_addr(wr_addr));
         ++written;
     }
 
