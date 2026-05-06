@@ -7,10 +7,6 @@
        is currently unlocked.
     2. Displaying in-game notifications when items are received or checks complete.
 
-    All DLC states the player owns are freely accessible — no state locking is
-    enforced. Unlock items in the multiworld pool cover trucks, garages, and
-    recruitment offices only.
-
     File communication:
     - Reads:  %USERPROFILE%\Documents\American Truck Simulator\archipelago\items.json
     - Writes: Nothing (read-only from Lua side; C++ plugin handles writes)
@@ -25,11 +21,7 @@ local COMM_SUBPATH      = "archipelago\\items.json"
 local g_items_file_path = nil
 local g_last_poll_time  = 0
 local g_unlocked_trucks = {}
-local g_unlocked_garages = {}
-local g_unlocked_offices = {}
 local g_shuffle_trucks  = false
-local g_shuffle_garages = false
-local g_shuffle_offices = false
 local g_win_condition   = 0
 local g_goal_level      = 35
 local g_goal_money      = 1000000
@@ -77,10 +69,16 @@ local function json_number(json_str, key)
     return val and tonumber(val) or nil
 end
 
+-- Note: Lua patterns do not support | alternation. Match each literal separately.
 local function json_bool(json_str, key)
-    local pattern = '"' .. key .. '"%s*:%s*(true|false)'
-    local val = json_str:match(pattern)
-    return val == "true"
+    local pattern_true  = '"' .. key .. '"%s*:%s*true'
+    local pattern_false = '"' .. key .. '"%s*:%s*false'
+    if json_str:match(pattern_true) then
+        return true
+    elseif json_str:match(pattern_false) then
+        return false
+    end
+    return false
 end
 
 -- Parse the item_notifications array written by the Python client.
@@ -147,11 +145,7 @@ local function poll_items_file()
     if not content then return end
 
     g_unlocked_trucks  = json_string_array(content, "unlocked_trucks")
-    g_unlocked_garages = json_string_array(content, "unlocked_garages")
-    g_unlocked_offices = json_string_array(content, "unlocked_offices")
     g_shuffle_trucks   = json_bool(content, "shuffle_trucks")
-    g_shuffle_garages  = json_bool(content, "shuffle_garages")
-    g_shuffle_offices  = json_bool(content, "shuffle_recruitment_offices")
     g_win_condition    = json_number(content, "win_condition") or 0
     g_goal_level       = json_number(content, "goal_level") or 35
     local goal_k       = json_number(content, "goal_money_thousands") or 1000
@@ -210,8 +204,6 @@ function onUpdate(dt)
 end
 
 return {
-    push_notification  = push_notification,
-    unlocked_trucks    = g_unlocked_trucks,
-    unlocked_garages   = g_unlocked_garages,
-    unlocked_offices   = g_unlocked_offices,
+    push_notification = push_notification,
+    unlocked_trucks   = g_unlocked_trucks,
 }
