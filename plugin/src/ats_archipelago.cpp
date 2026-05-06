@@ -141,6 +141,12 @@ static fs::path get_documents_path() {
     return fs::path(getenv("USERPROFILE")) / "Documents";
 }
 
+static std::string hex_addr(uintptr_t addr) {
+    std::ostringstream oss;
+    oss << "0x" << std::hex << std::uppercase << addr;
+    return oss.str();
+}
+
 // ── Persistent grant tracking ──────────────────────────────────────────────────
 // The DLL must not double-grant money/XP that was already applied to a previous
 // game session. We persist applied totals in grants.json so they survive restarts.
@@ -609,12 +615,6 @@ static std::vector<ScanMatch> scan_heap_for_strings(
     }
 
     return results;
-}
-
-static std::string hex_addr(uintptr_t addr) {
-    std::ostringstream oss;
-    oss << "0x" << std::hex << std::uppercase << addr;
-    return oss.str();
 }
 
 static void log_match(const std::string& prefix, const ScanMatch& m) {
