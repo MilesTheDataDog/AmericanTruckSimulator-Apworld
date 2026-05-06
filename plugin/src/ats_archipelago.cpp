@@ -147,7 +147,20 @@ static std::string hex_addr(uintptr_t addr) {
     return oss.str();
 }
 
-// ── Persistent grant tracking ──────────────────────────────────────────────────
+// ── Game module base ───────────────────────────────────────────────────────────
+// Cached at init time. GetModuleHandleA(nullptr) returns the base address of the
+// host process (amtrucks.exe). Hardcoding the exe name is fragile and wrong here —
+// the process is amtrucks.exe, not amtrucks_x64.exe.
+static uintptr_t g_module_base = 0;
+
+static void init_module_base() {
+    g_module_base = reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr));
+    if (g_module_base == 0) {
+        log("WARNING: could not obtain module base address — XP/money grants will not work", SCS_LOG_TYPE_warning);
+    } else {
+        log("Module base: " + hex_addr(g_module_base));
+    }
+}
 // The DLL must not double-grant money/XP that was already applied to a previous
 // game session. We persist applied totals in grants.json so they survive restarts.
 static int64_t g_applied_money = 0;
@@ -230,12 +243,11 @@ static uintptr_t follow_chain(uintptr_t module_base, uintptr_t static_offset,
 //     [[[[[module_base + 0x02B3FBB0] + 0x10] + 0x28] + 0x08] + 0x18] + 0x4D0
 
 static bool grant_money_memory(int64_t amount) {
-    uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandleA("amtrucks_x64.exe"));
-    if (base == 0) {
-        log("grant_money: amtrucks_x64.exe module not found", SCS_LOG_TYPE_warning);
+    if (g_module_base == 0) {
+        log("grant_money: module base not available", SCS_LOG_TYPE_warning);
         return false;
     }
-    uintptr_t addr = follow_chain(base, 0x02D6FA58, {0x10}, 0x10);
+    uintptr_t addr = follow_chain(g_module_base, 0x02D6FA58, {0x10}, 0x10);
     if (addr == 0) {
         log("grant_money: pointer chain failed", SCS_LOG_TYPE_warning);
         return false;
@@ -256,12 +268,11 @@ static bool grant_money_memory(int64_t amount) {
 }
 
 static bool grant_xp_memory(int32_t amount) {
-    uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandleA("amtrucks_x64.exe"));
-    if (base == 0) {
-        log("grant_xp: amtrucks_x64.exe module not found", SCS_LOG_TYPE_warning);
+    if (g_module_base == 0) {
+        log("grant_xp: module base not available", SCS_LOG_TYPE_warning);
         return false;
     }
-    uintptr_t addr = follow_chain(base, 0x02B3FBB0, {0x10, 0x28, 0x08, 0x18}, 0x4D0);
+    uintptr_t addr = follow_chain(g_module_base, 0x02B3FBB0, {0x10, 0x28, 0x08, 0x18}, 0x4D0);
     if (addr == 0) {
         log("grant_xp: pointer chain failed", SCS_LOG_TYPE_warning);
         return false;
@@ -751,6 +762,7 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
 
     g_log = p->common.log;
     log("Archipelago plugin initializing v" + std::string(PLUGIN_VERSION));
+    init_module_base();
 
     g_comm_dir    = get_documents_path() / "American Truck Simulator" / "archipelago";
     g_events_file = g_comm_dir / "events.json";

@@ -655,6 +655,8 @@ class ATSContext(CommonContext):
         self._save_warned_unreadable = False
 
         save = _parse_sii_save(text)
+        logger.debug(f"[ATS] Save parsed: {len(save['visited_cities'])} visited cities, "
+                     f"xp={save['experience_points']}, money={save['money']}")
 
         # One-time fresh-save check. Only warn when the server has no checked
         # locations yet — if it does, the player is resuming a legitimate run.
@@ -689,21 +691,31 @@ class ATSContext(CommonContext):
 
         # City first arrival checks + state first visit checks
         new_cities = save["visited_cities"] - self._save_known_cities
+        if new_cities:
+            logger.info(f"[ATS] Save poll: {len(new_cities)} new city/cities detected: {sorted(new_cities)}")
         for city_id in new_cities:
             self._save_known_cities.add(city_id)
+            matched = False
             for loc_data in CITY_ARRIVAL_LOCATIONS.values():
-                if loc_data.game_id == city_id and loc_data.code not in self.checked_locations:
-                    new_checks.append(loc_data.code)
-                    # Check if this city reveals a new state
-                    state_name = loc_data.region  # region == state display name
-                    if state_name not in self._save_known_states:
-                        self._save_known_states.add(state_name)
-                        for sa_data in STATE_ARRIVAL_LOCATIONS.values():
-                            if sa_data.region == state_name and sa_data.code not in self.checked_locations:
-                                new_checks.append(sa_data.code)
-                                logger.info(f"[ATS] First visit to state: {state_name}")
-                                break
+                if loc_data.game_id == city_id:
+                    matched = True
+                    if loc_data.code not in self.checked_locations:
+                        new_checks.append(loc_data.code)
+                        logger.info(f"[ATS] City arrival check queued: {city_id} → location {loc_data.code}")
+                        # Check if this city reveals a new state
+                        state_name = loc_data.region  # region == state display name
+                        if state_name not in self._save_known_states:
+                            self._save_known_states.add(state_name)
+                            for sa_data in STATE_ARRIVAL_LOCATIONS.values():
+                                if sa_data.region == state_name and sa_data.code not in self.checked_locations:
+                                    new_checks.append(sa_data.code)
+                                    logger.info(f"[ATS] First visit to state: {state_name}")
+                                    break
+                    else:
+                        logger.debug(f"[ATS] City {city_id} already checked — skipping")
                     break
+            if not matched:
+                logger.debug(f"[ATS] City '{city_id}' from save has no matching location (not in enabled DLC or base states)")
 
         # Garage upgrade checks (status == 2 means player-owned)
         new_garages = save["owned_garages"] - self._save_known_garages
