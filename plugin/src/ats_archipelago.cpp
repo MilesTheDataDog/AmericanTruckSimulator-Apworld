@@ -94,16 +94,14 @@ static GameState g_state;
 // ── Item state (read from items.json) ─────────────────────────────────────────
 struct ItemState {
     std::set<std::string> unlocked_trucks;
-    std::set<std::string> unlocked_garages;
-    std::set<std::string> unlocked_offices;
     std::map<std::string, int> upgrade_tiers;
     bool shuffle_trucks = false;
-    bool shuffle_garages = false;
-    bool shuffle_recruitment_offices = false;
     bool shuffle_truck_upgrades = false;
     int win_condition = 0;
     int goal_level = 35;
     long long goal_money = 1000000;
+    int64_t total_money_granted = 0;
+    int32_t total_xp_granted = 0;
     double last_read_time = 0.0;
 };
 
@@ -143,20 +141,145 @@ static fs::path get_documents_path() {
     return fs::path(getenv("USERPROFILE")) / "Documents";
 }
 
-// Applied-grants sets: cities whose memory writes succeeded this session.
-// Failed writes (string not yet in heap) are retried on the next 5 s poll.
-static std::set<std::string> g_applied_garage_grants;
-static std::set<std::string> g_applied_office_discovers;
+// ── Persistent grant tracking ──────────────────────────────────────────────────
+// The DLL must not double-grant money/XP that was already applied to a previous
+// game session. We persist applied totals in grants.json so they survive restarts.
+static int64_t g_applied_money = 0;
+static int32_t g_applied_xp   = 0;
+static fs::path g_grants_file;
 
-// Forward declarations — bodies are after the scan helpers they depend on.
-static bool grant_garage_memory(const std::string& city_id);
-static bool discover_office_memory(const std::string& city_id);
+static void load_grants_file() {
+    if (!fs::exists(g_grants_file)) return;
+    try {
+        std::ifstream f(g_grants_file);
+        json j = json::parse(f);
+        g_applied_money = j.value("applied_money", (int64_t)0);
+        g_applied_xp    = j.value("applied_xp",    (int32_t)0);
+        log("grants.json loaded: applied_money=" + std::to_string(g_applied_money) +
+            " applied_xp=" + std::to_string(g_applied_xp));
+    } catch (const std::exception& e) {
+        log(std::string("Failed to read grants.json: ") + e.what(), SCS_LOG_TYPE_warning);
+    }
+}
+
+static void save_grants_file() {
+    json j;
+    j["applied_money"] = g_applied_money;
+    j["applied_xp"]    = g_applied_xp;
+    fs::path tmp = g_grants_file;
+    tmp += ".tmp";
+    try {
+        std::ofstream f(tmp);
+        f << j.dump(2);
+        f.close();
+        fs::rename(tmp, g_grants_file);
+    } catch (const std::exception& e) {
+        log(std::string("Failed to write grants.json: ") + e.what(), SCS_LOG_TYPE_warning);
+    }
+}
+
+// ── Pointer chain helper ───────────────────────────────────────────────────────
+// Follows a Cheat Engine-style multi-level pointer chain rooted at the game module.
+//
+//   chain[0] = static offset from module base → address of first pointer
+//   chain[1..n-2] = after each dereference, add this offset before next deref
+//   chain[n-1] = final offset added after last dereference → value address
+//
+// Returns the address of the final value, or 0 on failure.
+static uintptr_t follow_chain(uintptr_t module_base, uintptr_t static_offset,
+                               const std::vector<uintptr_t>& deref_offsets,
+                               uintptr_t final_offset)
+{
+    uintptr_t ptr = module_base + static_offset;
+
+    // Read first pointer
+    MEMORY_BASIC_INFORMATION mbi;
+    if (VirtualQuery(reinterpret_cast<LPCVOID>(ptr), &mbi, sizeof(mbi)) != sizeof(mbi)) return 0;
+    if (mbi.State != MEM_COMMIT) return 0;
+    uintptr_t p = 0;
+    memcpy(&p, reinterpret_cast<void*>(ptr), sizeof(p));
+    if (p == 0) return 0;
+
+    // Follow each intermediate offset: add → deref
+    for (uintptr_t off : deref_offsets) {
+        ptr = p + off;
+        if (VirtualQuery(reinterpret_cast<LPCVOID>(ptr), &mbi, sizeof(mbi)) != sizeof(mbi)) return 0;
+        if (mbi.State != MEM_COMMIT) return 0;
+        p = 0;
+        memcpy(&p, reinterpret_cast<void*>(ptr), sizeof(p));
+        if (p == 0) return 0;
+    }
+
+    return p + final_offset;
+}
+
+// ── In-process money and XP grants ────────────────────────────────────────────
+//
+// Pointer chains confirmed via Cheat Engine on ATS 1.x (amtrucks_x64.exe):
+//
+//   Money (int32 @ module_base + 0x02D6FA58 → +0x10 → +0x10):
+//     [[module_base + 0x02D6FA58] + 0x10] + 0x10
+//
+//   XP (int32 @ module_base + 0x02B3FBB0 → +0x10 → +0x28 → +0x08 → +0x18 → +0x4D0):
+//     [[[[[module_base + 0x02B3FBB0] + 0x10] + 0x28] + 0x08] + 0x18] + 0x4D0
+
+static bool grant_money_memory(int64_t amount) {
+    uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandleA("amtrucks_x64.exe"));
+    if (base == 0) {
+        log("grant_money: amtrucks_x64.exe module not found", SCS_LOG_TYPE_warning);
+        return false;
+    }
+    uintptr_t addr = follow_chain(base, 0x02D6FA58, {0x10}, 0x10);
+    if (addr == 0) {
+        log("grant_money: pointer chain failed", SCS_LOG_TYPE_warning);
+        return false;
+    }
+    MEMORY_BASIC_INFORMATION mbi;
+    if (VirtualQuery(reinterpret_cast<LPCVOID>(addr), &mbi, sizeof(mbi)) != sizeof(mbi)) return false;
+    if (mbi.State != MEM_COMMIT || !(mbi.Protect & PAGE_READWRITE)) {
+        log("grant_money: value address not writable @ " + hex_addr(addr), SCS_LOG_TYPE_warning);
+        return false;
+    }
+    int32_t current = 0;
+    memcpy(&current, reinterpret_cast<void*>(addr), sizeof(current));
+    int32_t newval = current + static_cast<int32_t>(amount);
+    memcpy(reinterpret_cast<void*>(addr), &newval, sizeof(newval));
+    log("grant_money: $" + std::to_string(current) + " + $" + std::to_string(amount) +
+        " = $" + std::to_string(newval) + " @ " + hex_addr(addr));
+    return true;
+}
+
+static bool grant_xp_memory(int32_t amount) {
+    uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandleA("amtrucks_x64.exe"));
+    if (base == 0) {
+        log("grant_xp: amtrucks_x64.exe module not found", SCS_LOG_TYPE_warning);
+        return false;
+    }
+    uintptr_t addr = follow_chain(base, 0x02B3FBB0, {0x10, 0x28, 0x08, 0x18}, 0x4D0);
+    if (addr == 0) {
+        log("grant_xp: pointer chain failed", SCS_LOG_TYPE_warning);
+        return false;
+    }
+    MEMORY_BASIC_INFORMATION mbi;
+    if (VirtualQuery(reinterpret_cast<LPCVOID>(addr), &mbi, sizeof(mbi)) != sizeof(mbi)) return false;
+    if (mbi.State != MEM_COMMIT || !(mbi.Protect & PAGE_READWRITE)) {
+        log("grant_xp: value address not writable @ " + hex_addr(addr), SCS_LOG_TYPE_warning);
+        return false;
+    }
+    int32_t current = 0;
+    memcpy(&current, reinterpret_cast<void*>(addr), sizeof(current));
+    int32_t newval = current + amount;
+    memcpy(reinterpret_cast<void*>(addr), &newval, sizeof(newval));
+    log("grant_xp: " + std::to_string(current) + " + " + std::to_string(amount) +
+        " = " + std::to_string(newval) + " @ " + hex_addr(addr));
+    return true;
+}
 
 // ── Read items.json (written by Python client) ─────────────────────────────────
 static void read_items_file() {
-    // Collect items that need memory grants (processed after lock release).
-    std::vector<std::string> pending_garages, pending_offices;
-    bool apply_grants = false;
+    int64_t want_money = 0;
+    int32_t want_xp    = 0;
+    bool    in_game    = false;
 
     {
         std::lock_guard<std::mutex> lock(g_state_mutex);
@@ -172,23 +295,13 @@ static void read_items_file() {
                 g_items.unlocked_trucks.insert(t.get<std::string>());
             }
 
-            g_items.unlocked_garages.clear();
-            for (auto& g : j.value("unlocked_garages", json::array())) {
-                g_items.unlocked_garages.insert(g.get<std::string>());
-            }
-
-            g_items.unlocked_offices.clear();
-            for (auto& o : j.value("unlocked_offices", json::array())) {
-                g_items.unlocked_offices.insert(o.get<std::string>());
-            }
-
-            g_items.shuffle_trucks              = j.value("shuffle_trucks", false);
-            g_items.shuffle_garages             = j.value("shuffle_garages", false);
-            g_items.shuffle_recruitment_offices = j.value("shuffle_recruitment_offices", false);
-            g_items.shuffle_truck_upgrades      = j.value("shuffle_truck_upgrades", false);
-            g_items.win_condition               = j.value("win_condition", 0);
-            g_items.goal_level                  = j.value("goal_level", 35);
-            g_items.goal_money                  = (long long)(j.value("goal_money_thousands", 1000)) * 1000;
+            g_items.shuffle_trucks        = j.value("shuffle_trucks", false);
+            g_items.shuffle_truck_upgrades = j.value("shuffle_truck_upgrades", false);
+            g_items.win_condition          = j.value("win_condition", 0);
+            g_items.goal_level             = j.value("goal_level", 35);
+            g_items.goal_money             = (long long)(j.value("goal_money_thousands", 1000)) * 1000;
+            g_items.total_money_granted    = j.value("total_money_granted", (int64_t)0);
+            g_items.total_xp_granted       = j.value("total_xp_granted",   (int32_t)0);
 
             g_items.upgrade_tiers.clear();
             if (j.contains("upgrade_tiers") && j["upgrade_tiers"].is_object()) {
@@ -206,42 +319,41 @@ static void read_items_file() {
                 }
             }
 
-            // Only queue grants when the simulation is running (in_game=true means
-            // telemetry_started has fired, which happens after the save is fully loaded).
-            // Grants that fire during plugin init (in_game=false) would be overwritten
-            // when ATS subsequently reads garage status from the save file.
-            apply_grants = g_state.in_game;
-
-            if (apply_grants) {
-                for (const auto& city : g_items.unlocked_garages) {
-                    if (!g_applied_garage_grants.count(city))
-                        pending_garages.push_back(city);
-                }
-                for (const auto& city : g_items.unlocked_offices) {
-                    if (!g_applied_office_discovers.count(city))
-                        pending_offices.push_back(city);
-                }
-            }
+            want_money = g_items.total_money_granted;
+            want_xp    = g_items.total_xp_granted;
+            in_game    = g_state.in_game;
 
             g_items.last_read_time = now_seconds();
         } catch (const std::exception& e) {
             log(std::string("Failed to read items.json: ") + e.what(), SCS_LOG_TYPE_warning);
+            return;
         }
     }
 
-    // Apply pending Archipelago items to live game memory (outside lock — heap
-    // scanning can take a few milliseconds).
-    for (const auto& city : pending_garages) {
-        if (grant_garage_memory(city)) {
-            std::lock_guard<std::mutex> lock(g_state_mutex);
-            g_applied_garage_grants.insert(city);
+    // Apply money/XP grant deltas when the simulation is running.
+    // We gate on in_game so the save file is loaded before we write to memory.
+    if (!in_game) return;
+
+    bool grants_changed = false;
+
+    int64_t money_delta = want_money - g_applied_money;
+    if (money_delta > 0) {
+        if (grant_money_memory(money_delta)) {
+            g_applied_money = want_money;
+            grants_changed = true;
         }
     }
-    for (const auto& city : pending_offices) {
-        if (discover_office_memory(city)) {
-            std::lock_guard<std::mutex> lock(g_state_mutex);
-            g_applied_office_discovers.insert(city);
+
+    int32_t xp_delta = want_xp - g_applied_xp;
+    if (xp_delta > 0) {
+        if (grant_xp_memory(xp_delta)) {
+            g_applied_xp = want_xp;
+            grants_changed = true;
         }
+    }
+
+    if (grants_changed) {
+        save_grants_file();
     }
 }
 
@@ -505,89 +617,6 @@ static std::string hex_addr(uintptr_t addr) {
     return oss.str();
 }
 
-// ── Mid-session memory grants ──────────────────────────────────────────────────
-//
-// Memory layout discovered by run_discovery() scan v2:
-//
-//   Garage:  "garage.X"\0<pad-to-4-align>\uint32_status
-//            status_offset = ((strlen("garage.X")+1)+3)&~3
-//            status=1  →  small garage owned (SCS format: 0=none,1=small,2=medium,3=large)
-//
-//   Office:  "recruitment_agency.X"\0\uint8_discovered
-//            flag_offset = strlen("recruitment_agency.X")+1
-//            flag=0x01  →  office discovered (confirmed from flagstaff hex dump)
-
-static bool grant_garage_memory(const std::string& city_id) {
-    const std::string target = "garage." + city_id;
-    const size_t tlen        = target.size();
-    // Next 4-byte-aligned offset after the null terminator
-    const size_t wr_offset   = (tlen + 1 + 3) & ~3;
-
-    // near_range=0: just find the string, skip nearby-value sampling (perf)
-    auto matches = scan_heap_for_strings({target}, 10, 0, 1, 10, false);
-    if (matches.empty()) {
-        log("grant_garage: '" + target + "' not found in heap", SCS_LOG_TYPE_warning);
-        return false;
-    }
-
-    int written = 0;
-    for (const auto& m : matches) {
-        uintptr_t wr_addr = m.address + wr_offset;
-
-        MEMORY_BASIC_INFORMATION mbi;
-        if (VirtualQuery(reinterpret_cast<LPCVOID>(wr_addr), &mbi, sizeof(mbi)) != sizeof(mbi))
-            continue;
-        if (mbi.State != MEM_COMMIT || mbi.Protect != PAGE_READWRITE)
-            continue;
-
-        uint32_t status = 1;
-        memcpy(reinterpret_cast<void*>(wr_addr), &status, sizeof(status));
-        log("grant_garage: " + target + " status=1 @ " + hex_addr(wr_addr));
-        ++written;
-    }
-
-    if (written == 0) {
-        log("grant_garage: no writable copy for " + target, SCS_LOG_TYPE_warning);
-        return false;
-    }
-    return true;
-}
-
-static bool discover_office_memory(const std::string& city_id) {
-    const std::string target = "recruitment_agency." + city_id;
-    const size_t tlen        = target.size();
-    // Discovered flag byte is immediately after the null terminator
-    const size_t wr_offset   = tlen + 1;
-
-    auto matches = scan_heap_for_strings({target}, 10, 0, 1, 10, false);
-    if (matches.empty()) {
-        log("discover_office: '" + target + "' not found in heap", SCS_LOG_TYPE_warning);
-        return false;
-    }
-
-    int written = 0;
-    for (const auto& m : matches) {
-        uintptr_t wr_addr = m.address + wr_offset;
-
-        MEMORY_BASIC_INFORMATION mbi;
-        if (VirtualQuery(reinterpret_cast<LPCVOID>(wr_addr), &mbi, sizeof(mbi)) != sizeof(mbi))
-            continue;
-        if (mbi.State != MEM_COMMIT || mbi.Protect != PAGE_READWRITE)
-            continue;
-
-        uint8_t flag = 0x01;
-        memcpy(reinterpret_cast<void*>(wr_addr), &flag, sizeof(flag));
-        log("discover_office: " + target + " flag=1 @ " + hex_addr(wr_addr));
-        ++written;
-    }
-
-    if (written == 0) {
-        log("discover_office: no writable copy for " + target, SCS_LOG_TYPE_warning);
-        return false;
-    }
-    return true;
-}
-
 static void log_match(const std::string& prefix, const ScanMatch& m) {
     std::ostringstream oss;
     oss << prefix << "[" << m.target << "] 0x"
@@ -726,6 +755,7 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
     g_comm_dir    = get_documents_path() / "American Truck Simulator" / "archipelago";
     g_events_file = g_comm_dir / "events.json";
     g_items_file  = g_comm_dir / "items.json";
+    g_grants_file = g_comm_dir / "grants.json";
 
     if (!fs::exists(g_comm_dir)) {
         fs::create_directories(g_comm_dir);
@@ -733,6 +763,7 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
 
     log("Communication folder: " + g_comm_dir.string());
 
+    load_grants_file();
     read_items_file();
 
     p->register_for_event(SCS_TELEMETRY_EVENT_frame_start,   telemetry_frame_start,   nullptr);

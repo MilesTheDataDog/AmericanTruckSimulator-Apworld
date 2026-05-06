@@ -106,8 +106,8 @@ class ATSWorld(World):
     # Expose item and location groups for hint purposes
     item_name_groups = {
         "Trucks": {name for name in ALL_ITEMS if name.startswith("Unlock ")},
-        "Garage Deeds": {name for name in ALL_ITEMS if name.startswith("Garage Deed")},
-        "Recruitment Offices": {name for name in ALL_ITEMS if name.startswith("Recruitment Office")},
+        "Money Grants": {name for name in ALL_ITEMS if name.endswith("Money Grant")},
+        "XP Grants": {name for name in ALL_ITEMS if name.endswith("XP Grant")},
         "Truck Upgrades": {name for name in ALL_ITEMS if any(
             name == pack for pack in [
                 "Engine Tier 2", "Engine Tier 3", "Engine Tier 4", "Engine Tier 5",
@@ -182,8 +182,6 @@ class ATSWorld(World):
             "goal_money": self.options.goal_money.value,  # in thousands
             "shuffle_trucks": bool(self.options.shuffle_trucks),
             "shuffle_truck_upgrades": bool(self.options.shuffle_truck_upgrades),
-            "shuffle_garages": bool(self.options.shuffle_garages),
-            "shuffle_recruitment_offices": bool(self.options.shuffle_recruitment_offices),
             "level_milestone_checks": bool(self.options.level_milestone_checks),
             "cargo_delivery_checks": bool(self.options.cargo_delivery_checks),
             "city_arrival_checks": bool(self.options.city_arrival_checks),

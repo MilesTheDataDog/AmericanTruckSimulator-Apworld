@@ -91,26 +91,6 @@ class ShuffleTruckUpgrades(Toggle):
     default = 0
 
 
-class ShuffleGarages(Toggle):
-    """
-    If enabled, garages in each city must be received as Archipelago items before
-    they can be purchased. Without the garage deed for a city, the purchase button
-    is locked. Fully upgrading a received garage is still a location check.
-    """
-    display_name = "Shuffle Garages"
-    default = 1
-
-
-class ShuffleRecruitmentOffices(Toggle):
-    """
-    If enabled, recruitment offices are shuffled as items. Physically discovering
-    an office (driving past it) is always a location check, but interacting with
-    it to hire drivers requires receiving the corresponding office item.
-    """
-    display_name = "Shuffle Recruitment Offices"
-    default = 1
-
-
 class LevelMilestoneChecks(Toggle):
     """
     If enabled, reaching driver levels 5, 10, 15, 20, 25, and 30 each count as
@@ -174,8 +154,6 @@ class ATSOptions(PerGameCommonOptions):
     enabled_dlc: EnabledDLC
     shuffle_trucks: ShuffleTrucks
     shuffle_truck_upgrades: ShuffleTruckUpgrades
-    shuffle_garages: ShuffleGarages
-    shuffle_recruitment_offices: ShuffleRecruitmentOffices
     level_milestone_checks: LevelMilestoneChecks
     cargo_delivery_checks: CargoDeliveryChecks
     city_arrival_checks: CityArrivalChecks

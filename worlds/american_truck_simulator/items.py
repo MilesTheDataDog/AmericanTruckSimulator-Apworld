@@ -8,8 +8,8 @@ ATS_BASE_ID = 17_000_000
 # ── Item ID offsets ────────────────────────────────────────────────────────────
 # Truck model unlocks:    ATS_BASE_ID + 100   (slots 100–149)
 # Truck upgrade packs:    ATS_BASE_ID + 200   (slots 200–219)
-# Garage deeds:           ATS_BASE_ID + 1000  (slots 1000–1499)
-# Recruitment offices:    ATS_BASE_ID + 2000  (slots 2000–2499)
+# Money grant items:      ATS_BASE_ID + 3000  (slots 3000–3002)
+# XP grant items:         ATS_BASE_ID + 3100  (slots 3100–3102)
 # Filler items:           ATS_BASE_ID + 9000  (slots 9000–9099)
 
 
@@ -79,44 +79,57 @@ for _i, _pack in enumerate(_trucks_data["upgrade_packs"]):
         game_id=_pack["id"],
     )
 
-# ── Garage deed items ──────────────────────────────────────────────────────────
-# One item per city that has a garage, ordered by state then alphabetically.
-# This ordering is STABLE — new states append at the end.
-GARAGE_DEED_ITEMS: Dict[str, ATSItemData] = {}
-_garage_index = 0
-for _state in _cities_data["states"]:
-    _state_name = _state["name"]
-    for _city in _state["cities"]:
-        if _city.get("has_garage"):
-            _item_name = f"Garage Deed - {_city['name']}, {_state_name}"
-            GARAGE_DEED_ITEMS[_item_name] = ATSItemData(
-                code=ATS_BASE_ID + 1000 + _garage_index,
-                classification=ItemClassification.progression,
-                category="garage_deed",
-                game_id=_city["id"],
-            )
-            _garage_index += 1
+# ── Money grant items ──────────────────────────────────────────────────────────
+# Received as Archipelago items; client writes total to items.json and the DLL
+# adds the amount directly to the player's in-game money via pointer chain.
+MONEY_GRANT_ITEMS: Dict[str, ATSItemData] = {
+    "Small Money Grant": ATSItemData(
+        code=ATS_BASE_ID + 3000,
+        classification=ItemClassification.filler,
+        category="money_grant",
+        game_id="money_10000",
+    ),
+    "Medium Money Grant": ATSItemData(
+        code=ATS_BASE_ID + 3001,
+        classification=ItemClassification.filler,
+        category="money_grant",
+        game_id="money_50000",
+    ),
+    "Large Money Grant": ATSItemData(
+        code=ATS_BASE_ID + 3002,
+        classification=ItemClassification.filler,
+        category="money_grant",
+        game_id="money_150000",
+    ),
+}
 
-# ── Recruitment office items ───────────────────────────────────────────────────
-# One item per office slot (city_id + sequential suffix for cities with multiple).
-RECRUITMENT_OFFICE_ITEMS: Dict[str, ATSItemData] = {}
-_office_index = 0
-for _state in _cities_data["states"]:
-    _state_name = _state["name"]
-    for _city in _state["cities"]:
-        for _slot in range(_city.get("recruitment_office_count", 0)):
-            _suffix = f" #{_slot + 1}" if _city["recruitment_office_count"] > 1 else ""
-            _item_name = f"Recruitment Office - {_city['name']}{_suffix}, {_state_name}"
-            RECRUITMENT_OFFICE_ITEMS[_item_name] = ATSItemData(
-                code=ATS_BASE_ID + 2000 + _office_index,
-                classification=ItemClassification.useful,
-                category="recruitment_office",
-                game_id=f"{_city['id']}_office_{_slot + 1}",
-            )
-            _office_index += 1
+# ── XP grant items ─────────────────────────────────────────────────────────────
+# Client writes total to items.json; DLL adds via pointer chain to live XP value.
+XP_GRANT_ITEMS: Dict[str, ATSItemData] = {
+    "Small XP Grant": ATSItemData(
+        code=ATS_BASE_ID + 3100,
+        classification=ItemClassification.filler,
+        category="xp_grant",
+        game_id="xp_2000",
+    ),
+    "Medium XP Grant": ATSItemData(
+        code=ATS_BASE_ID + 3101,
+        classification=ItemClassification.filler,
+        category="xp_grant",
+        game_id="xp_10000",
+    ),
+    "Large XP Grant": ATSItemData(
+        code=ATS_BASE_ID + 3102,
+        classification=ItemClassification.filler,
+        category="xp_grant",
+        game_id="xp_50000",
+    ),
+}
 
 # ── Filler items ───────────────────────────────────────────────────────────────
 FILLER_ITEMS: Dict[str, ATSItemData] = {
+    **MONEY_GRANT_ITEMS,
+    **XP_GRANT_ITEMS,
     "Trucking Permit": ATSItemData(
         code=ATS_BASE_ID + 9000,
         classification=ItemClassification.filler,
@@ -138,8 +151,8 @@ VICTORY_ITEM = ATSItemData(
 ALL_ITEMS: Dict[str, ATSItemData] = {
     **TRUCK_UNLOCK_ITEMS,
     **TRUCK_UPGRADE_ITEMS,
-    **GARAGE_DEED_ITEMS,
-    **RECRUITMENT_OFFICE_ITEMS,
+    **MONEY_GRANT_ITEMS,
+    **XP_GRANT_ITEMS,
     **FILLER_ITEMS,
     VICTORY_ITEM_NAME: VICTORY_ITEM,
 }
@@ -151,8 +164,6 @@ def get_items_for_options(options) -> List[str]:
     """Return the list of item names to place into the pool given player options."""
     items: List[str] = []
 
-    enabled_state_ids = _get_enabled_state_ids(options)
-
     # Truck unlocks
     if options.shuffle_trucks:
         items.extend(TRUCK_UNLOCK_ITEMS.keys())
@@ -161,31 +172,9 @@ def get_items_for_options(options) -> List[str]:
     if options.shuffle_truck_upgrades:
         items.extend(TRUCK_UPGRADE_ITEMS.keys())
 
-    # Garage deeds — only for enabled states
-    if options.shuffle_garages:
-        for name, data in GARAGE_DEED_ITEMS.items():
-            city_state = _city_state_map.get(data.game_id)
-            if city_state in enabled_state_ids or city_state in ("california", "nevada"):
-                items.append(name)
-
-    # Recruitment office items — only for enabled states
-    if options.shuffle_recruitment_offices:
-        for name, data in RECRUITMENT_OFFICE_ITEMS.items():
-            city_id = data.game_id.rsplit("_office_", 1)[0]
-            city_state = _city_state_map.get(city_id)
-            if city_state in enabled_state_ids or city_state in ("california", "nevada"):
-                items.append(name)
-
     return items
 
 
 def _get_enabled_state_ids(options) -> set:
     """Return the set of state IDs (from cities.json) for all enabled DLC."""
     return {_DLC_KEY_MAP[dlc] for dlc in options.enabled_dlc.value if dlc in _DLC_KEY_MAP}
-
-
-# Build city_id → state_id reverse lookup
-_city_state_map: Dict[str, str] = {}
-for _state in _cities_data["states"]:
-    for _city in _state["cities"]:
-        _city_state_map[_city["id"]] = _state["id"]

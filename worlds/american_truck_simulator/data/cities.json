@@ -9,8 +9,8 @@
     "Kansas City appears in both Kansas (kansas_city_ks) and Missouri (kansas_city_mo).",
     "Longview appears in both Texas (longview_tx) and Washington (longview_wa).",
     "Burlington appears in both Colorado (burlington_co) and Iowa (burlington_ia).",
-    "Salina appears in both Kansas (salina) and Utah (salina_ut).",
-    "Sidney appears in both Montana (sidney_mt) and Nebraska (sydney_ne)."
+    "Salina appears in both Kansas (salina_ks) and Utah (salina_ut).",
+    "Sidney appears in both Montana (sidney_mt) and Nebraska (sidney_ne)."
   ],
   "states": [
     {
@@ -1573,7 +1573,7 @@
           "needs_verification": false
         },
         {
-          "id": "salina",
+          "id": "salina_ks",
           "name": "Salina",
           "has_garage": true,
           "recruitment_office_count": 1,
@@ -1673,7 +1673,7 @@
           "needs_verification": false
         },
         {
-          "id": "sydney_ne",
+          "id": "sidney_ne",
           "name": "Sidney",
           "has_garage": false,
           "recruitment_office_count": 0,

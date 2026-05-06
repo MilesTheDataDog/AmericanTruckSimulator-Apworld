@@ -339,8 +339,8 @@ class ATSContext(CommonContext):
         # Items received from server (sent to plugin)
         self._unlocked_trucks: Set[str] = set()
         self._unlocked_upgrade_tiers: Dict[str, int] = {}
-        self._unlocked_garages: Set[str] = set()
-        self._unlocked_offices: Set[str] = set()
+        self._total_money_granted: int = 0
+        self._total_xp_granted: int = 0
 
         # Track how many items we have applied so we can skip them on reconnect/resync
         self._applied_item_count: int = 0
@@ -459,18 +459,23 @@ class ATSContext(CommonContext):
         elif item_name == "Accessories Pack":
             self._unlocked_upgrade_tiers["accessories"] = 2
 
-        elif item_name.startswith("Garage Deed - "):
-            # city id embedded in game_id; look it up
-            city_id = self._city_id_from_item_name(item_name, "Garage Deed - ")
-            if city_id:
-                self._unlocked_garages.add(city_id)
-                logger.info(f"[ATS] Garage deed received: {city_id}")
+        elif item_name.endswith("Money Grant"):
+            from worlds.american_truck_simulator.items import ALL_ITEMS
+            item_data = ALL_ITEMS.get(item_name)
+            if item_data:
+                # game_id is "money_10000", "money_50000", or "money_150000"
+                amount = int(item_data.game_id.split("_")[1])
+                self._total_money_granted += amount
+                logger.info(f"[ATS] Money grant: +${amount:,} (total granted: ${self._total_money_granted:,})")
 
-        elif item_name.startswith("Recruitment Office - "):
-            city_id = self._city_id_from_item_name(item_name, "Recruitment Office - ")
-            if city_id:
-                self._unlocked_offices.add(city_id)
-                logger.info(f"[ATS] Office unlocked: {city_id}")
+        elif item_name.endswith("XP Grant"):
+            from worlds.american_truck_simulator.items import ALL_ITEMS
+            item_data = ALL_ITEMS.get(item_name)
+            if item_data:
+                # game_id is "xp_2000", "xp_10000", or "xp_50000"
+                amount = int(item_data.game_id.split("_")[1])
+                self._total_xp_granted += amount
+                logger.info(f"[ATS] XP grant: +{amount:,} XP (total granted: {self._total_xp_granted:,})")
 
 
     # ── Items file (client → plugin) ───────────────────────────────────────────
@@ -482,14 +487,12 @@ class ATSContext(CommonContext):
             "timestamp": time.time(),
             "unlocked_trucks": sorted(self._unlocked_trucks),
             "upgrade_tiers": self._unlocked_upgrade_tiers,
-            "unlocked_garages": sorted(self._unlocked_garages),
-            "unlocked_offices": sorted(self._unlocked_offices),
+            "total_money_granted": self._total_money_granted,
+            "total_xp_granted": self._total_xp_granted,
             "win_condition": self.slot_data.get("win_condition", 0),
             "goal_level": self.slot_data.get("goal_level", 35),
             "goal_money_thousands": self.slot_data.get("goal_money", 1000),
             "shuffle_trucks": self.slot_data.get("shuffle_trucks", True),
-            "shuffle_garages": self.slot_data.get("shuffle_garages", True),
-            "shuffle_recruitment_offices": self.slot_data.get("shuffle_recruitment_offices", True),
             "shuffle_truck_upgrades": self.slot_data.get("shuffle_truck_upgrades", False),
             "item_notifications": self._notifications,
         }
@@ -739,17 +742,6 @@ class ATSContext(CommonContext):
             return f"Earn ${money:,}"
         else:
             return f"Reach Level {lvl} OR ${money:,}"
-
-    # ── Helpers ────────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _city_id_from_item_name(item_name: str, prefix: str) -> Optional[str]:
-        """Extract a city ID from an item name by cross-referencing the items table."""
-        from worlds.american_truck_simulator.items import ALL_ITEMS
-        data = ALL_ITEMS.get(item_name)
-        if data:
-            return data.game_id
-        return None
 
 # ── Steam launcher ─────────────────────────────────────────────────────────────
 
