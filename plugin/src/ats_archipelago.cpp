@@ -223,12 +223,7 @@ static void read_items_file() {
                 }
             }
 
-            if (j.contains("item_notifications") && j["item_notifications"].is_array()) {
-                std::size_t n = j["item_notifications"].size();
-                if (n > 0)
-                    log("items.json: " + std::to_string(n) +
-                        " notification(s) queued for Lua mod");
-            }
+            // (Lua mod reads item_notifications directly; no need to log here)
 
             reload_counter = j.value("reload_counter", 0);
             in_game        = g_state.in_game;
@@ -246,10 +241,15 @@ static void read_items_file() {
     if (!g_reload_counter_synced) {
         g_reload_counter_synced = true;
         g_last_reload_counter   = reload_counter;
+        log("reload_counter synced to " + std::to_string(reload_counter) +
+            "; in_game=" + (in_game ? "true" : "false"));
         return;
     }
 
     if (reload_counter > g_last_reload_counter) {
+        log("reload_counter changed: " + std::to_string(g_last_reload_counter) +
+            " -> " + std::to_string(reload_counter) +
+            "; in_game=" + (in_game ? "true" : "false"));
         if (in_game) {
             g_last_reload_counter = reload_counter;
             trigger_quick_load();
