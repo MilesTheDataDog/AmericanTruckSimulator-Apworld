@@ -257,6 +257,8 @@ static bool     g_hook_installed = false;
 static std::atomic<int32_t> g_money_offset{-1};
 static bool                 g_money_is_int64 = false;
 static std::atomic<int64_t> g_money_hint{0};
+static std::atomic<int32_t> g_xp_hint{0};
+static double               g_last_scan_attempt = 0.0;
 
 // Warning-once flags — reset when a new game session starts so failures are re-logged.
 static bool g_warn_xp_no_obj     = false;
@@ -401,6 +403,76 @@ static int32_t scan_money_offset(uintptr_t obj, int64_t hint) {
     return -1;
 }
 
+// ── Player-object heap scan ────────────────────────────────────────────────────
+// Fallback for when the trampoline hook hasn't fired yet.
+// Scans PAGE_READWRITE heap for xp_hint at [addr+XP_OFFSET_IN_OBJ], then
+// cross-validates by checking money_hint exists at [candidate+0x400..+0x1400].
+static uintptr_t scan_for_player_object(int32_t xp_hint, int64_t money_hint) {
+    if (xp_hint <= 0 || money_hint <= 0) return 0;
+
+    MEMORY_BASIC_INFORMATION mbi;
+    uintptr_t addr = 0x10000;
+    int candidates = 0;
+
+    while (VirtualQuery(reinterpret_cast<LPCVOID>(addr), &mbi, sizeof(mbi)) == sizeof(mbi)) {
+        if (mbi.State   == MEM_COMMIT   &&
+            mbi.Type    == MEM_PRIVATE  &&
+            mbi.Protect == PAGE_READWRITE &&
+            mbi.RegionSize > XP_OFFSET_IN_OBJ + 4 &&
+            mbi.RegionSize < 128ULL * 1024 * 1024)
+        {
+            const uint8_t* region   = reinterpret_cast<const uint8_t*>(mbi.BaseAddress);
+            uintptr_t      rbase    = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+            size_t         rsize    = mbi.RegionSize;
+
+            for (size_t i = XP_OFFSET_IN_OBJ; i + 4 <= rsize; i += 4) {
+                int32_t v = 0;
+                memcpy(&v, region + i, 4);
+                if (v != xp_hint) continue;
+
+                uintptr_t candidate = rbase + i - XP_OFFSET_IN_OBJ;
+                ++candidates;
+
+                // Cross-check: money_hint must appear in [candidate+0x400, candidate+0x1400).
+                uintptr_t scan_lo = candidate + 0x400;
+                uintptr_t scan_hi = candidate + 0x1400;
+                if (scan_lo < rbase) continue;
+                scan_hi = (std::min)(scan_hi, rbase + rsize);
+
+                bool money_ok = false;
+                // Try int64
+                for (uintptr_t a = scan_lo; a + 8 <= scan_hi && !money_ok; a += 8) {
+                    int64_t mv = 0; memcpy(&mv, reinterpret_cast<void*>(a), 8);
+                    if (mv == money_hint) money_ok = true;
+                }
+                // Try int32 if hint fits
+                if (!money_ok && money_hint <= static_cast<int64_t>(INT32_MAX)) {
+                    auto mh32 = static_cast<int32_t>(money_hint);
+                    for (uintptr_t a = scan_lo; a + 4 <= scan_hi && !money_ok; a += 4) {
+                        int32_t mv = 0; memcpy(&mv, reinterpret_cast<void*>(a), 4);
+                        if (mv == mh32) money_ok = true;
+                    }
+                }
+                if (!money_ok) continue;
+
+                log("scan: player object found @ " + hex_addr(candidate) +
+                    "  xp=" + std::to_string(xp_hint) +
+                    "  money=$" + std::to_string(money_hint) +
+                    "  candidates_checked=" + std::to_string(candidates));
+                return candidate;
+            }
+        }
+        if (mbi.RegionSize == 0) break;
+        addr += mbi.RegionSize;
+    }
+
+    log("scan: player object not found (xp=" + std::to_string(xp_hint) +
+        ", money=$" + std::to_string(money_hint) +
+        ", candidates=" + std::to_string(candidates) + ")",
+        SCS_LOG_TYPE_warning);
+    return 0;
+}
+
 // ── In-process money and XP grants ────────────────────────────────────────────
 
 static bool grant_money_memory(int64_t amount) {
@@ -515,6 +587,9 @@ static void read_items_file() {
             int64_t hint = j.value("current_money_hint", (int64_t)0);
             if (hint > 0) g_money_hint.store(hint, std::memory_order_release);
 
+            int32_t xhint = j.value("current_xp_hint", (int32_t)0);
+            if (xhint > 0) g_xp_hint.store(xhint, std::memory_order_release);
+
             g_items.upgrade_tiers.clear();
             if (j.contains("upgrade_tiers") && j["upgrade_tiers"].is_object()) {
                 for (auto& [k, v] : j["upgrade_tiers"].items()) {
@@ -555,6 +630,20 @@ static void read_items_file() {
     // Apply money/XP grant deltas when the simulation is running.
     // We gate on in_game so the save file is loaded before we write to memory.
     if (!in_game) return;
+
+    // If the trampoline hook hasn't fired yet, try a direct heap scan using the
+    // XP value from the save file as a search key, cross-validated with the
+    // money balance.  Rate-limited to once per 30 seconds to avoid stalling.
+    if (g_player_object == 0) {
+        double now = now_seconds();
+        if (now - g_last_scan_attempt >= 30.0) {
+            g_last_scan_attempt = now;
+            int32_t xhint = g_xp_hint.load(std::memory_order_acquire);
+            int64_t mhint = g_money_hint.load(std::memory_order_acquire);
+            uintptr_t found = scan_for_player_object(xhint, mhint);
+            if (found) g_player_object = found;
+        }
+    }
 
     bool grants_changed = false;
 
@@ -722,10 +811,9 @@ SCSAPI_VOID telemetry_started(const scs_event_t event,
                                const scs_context_t context) {
     std::lock_guard<std::mutex> lock(g_state_mutex);
     g_state.in_game = true;
-    // Reset money offset so we rescan against the current save's balance.
-    // On a fresh save load the player object base address may differ; the
-    // cached offset from a prior session would point to the wrong location.
+    // Reset money offset and scan cooldown so grants work cleanly each session.
     g_money_offset.store(-1, std::memory_order_release);
+    g_last_scan_attempt = 0.0;
     // Reset warning-once flags so any new failures are logged.
     g_warn_xp_no_obj     = false;
     g_warn_money_no_obj  = false;

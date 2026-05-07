@@ -357,6 +357,7 @@ class ATSContext(CommonContext):
         self._save_warned_unreadable: bool = False
         self._fresh_save_checked: bool = False
         self._save_path_logged: bool = False
+        self.current_xp: int = 0
 
     # ── Archipelago callbacks ──────────────────────────────────────────────────
 
@@ -495,8 +496,9 @@ class ATSContext(CommonContext):
             "shuffle_trucks": self.slot_data.get("shuffle_trucks", True),
             "shuffle_truck_upgrades": self.slot_data.get("shuffle_truck_upgrades", False),
             "item_notifications": self._notifications,
-            # Used by the C++ plugin to scan the player object for the money field.
+            # Used by the C++ plugin to locate the player object in memory.
             "current_money_hint": self.current_money,
+            "current_xp_hint": self.current_xp,
         }
         _write_json(ITEMS_FILE, payload)
 
@@ -688,9 +690,11 @@ class ATSContext(CommonContext):
         level = _xp_to_level(save["experience_points"])
         self.current_level = level
         new_money = save["money"]
-        if new_money != self.current_money:
+        new_xp    = save["experience_points"]
+        if new_money != self.current_money or new_xp != self.current_xp:
             self.current_money = new_money
-            self._write_items_file()  # push updated money hint to plugin
+            self.current_xp    = new_xp
+            self._write_items_file()  # push updated hints to plugin
 
         from worlds.american_truck_simulator.locations import (
             ALL_LOCATIONS, CITY_ARRIVAL_LOCATIONS, GARAGE_UPGRADE_LOCATIONS,
