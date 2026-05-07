@@ -405,6 +405,7 @@ class ATSContext(CommonContext):
         self.plugin_connected: bool = False
         self._last_events_mtime: float = 0.0
         self._processed_event_ids: Set[str] = set()
+        self._events_err_count: int = 0  # consecutive events.json read failures
 
         # Game state tracked by client
         self.current_level: int = 0
@@ -434,6 +435,7 @@ class ATSContext(CommonContext):
         self._save_path_logged: bool = False
         self.current_xp: int = 0
         self._save_is_plain: bool = False  # True when save uses SiiN (g_save_format 2)
+        self._save_not_found_warned: bool = False
 
         # Save-grant tracking: how much XP / money has been baked into the save
         # file already (persisted across sessions in grants.json).
@@ -604,12 +606,25 @@ class ATSContext(CommonContext):
         if not force and mtime <= self._last_events_mtime:
             return
 
-        self._last_events_mtime = mtime
-
+        # Update mtime only on success so transient PermissionErrors are retried.
         try:
             data = _read_json(EVENTS_FILE)
+            self._last_events_mtime = mtime
+            if self._events_err_count > 0:
+                logger.info("[ATS] events.json read recovered after lock.")
+            self._events_err_count = 0
+        except PermissionError:
+            self._events_err_count += 1
+            if self._events_err_count == 1:
+                logger.warning(
+                    "[ATS] events.json is momentarily locked by the plugin DLL "
+                    "(rename race) — will retry next poll. This is normal if rare."
+                )
+            return
         except Exception:
+            self._events_err_count += 1
             logger.error(f"[ATS] Failed to read events file: {traceback.format_exc()}")
+            self._last_events_mtime = mtime  # don't retry persistent errors
             return
 
         if not isinstance(data, dict):
@@ -726,9 +741,19 @@ class ATSContext(CommonContext):
 
         save_path = _find_ats_save_file()
         if not save_path:
-            logger.debug("[ATS] No ATS save file found; city/garage/level checks skipped.")
+            if not self._save_not_found_warned:
+                self._save_not_found_warned = True
+                _docs = Path(os.environ.get("USERPROFILE", Path.home())) / "Documents" / "American Truck Simulator"
+                logger.warning(
+                    "[ATS] No ATS save file (game.sii) found. Searched:\n"
+                    f"  {_docs / 'profiles'}\n"
+                    f"  {_docs / 'steam' / 'profiles'}\n"
+                    "XP/money grants cannot be applied until a save file is found. "
+                    "Make sure ATS has been saved at least once."
+                )
             return
         if not self._save_path_logged:
+            self._save_not_found_warned = False  # reset in case it recovers
             self._save_path_logged = True
             logger.info(f"[ATS] Found save file: {save_path}")
         logger.debug(f"[ATS] Watching save file: {save_path}")
