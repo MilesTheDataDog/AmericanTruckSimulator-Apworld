@@ -849,10 +849,39 @@ class ATSContext(CommonContext):
         if text is None:
             if not self._save_warned_unreadable:
                 self._save_warned_unreadable = True
+                # Try to tell the user which config.cfg to edit, including the
+                # Steam Cloud remote path if that's where the save was found.
+                _cfg_paths = []
+                _save_remote = None
+                for _part in save_path.parts:
+                    pass  # walk handled below
+                # Check if the save is under a Steam userdata remote dir
+                for _remote in _steam_userdata_roots():
+                    try:
+                        save_path.relative_to(_remote)
+                        _save_remote = _remote
+                        break
+                    except ValueError:
+                        pass
+                if _save_remote:
+                    _cfg_paths.append(str(_save_remote / "config.cfg"))
+                _docs_cfg = (
+                    Path(os.environ.get("USERPROFILE", Path.home()))
+                    / "Documents" / "American Truck Simulator" / "config.cfg"
+                )
+                _cfg_paths.append(str(_docs_cfg))
+                _cfg_hint = "\n  ".join(_cfg_paths)
                 logger.warning(
-                    "[ATS] Could not read save file. If saves are encrypted (BSII v3) "
-                    "you need the 'cryptography' Python package installed, OR add "
-                    "'g_save_format 2' to config.cfg so ATS writes plain-text saves."
+                    "[ATS] Could not read save file (save is encrypted BSII v3).\n"
+                    "To fix, pick ONE of these options:\n"
+                    "  Option A — Install the cryptography package:\n"
+                    "    pip install cryptography\n"
+                    "  Option B — Switch ATS to plain-text saves:\n"
+                    f"  1. Open config.cfg (try these locations):\n"
+                    f"       {_cfg_hint}\n"
+                    "  2. Add this line:  uset g_save_format \"2\"\n"
+                    "  3. In ATS: pause menu → Save & Exit  (so a new plain-text save is written)\n"
+                    "  4. Restart the client."
                 )
             return
         self._save_warned_unreadable = False
