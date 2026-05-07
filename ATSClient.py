@@ -220,7 +220,20 @@ def _decrypt_bsii_v3(payload: bytes) -> Optional[bytes]:
         return None
 
 
-def _write_sii_save(path: Path, text: str) -> bool:
+def _write_sii_plain(path: Path, text: str) -> bool:
+    """Write plaintext SiiNunit text as a plain-text save (g_save_format 2)."""
+    try:
+        raw = text.encode("utf-8")
+        tmp = path.with_suffix(".tmp")
+        tmp.write_bytes(raw)
+        tmp.replace(path)
+        return True
+    except Exception as e:
+        logger.error(f"[ATS] _write_sii_plain failed for {path}: {e}")
+        return False
+
+
+def _write_sii_encrypted(path: Path, text: str) -> bool:
     """Encode plaintext SiiNunit text as a BSII v3 (AES-256-ECB + zlib) save file."""
     try:
         from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -229,8 +242,6 @@ def _write_sii_save(path: Path, text: str) -> bool:
         raw = text.encode("utf-8")
         compressed = zlib.compress(raw, level=9)
 
-        # Pad to 16-byte AES block boundary with zero bytes.
-        # The game's C++ zlib inflate() reads until Z_STREAM_END and ignores trailing bytes.
         rem = len(compressed) % 16
         if rem:
             compressed += b"\x00" * (16 - rem)
@@ -239,17 +250,21 @@ def _write_sii_save(path: Path, text: str) -> bool:
         enc = cipher.encryptor()
         encrypted = enc.update(compressed) + enc.finalize()
 
-        # BSII v3 layout: magic(4) + version(4) + plaintext_size(4) + encrypted_data
-        # The 4-byte plaintext size is written by ATS itself between the version
-        # and encrypted data; without it ATS silently rejects the file on load.
         header = b"BSII" + struct.pack("<I", 3) + struct.pack("<I", len(raw))
         tmp = path.with_suffix(".tmp")
         tmp.write_bytes(header + encrypted)
         tmp.replace(path)
         return True
     except Exception as e:
-        logger.error(f"[ATS] _write_sii_save failed for {path}: {e}")
+        logger.error(f"[ATS] _write_sii_encrypted failed for {path}: {e}")
         return False
+
+
+def _write_sii_save(path: Path, text: str, plain: bool = False) -> bool:
+    """Write SII save — plain text if plain=True, encrypted BSII v3 otherwise."""
+    if plain:
+        return _write_sii_plain(path, text)
+    return _write_sii_encrypted(path, text)
 
 
 def _read_sii_text(path: Path) -> Optional[str]:
@@ -418,6 +433,7 @@ class ATSContext(CommonContext):
         self._fresh_save_checked: bool = False
         self._save_path_logged: bool = False
         self.current_xp: int = 0
+        self._save_is_plain: bool = False  # True when save uses SiiN (g_save_format 2)
 
         # Save-grant tracking: how much XP / money has been baked into the save
         # file already (persisted across sessions in grants.json).
@@ -732,14 +748,21 @@ class ATSContext(CommonContext):
             return
         self._save_last_mtime = mtime
 
+        # Detect save format before parsing so we can write back in the same format.
+        try:
+            raw_header = save_path.read_bytes()[:4]
+            self._save_is_plain = (raw_header == _SIIN_MAGIC)
+        except OSError:
+            self._save_is_plain = False
+
         text = _read_sii_text(save_path)
         if text is None:
             if not self._save_warned_unreadable:
                 self._save_warned_unreadable = True
                 logger.warning(
-                    "[ATS] Could not read save file — it may use AES encryption "
-                    "(BSII v3) with an unrecognised key. Level milestones, city "
-                    "arrivals, and garage upgrades will not fire until this is resolved."
+                    "[ATS] Could not read save file. If saves are encrypted (BSII v3) "
+                    "you need the 'cryptography' Python package installed, OR add "
+                    "'g_save_format 2' to config.cfg so ATS writes plain-text saves."
                 )
             return
         self._save_warned_unreadable = False
@@ -808,19 +831,27 @@ class ATSContext(CommonContext):
                     modified, count=1,
                 )
 
-            wrote_autosave = _write_sii_save(save_path, modified)
+            plain = self._save_is_plain
+            logger.info(f"[ATS] Writing grants — format={'plain-text' if plain else 'BSII-v3-encrypted'}")
 
-            # Also write to the quicksave slot so F9 (quick-load) picks it up.
+            # Write to the quicksave slot first — F9 loads quicksave, not autosave.
             quicksave_dir  = save_path.parent.parent / "quicksave"
             quicksave_path = quicksave_dir / "game.sii"
             wrote_quicksave = False
             try:
                 quicksave_dir.mkdir(parents=True, exist_ok=True)
-                wrote_quicksave = _write_sii_save(quicksave_path, modified)
+                wrote_quicksave = _write_sii_save(quicksave_path, modified, plain=plain)
             except Exception as e:
                 logger.warning(f"[ATS] Could not write quicksave: {e}")
 
-            if wrote_autosave or wrote_quicksave:
+            # Also write back to the autosave slot so the next natural autosave
+            # does not stomp the grants if the player saves before F9 fires.
+            wrote_autosave = _write_sii_save(save_path, modified, plain=plain)
+
+            if wrote_quicksave:
+                # Only increment reload_counter when quicksave succeeded —
+                # F9 loads the quicksave slot, so firing it without a valid
+                # quicksave would reload the un-patched save.
                 self._save_applied_xp    += xp_delta
                 self._save_applied_money += money_delta
                 _persist_save_grants(self._save_applied_xp, self._save_applied_money)
@@ -835,11 +866,28 @@ class ATSContext(CommonContext):
                     f"+${money_delta:,} (total ${new_money:,}) — "
                     f"reload_counter={self._reload_counter} "
                     f"(autosave={'ok' if wrote_autosave else 'FAIL'}, "
-                    f"quicksave={'ok' if wrote_quicksave else 'FAIL'})"
+                    f"quicksave=ok)"
                 )
-                self._write_items_file()   # sends reload_counter to DLL
+                self._write_items_file()   # sends updated reload_counter to DLL
+            elif wrote_autosave:
+                logger.warning(
+                    "[ATS] Grants written to autosave only — quicksave write failed. "
+                    "Grants will appear after the next time ATS loads that save slot "
+                    "(sleep in-game or use Load Game). F9 quick-load will NOT be triggered."
+                )
+                # Still mark as applied so we don't try to re-apply on next poll.
+                self._save_applied_xp    += xp_delta
+                self._save_applied_money += money_delta
+                _persist_save_grants(self._save_applied_xp, self._save_applied_money)
+                self.current_xp    = new_xp
+                self.current_money = new_money
             else:
-                logger.error("[ATS] Grant write failed for both autosave and quicksave")
+                logger.error(
+                    "[ATS] Grant write FAILED for both autosave and quicksave. "
+                    f"format={'plain-text' if plain else 'BSII-v3'}. "
+                    "If saves are encrypted, install the 'cryptography' package "
+                    "or set 'g_save_format 2' in config.cfg."
+                )
         else:
             # No pending grants — still write items.json if anything else changed
             # (handled by the caller / item-receive path; no extra write needed here)
