@@ -7,8 +7,8 @@
  *  1. Receives game events (job delivered, level-up, city visited, etc.)
  *  2. Writes those events to a JSON file the Python client reads.
  *  3. Reads the unlocked-items JSON file the Python client writes.
- *  4. Filters job acceptance: jobs to/from cities whose garage/office is locked
- *     are handled by the Lua mod layer.
+ *  4. Triggers a quick-load (F9) when the Python client signals it has
+ *     patched the save file with pending XP / money grants.
  *
  * Build requirements:
  *  - Windows x64 (ATS is Windows-only)
@@ -38,7 +38,6 @@
 #include <ctime>
 #include <sstream>
 #include <iomanip>
-#include <atomic>
 
 // SCS SDK headers — obtain from https://modding.scssoft.com/wiki/SDK
 #include "scssdk_telemetry.h"
@@ -100,8 +99,6 @@ struct ItemState {
     int win_condition = 0;
     int goal_level = 35;
     long long goal_money = 1000000;
-    int64_t total_money_granted = 0;
-    int32_t total_xp_granted = 0;
     double last_read_time = 0.0;
 };
 
@@ -147,466 +144,55 @@ static std::string hex_addr(uintptr_t addr) {
     return oss.str();
 }
 
-// ── Game module base ───────────────────────────────────────────────────────────
-// Cached at init time. GetModuleHandleA(nullptr) returns the base address of the
-// host process (amtrucks.exe). Hardcoding the exe name is fragile and wrong here —
-// the process is amtrucks.exe, not amtrucks_x64.exe.
-static uintptr_t g_module_base = 0;
+// ── Quick-load trigger ─────────────────────────────────────────────────────────
+// Python patches the save file with pending XP/money grants, writes the
+// quicksave slot, then increments reload_counter in items.json.  The DLL
+// sends F9 to the ATS window so the game loads the patched quicksave.
 
-static void init_module_base() {
-    g_module_base = reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr));
-    if (g_module_base == 0) {
-        log("WARNING: could not obtain module base address — XP/money grants will not work", SCS_LOG_TYPE_warning);
-    } else {
-        log("Module base: " + hex_addr(g_module_base));
-    }
-}
-// The DLL must not double-grant money/XP that was already applied to a previous
-// game session. We persist applied totals in grants.json so they survive restarts.
-static int64_t g_applied_money = 0;
-static int32_t g_applied_xp   = 0;
-static fs::path g_grants_file;
+static int  g_last_reload_counter  = 0;
+static bool g_reload_counter_synced = false;  // true after first items.json read
 
-static void load_grants_file() {
-    if (!fs::exists(g_grants_file)) return;
-    try {
-        std::ifstream f(g_grants_file);
-        json j = json::parse(f);
-        g_applied_money = j.value("applied_money", (int64_t)0);
-        g_applied_xp    = j.value("applied_xp",    (int32_t)0);
-        log("grants.json loaded: applied_money=" + std::to_string(g_applied_money) +
-            " applied_xp=" + std::to_string(g_applied_xp));
-    } catch (const std::exception& e) {
-        log(std::string("Failed to read grants.json: ") + e.what(), SCS_LOG_TYPE_warning);
-    }
-}
+static HWND find_ats_window() {
+    struct EnumData { DWORD pid; HWND hwnd; };
+    EnumData d = { GetCurrentProcessId(), nullptr };
 
-static void save_grants_file() {
-    json j;
-    j["applied_money"] = g_applied_money;
-    j["applied_xp"]    = g_applied_xp;
-    fs::path tmp = g_grants_file;
-    tmp += ".tmp";
-    try {
-        std::ofstream f(tmp);
-        f << j.dump(2);
-        f.close();
-        fs::rename(tmp, g_grants_file);
-    } catch (const std::exception& e) {
-        log(std::string("Failed to write grants.json: ") + e.what(), SCS_LOG_TYPE_warning);
-    }
-}
-
-// ── Pointer chain helper ───────────────────────────────────────────────────────
-// Follows a Cheat Engine-style multi-level pointer chain rooted at the game module.
-//
-//   chain[0] = static offset from module base → address of first pointer
-//   chain[1..n-2] = after each dereference, add this offset before next deref
-//   chain[n-1] = final offset added after last dereference → value address
-//
-// Returns the address of the final value, or 0 on failure.
-static uintptr_t follow_chain(uintptr_t module_base, uintptr_t static_offset,
-                               const std::vector<uintptr_t>& deref_offsets,
-                               uintptr_t final_offset)
-{
-    uintptr_t ptr = module_base + static_offset;
-
-    // Read first pointer
-    MEMORY_BASIC_INFORMATION mbi;
-    if (VirtualQuery(reinterpret_cast<LPCVOID>(ptr), &mbi, sizeof(mbi)) != sizeof(mbi)) return 0;
-    if (mbi.State != MEM_COMMIT) return 0;
-    uintptr_t p = 0;
-    memcpy(&p, reinterpret_cast<void*>(ptr), sizeof(p));
-    if (p == 0) return 0;
-
-    // Follow each intermediate offset: add → deref
-    for (uintptr_t off : deref_offsets) {
-        ptr = p + off;
-        if (VirtualQuery(reinterpret_cast<LPCVOID>(ptr), &mbi, sizeof(mbi)) != sizeof(mbi)) return 0;
-        if (mbi.State != MEM_COMMIT) return 0;
-        p = 0;
-        memcpy(&p, reinterpret_cast<void*>(ptr), sizeof(p));
-        if (p == 0) return 0;
-    }
-
-    return p + final_offset;
-}
-
-// ── Trampoline hook for player-object capture ──────────────────────────────────
-// XP write instruction in ATS 1.59 (amtrucks.exe+0x422196):
-//   89 BE 2C 06 00 00  =  mov [rsi+0x62C],edi
-// RSI is the player/economy heap object.
-//
-// Technique (same as the community CE table): allocate a code cave near the
-// hook site, write a 6-byte relative JMP there, and in the cave store RSI then
-// execute the original instruction and jump back.  No VEH, no debug registers.
-//
-// Money offset is auto-discovered by scanning the player object for the current
-// balance read from the save file (written into items.json by the Python client).
-
-static const uint32_t XP_WRITE_INST_OFFSET = 0x422196;
-static const uint32_t XP_OFFSET_IN_OBJ     = 0x62C;
-static const uint8_t  XP_WRITE_BYTES[6]    = {0x89, 0xBE, 0x2C, 0x06, 0x00, 0x00};
-
-// Written by the code cave (plain aligned store is hardware-atomic on x64).
-alignas(8) static volatile uintptr_t g_player_object = 0;
-static uintptr_t g_player_object_logged = 0; // last value we logged so we only log changes
-static uint8_t* g_cave_mem       = nullptr;
-static bool     g_hook_installed = false;
-
-static std::atomic<int32_t> g_money_offset{-1};
-static bool                 g_money_is_int64 = false;
-static std::atomic<int64_t> g_money_hint{0};
-static std::atomic<int32_t> g_xp_hint{0};
-static double               g_last_scan_attempt = 0.0;
-
-// Warning-once flags — reset when a new game session starts so failures are re-logged.
-static bool g_warn_xp_no_obj     = false;
-static bool g_warn_money_no_obj  = false;
-static bool g_warn_money_no_hint = false;
-static bool g_warn_money_no_scan = false;
-
-static bool install_xp_hook() {
-    if (g_module_base == 0 || g_hook_installed) return false;
-
-    uint8_t* site = reinterpret_cast<uint8_t*>(g_module_base + XP_WRITE_INST_OFFSET);
-
-    if (memcmp(site, XP_WRITE_BYTES, 6) != 0) {
-        log("XP hook: instruction bytes at +0x422196 don't match expected — "
-            "ATS version may have changed; hook not installed",
-            SCS_LOG_TYPE_warning);
-        return false;
-    }
-
-    // Allocate executable code cave within ±2 GB of the hook site so the
-    // 5-byte E9 relative JMP can reach it.
-    const size_t   CAVE_SIZE    = 64;
-    const intptr_t SEARCH_RANGE = 0x70000000;
-
-    g_cave_mem = nullptr;
-    for (int sign : {-1, 1}) {
-        for (intptr_t delta = 0x1000; delta < SEARCH_RANGE && !g_cave_mem; delta += 0x1000) {
-            void* hint = reinterpret_cast<void*>(
-                reinterpret_cast<intptr_t>(site) + sign * delta);
-            void* p = VirtualAlloc(hint, CAVE_SIZE,
-                                   MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-            if (p) {
-                intptr_t rel = reinterpret_cast<intptr_t>(p) -
-                               reinterpret_cast<intptr_t>(site + 5);
-                if (rel >= INT32_MIN && rel <= INT32_MAX) {
-                    g_cave_mem = reinterpret_cast<uint8_t*>(p);
-                } else {
-                    VirtualFree(p, 0, MEM_RELEASE);
-                }
-            }
+    EnumWindows([](HWND hwnd, LPARAM lp) -> BOOL {
+        auto* data = reinterpret_cast<EnumData*>(lp);
+        if (!IsWindowVisible(hwnd)) return TRUE;
+        DWORD pid = 0;
+        GetWindowThreadProcessId(hwnd, &pid);
+        if (pid == data->pid) {
+            data->hwnd = hwnd;
+            return FALSE;
         }
-        if (g_cave_mem) break;
-    }
-    if (!g_cave_mem) {
-        log("XP hook: failed to allocate code cave within JMP range", SCS_LOG_TYPE_warning);
-        return false;
-    }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&d));
 
-    // Code cave layout (36 bytes):
-    //  +0   50                       push rax
-    //  +1   48 B8 <8B addr>          movabs rax, &g_player_object
-    //  +11  48 89 30                 mov [rax], rsi     ← captures player object
-    //  +14  58                       pop rax
-    //  +15  89 BE 2C 06 00 00        mov [rsi+0x62C],edi  (original instruction)
-    //  +21  FF 25 01 00 00 00        jmp [rip+1]  (rip=+27, addr at +28)
-    //  +27  90                       nop (alignment)
-    //  +28  <8B return addr>         = site + 6
-    uint8_t  cc[36];
-    memset(cc, 0x90, sizeof(cc));
-    uint64_t po_addr  = reinterpret_cast<uint64_t>(
-                            const_cast<uintptr_t*>(&g_player_object));
-    uint64_t ret_addr = reinterpret_cast<uint64_t>(site + 6);
-
-    cc[0]  = 0x50;
-    cc[1]  = 0x48; cc[2]  = 0xB8;
-    memcpy(cc + 3, &po_addr, 8);
-    cc[11] = 0x48; cc[12] = 0x89; cc[13] = 0x30;
-    cc[14] = 0x58;
-    memcpy(cc + 15, XP_WRITE_BYTES, 6);
-    cc[21] = 0xFF; cc[22] = 0x25;
-    cc[23] = 0x01; cc[24] = 0x00; cc[25] = 0x00; cc[26] = 0x00;
-    cc[27] = 0x90;
-    memcpy(cc + 28, &ret_addr, 8);
-
-    memcpy(g_cave_mem, cc, sizeof(cc));
-    FlushInstructionCache(GetCurrentProcess(), g_cave_mem, sizeof(cc));
-
-    // Overwrite hook site with: E9 <rel32> 90
-    DWORD old_prot;
-    if (!VirtualProtect(site, 6, PAGE_EXECUTE_READWRITE, &old_prot)) {
-        VirtualFree(g_cave_mem, 0, MEM_RELEASE);
-        g_cave_mem = nullptr;
-        log("XP hook: VirtualProtect failed", SCS_LOG_TYPE_warning);
-        return false;
-    }
-    int32_t rel = static_cast<int32_t>(
-        reinterpret_cast<intptr_t>(g_cave_mem) -
-        reinterpret_cast<intptr_t>(site + 5));
-    uint8_t patch[6] = {0xE9, 0, 0, 0, 0, 0x90};
-    memcpy(patch + 1, &rel, 4);
-    memcpy(site, patch, 6);
-    VirtualProtect(site, 6, old_prot, &old_prot);
-    FlushInstructionCache(GetCurrentProcess(), site, 6);
-
-    g_hook_installed = true;
-    log("XP hook: trampoline installed @ " + hex_addr(g_module_base + XP_WRITE_INST_OFFSET) +
-        "  cave @ " + hex_addr(reinterpret_cast<uintptr_t>(g_cave_mem)));
-    return true;
+    return d.hwnd;
 }
 
-static void uninstall_xp_hook() {
-    if (!g_hook_installed || g_module_base == 0) return;
-    uint8_t* site = reinterpret_cast<uint8_t*>(g_module_base + XP_WRITE_INST_OFFSET);
-    DWORD old_prot;
-    if (VirtualProtect(site, 6, PAGE_EXECUTE_READWRITE, &old_prot)) {
-        memcpy(site, XP_WRITE_BYTES, 6);
-        VirtualProtect(site, 6, old_prot, &old_prot);
-        FlushInstructionCache(GetCurrentProcess(), site, 6);
-    }
-    if (g_cave_mem) { VirtualFree(g_cave_mem, 0, MEM_RELEASE); g_cave_mem = nullptr; }
-    g_hook_installed = false;
-    log("XP hook uninstalled.");
-}
-
-static int32_t scan_money_offset(uintptr_t obj, int64_t hint) {
-    if (obj == 0 || hint <= 0) return -1;
-    MEMORY_BASIC_INFORMATION mbi;
-    if (VirtualQuery(reinterpret_cast<LPCVOID>(obj), &mbi, sizeof(mbi)) != sizeof(mbi)) return -1;
-    if (mbi.State != MEM_COMMIT || !(mbi.Protect & (PAGE_READWRITE | PAGE_WRITECOPY))) return -1;
-    uintptr_t limit = (std::min)(obj + 0x1400ULL,
-        reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize);
-
-    for (uintptr_t off = 0x400; obj + off + 8 <= limit; off += 8) {
-        int64_t v = 0; memcpy(&v, reinterpret_cast<void*>(obj + off), 8);
-        if (v == hint) {
-            g_money_is_int64 = true;
-            log("Money offset (int64): +" + hex_addr(off) + "  $" + std::to_string(v));
-            return static_cast<int32_t>(off);
-        }
-    }
-    if (hint <= static_cast<int64_t>(INT32_MAX)) {
-        auto h32 = static_cast<int32_t>(hint);
-        for (uintptr_t off = 0x400; obj + off + 4 <= limit; off += 4) {
-            int32_t v = 0; memcpy(&v, reinterpret_cast<void*>(obj + off), 4);
-            if (v == h32) {
-                g_money_is_int64 = false;
-                log("Money offset (int32): +" + hex_addr(off) + "  $" + std::to_string(v));
-                return static_cast<int32_t>(off);
-            }
-        }
-    }
-    return -1;
-}
-
-// ── Player-object heap scan ────────────────────────────────────────────────────
-// Fallback for when the trampoline hook hasn't fired yet.
-// Scans PAGE_READWRITE heap for xp_hint at [addr+XP_OFFSET_IN_OBJ], then
-// cross-validates by checking money_hint exists at [candidate+0x400..+0x1400].
-static uintptr_t scan_for_player_object(int32_t xp_hint, int64_t money_hint) {
-    if (money_hint <= 0) return 0;
-
-    // When xp_hint == 0 (level-1 player) we can't use XP as search key because
-    // 0 appears everywhere in memory.  Fall back to scanning for money_hint and
-    // treating any matching address as the candidate base.
-    const bool xp_valid = xp_hint > 0;
-
-    MEMORY_BASIC_INFORMATION mbi;
-    uintptr_t addr = 0x10000;
-    int candidates = 0;
-
-    while (VirtualQuery(reinterpret_cast<LPCVOID>(addr), &mbi, sizeof(mbi)) == sizeof(mbi)) {
-        if (mbi.State   == MEM_COMMIT   &&
-            mbi.Type    == MEM_PRIVATE  &&
-            mbi.Protect == PAGE_READWRITE &&
-            mbi.RegionSize > XP_OFFSET_IN_OBJ + 4 &&
-            mbi.RegionSize < 128ULL * 1024 * 1024)
-        {
-            const uint8_t* region   = reinterpret_cast<const uint8_t*>(mbi.BaseAddress);
-            uintptr_t      rbase    = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
-            size_t         rsize    = mbi.RegionSize;
-
-            if (xp_valid) {
-                // Primary path: find xp_hint at offset XP_OFFSET_IN_OBJ, then
-                // cross-validate that money_hint appears at [candidate+0x400..+0x1400).
-                for (size_t i = XP_OFFSET_IN_OBJ; i + 4 <= rsize; i += 4) {
-                    int32_t v = 0;
-                    memcpy(&v, region + i, 4);
-                    if (v != xp_hint) continue;
-
-                    uintptr_t candidate = rbase + i - XP_OFFSET_IN_OBJ;
-                    ++candidates;
-
-                    uintptr_t scan_lo = candidate + 0x400;
-                    uintptr_t scan_hi = candidate + 0x1400;
-                    if (scan_lo < rbase) continue;
-                    scan_hi = (std::min)(scan_hi, rbase + rsize);
-
-                    bool money_ok = false;
-                    for (uintptr_t a = scan_lo; a + 8 <= scan_hi && !money_ok; a += 8) {
-                        int64_t mv = 0; memcpy(&mv, reinterpret_cast<void*>(a), 8);
-                        if (mv == money_hint) money_ok = true;
-                    }
-                    if (!money_ok && money_hint <= static_cast<int64_t>(INT32_MAX)) {
-                        auto mh32 = static_cast<int32_t>(money_hint);
-                        for (uintptr_t a = scan_lo; a + 4 <= scan_hi && !money_ok; a += 4) {
-                            int32_t mv = 0; memcpy(&mv, reinterpret_cast<void*>(a), 4);
-                            if (mv == mh32) money_ok = true;
-                        }
-                    }
-                    if (!money_ok) continue;
-
-                    log("scan: player object found @ " + hex_addr(candidate) +
-                        "  xp=" + std::to_string(xp_hint) +
-                        "  money=$" + std::to_string(money_hint) +
-                        "  candidates_checked=" + std::to_string(candidates));
-                    return candidate;
-                }
-            } else {
-                // Fallback path (xp_hint == 0, level-1 player): scan for money_hint in
-                // [region+0x400..region+0x1400), then derive candidate = match - moneyOff.
-                // We don't know the exact money offset so we brute-force 0x400..0x1400
-                // and verify the derived object base is within the same region and
-                // can plausibly hold the XP field (0 is ok here).
-                uintptr_t scan_hi_region = rbase + (rsize > 0x1400 ? rsize - 0x1400 : 0);
-                for (uintptr_t mo = 0x400; mo < 0x1400 && mo + 8 <= 0x1400; mo += 8) {
-                    for (uintptr_t base = rbase; base + mo + 8 <= rbase + rsize &&
-                                                 base >= rbase && base <= scan_hi_region; base += 8) {
-                        int64_t mv = 0; memcpy(&mv, reinterpret_cast<void*>(base + mo), 8);
-                        if (mv != money_hint) continue;
-                        // Verify candidate has XP_OFFSET_IN_OBJ within region
-                        if (base + XP_OFFSET_IN_OBJ + 4 > rbase + rsize) continue;
-                        ++candidates;
-                        log("scan(money-only): player object candidate @ " + hex_addr(base) +
-                            "  money_off=+" + hex_addr(mo) +
-                            "  money=$" + std::to_string(money_hint) +
-                            "  candidates=" + std::to_string(candidates));
-                        return base;
-                    }
-                }
-                // Also try int32 money
-                if (money_hint <= static_cast<int64_t>(INT32_MAX)) {
-                    auto mh32 = static_cast<int32_t>(money_hint);
-                    for (uintptr_t mo = 0x400; mo < 0x1400 && mo + 4 <= 0x1400; mo += 4) {
-                        for (uintptr_t base = rbase; base + mo + 4 <= rbase + rsize &&
-                                                     base >= rbase && base <= scan_hi_region; base += 4) {
-                            int32_t mv = 0; memcpy(&mv, reinterpret_cast<void*>(base + mo), 4);
-                            if (mv != mh32) continue;
-                            if (base + XP_OFFSET_IN_OBJ + 4 > rbase + rsize) continue;
-                            ++candidates;
-                            log("scan(money-only,i32): player object candidate @ " + hex_addr(base) +
-                                "  money_off=+" + hex_addr(mo) +
-                                "  money=$" + std::to_string(money_hint) +
-                                "  candidates=" + std::to_string(candidates));
-                            return base;
-                        }
-                    }
-                }
-            }
-        }
-        if (mbi.RegionSize == 0) break;
-        addr += mbi.RegionSize;
+static void trigger_quick_load() {
+    HWND hwnd = find_ats_window();
+    if (!hwnd) {
+        log("quick_load: could not find ATS window", SCS_LOG_TYPE_warning);
+        return;
     }
 
-    log("scan: player object not found (xp=" + std::to_string(xp_hint) +
-        ", money=$" + std::to_string(money_hint) +
-        ", candidates=" + std::to_string(candidates) + ")",
-        SCS_LOG_TYPE_warning);
-    return 0;
-}
+    UINT scan      = MapVirtualKeyA(VK_F9, MAPVK_VK_TO_VSC);
+    LPARAM lp_down = 1 | (scan << 16);
+    LPARAM lp_up   = 1 | (scan << 16) | (1 << 30) | (1 << 31);
 
-// ── In-process money and XP grants ────────────────────────────────────────────
+    PostMessageA(hwnd, WM_KEYDOWN, VK_F9, lp_down);
+    PostMessageA(hwnd, WM_KEYUP,   VK_F9, lp_up);
 
-static bool grant_money_memory(int64_t amount) {
-    uintptr_t obj = g_player_object;
-    if (obj == 0) {
-        if (!g_warn_money_no_obj) { g_warn_money_no_obj = true;
-            log("grant_money: player object not yet captured — waiting for first XP write",
-                SCS_LOG_TYPE_warning); }
-        return false;
-    }
-    int32_t moff = g_money_offset.load(std::memory_order_acquire);
-    if (moff < 0) {
-        int64_t hint = g_money_hint.load(std::memory_order_acquire);
-        if (hint <= 0) {
-            if (!g_warn_money_no_hint) { g_warn_money_no_hint = true;
-                log("grant_money: waiting for money hint from save file",
-                    SCS_LOG_TYPE_warning); }
-            return false;
-        }
-        moff = scan_money_offset(obj, hint);
-        if (moff < 0) {
-            if (!g_warn_money_no_scan) { g_warn_money_no_scan = true;
-                log("grant_money: money value not found in player object (hint=$" +
-                    std::to_string(hint) + ") — will retry", SCS_LOG_TYPE_warning); }
-            return false;
-        }
-        g_money_offset.store(moff, std::memory_order_release);
-    }
-    uintptr_t addr = obj + static_cast<uint32_t>(moff);
-    MEMORY_BASIC_INFORMATION mbi;
-    if (VirtualQuery(reinterpret_cast<LPCVOID>(addr), &mbi, sizeof(mbi)) != sizeof(mbi)) {
-        log("grant_money: VirtualQuery failed @ " + hex_addr(addr), SCS_LOG_TYPE_warning);
-        return false;
-    }
-    if (mbi.State != MEM_COMMIT || !(mbi.Protect & (PAGE_READWRITE | PAGE_WRITECOPY))) {
-        log("grant_money: bad memory at " + hex_addr(addr) +
-            " state=" + std::to_string(mbi.State) + " prot=" + std::to_string(mbi.Protect),
-            SCS_LOG_TYPE_warning);
-        return false;
-    }
-    if (g_money_is_int64) {
-        int64_t cur = 0; memcpy(&cur, reinterpret_cast<void*>(addr), 8);
-        int64_t nv = cur + amount;
-        memcpy(reinterpret_cast<void*>(addr), &nv, 8);
-        log("grant_money: $" + std::to_string(cur) + " → $" + std::to_string(nv));
-        g_money_hint.store(nv, std::memory_order_release);
-    } else {
-        int32_t cur = 0; memcpy(&cur, reinterpret_cast<void*>(addr), 4);
-        int32_t nv = cur + static_cast<int32_t>(amount);
-        memcpy(reinterpret_cast<void*>(addr), &nv, 4);
-        log("grant_money: $" + std::to_string(cur) + " → $" + std::to_string(nv));
-        g_money_hint.store(static_cast<int64_t>(nv), std::memory_order_release);
-    }
-    return true;
-}
-
-static bool grant_xp_memory(int32_t amount) {
-    uintptr_t obj = g_player_object;
-    if (obj == 0) {
-        if (!g_warn_xp_no_obj) { g_warn_xp_no_obj = true;
-            log("grant_xp: player object not yet captured — waiting for first XP write",
-                SCS_LOG_TYPE_warning); }
-        return false;
-    }
-    uintptr_t addr = obj + XP_OFFSET_IN_OBJ;
-    MEMORY_BASIC_INFORMATION mbi;
-    if (VirtualQuery(reinterpret_cast<LPCVOID>(addr), &mbi, sizeof(mbi)) != sizeof(mbi)) {
-        log("grant_xp: VirtualQuery failed @ " + hex_addr(addr), SCS_LOG_TYPE_warning);
-        return false;
-    }
-    if (mbi.State != MEM_COMMIT || !(mbi.Protect & (PAGE_READWRITE | PAGE_WRITECOPY))) {
-        log("grant_xp: bad memory at " + hex_addr(addr) +
-            " state=" + std::to_string(mbi.State) + " prot=" + std::to_string(mbi.Protect),
-            SCS_LOG_TYPE_warning);
-        return false;
-    }
-    int32_t cur = 0; memcpy(&cur, reinterpret_cast<void*>(addr), 4);
-    int32_t nv = cur + amount;
-    memcpy(reinterpret_cast<void*>(addr), &nv, 4);
-    log("grant_xp: " + std::to_string(cur) + " → " + std::to_string(nv));
-    return true;
+    log("quick_load: F9 sent to window " +
+        hex_addr(reinterpret_cast<uintptr_t>(hwnd)));
 }
 
 // ── Read items.json (written by Python client) ─────────────────────────────────
 static void read_items_file() {
-    int64_t want_money = 0;
-    int32_t want_xp    = 0;
-    bool    in_game    = false;
+    int  reload_counter = 0;
+    bool in_game        = false;
 
     {
         std::lock_guard<std::mutex> lock(g_state_mutex);
@@ -622,101 +208,55 @@ static void read_items_file() {
                 g_items.unlocked_trucks.insert(t.get<std::string>());
             }
 
-            g_items.shuffle_trucks        = j.value("shuffle_trucks", false);
+            g_items.shuffle_trucks         = j.value("shuffle_trucks",         false);
             g_items.shuffle_truck_upgrades = j.value("shuffle_truck_upgrades", false);
-            g_items.win_condition          = j.value("win_condition", 0);
-            g_items.goal_level             = j.value("goal_level", 35);
-            g_items.goal_money             = (long long)(j.value("goal_money_thousands", 1000)) * 1000;
-            g_items.total_money_granted    = j.value("total_money_granted", (int64_t)0);
-            g_items.total_xp_granted       = j.value("total_xp_granted",   (int32_t)0);
-
-            int64_t hint = j.value("current_money_hint", (int64_t)0);
-            if (hint > 0) g_money_hint.store(hint, std::memory_order_release);
-
-            int32_t xhint = j.value("current_xp_hint", (int32_t)0);
-            if (xhint > 0) g_xp_hint.store(xhint, std::memory_order_release);
+            g_items.win_condition          = j.value("win_condition",           0);
+            g_items.goal_level             = j.value("goal_level",              35);
+            g_items.goal_money             =
+                (long long)(j.value("goal_money_thousands", 1000)) * 1000;
 
             g_items.upgrade_tiers.clear();
             if (j.contains("upgrade_tiers") && j["upgrade_tiers"].is_object()) {
                 for (auto& [k, v] : j["upgrade_tiers"].items()) {
-                    if (v.is_number_integer()) {
+                    if (v.is_number_integer())
                         g_items.upgrade_tiers[k] = v.get<int>();
-                    }
                 }
             }
 
             if (j.contains("item_notifications") && j["item_notifications"].is_array()) {
                 std::size_t n = j["item_notifications"].size();
-                if (n > 0) {
-                    log("items.json: " + std::to_string(n) + " notification(s) queued for Lua mod");
-                }
+                if (n > 0)
+                    log("items.json: " + std::to_string(n) +
+                        " notification(s) queued for Lua mod");
             }
 
-            want_money = g_items.total_money_granted;
-            want_xp    = g_items.total_xp_granted;
-            in_game    = g_state.in_game;
-
+            reload_counter = j.value("reload_counter", 0);
+            in_game        = g_state.in_game;
             g_items.last_read_time = now_seconds();
+
         } catch (const std::exception& e) {
-            log(std::string("Failed to read items.json: ") + e.what(), SCS_LOG_TYPE_warning);
+            log(std::string("Failed to read items.json: ") + e.what(),
+                SCS_LOG_TYPE_warning);
             return;
         }
     }
 
-    // Log when the hook first captures the player object (or recaptures after reset).
-    uintptr_t cur_obj = g_player_object;
-    if (cur_obj != g_player_object_logged) {
-        g_player_object_logged = cur_obj;
-        if (cur_obj != 0)
-            log("player object captured @ " + hex_addr(cur_obj));
-        else
-            log("player object cleared", SCS_LOG_TYPE_warning);
+    // On the first read after plugin init, sync the counter without triggering
+    // a reload — grants from previous sessions are already in the loaded save.
+    if (!g_reload_counter_synced) {
+        g_reload_counter_synced = true;
+        g_last_reload_counter   = reload_counter;
+        return;
     }
 
-    // Apply money/XP grant deltas when the simulation is running.
-    // We gate on in_game so the save file is loaded before we write to memory.
-    if (!in_game) return;
-
-    // If the trampoline hook hasn't fired yet, try a direct heap scan using the
-    // XP value from the save file as a search key, cross-validated with the
-    // money balance.  Rate-limited to once per 30 seconds to avoid stalling.
-    if (g_player_object == 0) {
-        double now = now_seconds();
-        if (now - g_last_scan_attempt >= 30.0) {
-            g_last_scan_attempt = now;
-            int32_t xhint = g_xp_hint.load(std::memory_order_acquire);
-            int64_t mhint = g_money_hint.load(std::memory_order_acquire);
-            if (mhint <= 0) {
-                log("scan: waiting for hints from AP client (xp=" + std::to_string(xhint) +
-                    " money=" + std::to_string(mhint) + ") — is ATSClient.py running?",
-                    SCS_LOG_TYPE_warning);
-            } else {
-                uintptr_t found = scan_for_player_object(xhint, mhint);
-                if (found) g_player_object = found;
-            }
+    if (reload_counter > g_last_reload_counter) {
+        g_last_reload_counter = reload_counter;
+        if (in_game) {
+            trigger_quick_load();
+        } else {
+            log("quick_load: reload requested but simulation not running — "
+                "will apply when player is in game");
         }
-    }
-
-    bool grants_changed = false;
-
-    int64_t money_delta = want_money - g_applied_money;
-    if (money_delta > 0) {
-        if (grant_money_memory(money_delta)) {
-            g_applied_money = want_money;
-            grants_changed = true;
-        }
-    }
-
-    int32_t xp_delta = want_xp - g_applied_xp;
-    if (xp_delta > 0) {
-        if (grant_xp_memory(xp_delta)) {
-            g_applied_xp = want_xp;
-            grants_changed = true;
-        }
-    }
-
-    if (grants_changed) {
-        save_grants_file();
     }
 }
 
@@ -755,7 +295,8 @@ static void flush_events_file() {
         f.close();
         fs::rename(tmp, g_events_file);
     } catch (const std::exception& e) {
-        log(std::string("Failed to write events.json: ") + e.what(), SCS_LOG_TYPE_warning);
+        log(std::string("Failed to write events.json: ") + e.what(),
+            SCS_LOG_TYPE_warning);
     }
 }
 
@@ -852,10 +393,6 @@ SCSAPI_VOID telemetry_paused(const scs_event_t event,
                               const scs_context_t context) {
     std::lock_guard<std::mutex> lock(g_state_mutex);
     g_state.in_game = false;
-    // Do NOT reset g_player_object here. The pointer stays valid for the whole
-    // game session and is captured by the trampoline hook on the first XP write.
-    // Resetting it on every pause (delivery screen, menu, ESC) would prevent
-    // grants from applying between the delivery event and the next poll tick.
 }
 
 SCSAPI_VOID telemetry_started(const scs_event_t event,
@@ -863,51 +400,36 @@ SCSAPI_VOID telemetry_started(const scs_event_t event,
                                const scs_context_t context) {
     std::lock_guard<std::mutex> lock(g_state_mutex);
     g_state.in_game = true;
-    // Reset money offset and scan cooldown so grants work cleanly each session.
-    g_money_offset.store(-1, std::memory_order_release);
-    g_last_scan_attempt = 0.0;
-    // Reset warning-once flags so any new failures are logged.
-    g_warn_xp_no_obj     = false;
-    g_warn_money_no_obj  = false;
-    g_warn_money_no_hint = false;
-    g_warn_money_no_scan = false;
-    // Force re-log of player object address (it may have changed with the new save load).
-    g_player_object_logged = ~g_player_object;
+    // Allow a pending reload request to fire now that simulation is running.
+    // (The counter check in read_items_file handles the actual trigger.)
 }
 
-// ── Frame callback — drives all periodic operations ───────────────────────────
+// ── Frame-timing state (declared here so discovery code can reference g_startup_time) ──
 static double g_last_poll_time    = 0.0;
 static double g_last_flush_time   = 0.0;
 static double g_startup_time      = 0.0;
-static const double POLL_INTERVAL_SECONDS  = 5.0;
+static const double POLL_INTERVAL_SECONDS  = 2.0;
 static const double FLUSH_INTERVAL_SECONDS = 2.0;
 
 // ── Memory discovery ───────────────────────────────────────────────────────────
 // When "discovery_mode.txt" exists in the comm folder, the DLL scans its own
 // heap memory for garage and truck strings and logs offsets to game.log.
-// This reveals the memory layout needed to implement garage granting and truck
-// hiding without requiring external Cheat Engine work.
+// This is a developer tool for mapping object layouts for future features.
 
 static bool g_discovery_done = false;
 
 struct ScanMatch {
     uintptr_t   address;
     std::string target;
-    // nearby_vals[i] = {byte_offset_from_string_start, uint32_value}
     std::vector<std::pair<int, uint32_t>> nearby_vals;
-    std::string hex_context;  // raw bytes [-16..+32) from string start, "|" marks offset 0
+    std::string hex_context;
 };
 
-// Read 4 bytes from src into out. We only call this after VirtualQuery confirms
-// the region is PAGE_READWRITE + MEM_COMMIT, so direct memcpy is safe.
 static bool safe_read32(const uint8_t* src, uint32_t& out) {
     memcpy(&out, src, 4);
     return true;
 }
 
-// near_range: scan ±N bytes from string start (must be multiple of 4)
-// min_val / max_val: only record nearby uint32 values in [min_val, max_val]
-// include_hex: if true, capture raw bytes [-16..+32) around string start
 static std::vector<ScanMatch> scan_heap_for_strings(
         const std::vector<std::string>& targets,
         size_t   max_results = 200,
@@ -923,11 +445,10 @@ static std::vector<ScanMatch> scan_heap_for_strings(
     while (results.size() < max_results &&
            VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi)) == sizeof(mbi))
     {
-        // Only private read-write heap pages; skip very large regions (mapped files).
-        bool scannable = (mbi.State   == MEM_COMMIT)  &&
-                         (mbi.Type    == MEM_PRIVATE)  &&
+        bool scannable = (mbi.State   == MEM_COMMIT)   &&
+                         (mbi.Type    == MEM_PRIVATE)   &&
                          (mbi.Protect == PAGE_READWRITE) &&
-                         (mbi.RegionSize > 0)            &&
+                         (mbi.RegionSize > 0)             &&
                          (mbi.RegionSize < 128 * 1024 * 1024);
 
         if (scannable) {
@@ -939,7 +460,6 @@ static std::vector<ScanMatch> scan_heap_for_strings(
                 size_t tlen = tgt.size();
 
                 for (size_t i = 0; i + tlen + 1 < rsize; ++i) {
-                    // Region is confirmed PAGE_READWRITE by VirtualQuery above.
                     if (region[i] != (uint8_t)tgt[0]) continue;
                     if (region[i + tlen] != '\0')      continue;
                     if (memcmp(region + i, tgt.c_str(), tlen) != 0) continue;
@@ -948,29 +468,24 @@ static std::vector<ScanMatch> scan_heap_for_strings(
                     m.address = reinterpret_cast<uintptr_t>(region + i);
                     m.target  = tgt;
 
-                    // Sample every 4 bytes in ±near_range, record values in [min_val, max_val].
                     for (int off = -near_range; off < near_range; off += 4) {
                         intptr_t abs = static_cast<intptr_t>(i) + off;
                         if (abs < 0 || abs + 4 > static_cast<intptr_t>(rsize)) continue;
                         uint32_t v = 0;
-                        if (safe_read32(region + abs, v) && v >= min_val && v <= max_val) {
+                        if (safe_read32(region + abs, v) && v >= min_val && v <= max_val)
                             m.nearby_vals.push_back({off, v});
-                        }
                     }
 
-                    // Raw hex dump: 16 bytes before + 32 at/after string start.
-                    // "|" marks offset 0 (start of the string itself).
                     if (include_hex) {
                         std::ostringstream hex;
                         for (int h = -16; h < 32; ++h) {
                             if (h == 0) hex << "|";
                             intptr_t abs_h = static_cast<intptr_t>(i) + h;
-                            if (abs_h >= 0 && abs_h < static_cast<intptr_t>(rsize)) {
+                            if (abs_h >= 0 && abs_h < static_cast<intptr_t>(rsize))
                                 hex << std::hex << std::setw(2) << std::setfill('0')
                                     << static_cast<int>(region[abs_h]);
-                            } else {
+                            else
                                 hex << "??";
-                            }
                         }
                         m.hex_context = hex.str();
                     }
@@ -993,27 +508,19 @@ static void log_match(const std::string& prefix, const ScanMatch& m) {
     oss << prefix << "[" << m.target << "] 0x"
         << std::hex << std::setw(12) << std::setfill('0') << m.address
         << std::dec;
-    for (const auto& [off, v] : m.nearby_vals) {
+    for (const auto& [off, v] : m.nearby_vals)
         oss << "  " << (off >= 0 ? "+" : "") << off << "=" << v;
-    }
     log(oss.str());
-    if (!m.hex_context.empty()) {
+    if (!m.hex_context.empty())
         log("  hex: " + m.hex_context);
-    }
 }
 
 static void run_discovery() {
     log("=== ATS-AP DISCOVERY MODE START ===");
     log("Scanning heap for garage/office/truck objects. Share game.log with the developer.");
 
-    // ── Garage compound IDs only ───────────────────────────────────────────────
-    // Bare city IDs ("san_francisco") land in navigation/routing arrays (32-byte
-    // stride, values 3-10) — those are NOT ownership objects.
-    // The "garage.X" compound IDs are the actual save-game garage records.
-    // San Francisco is the OWNED garage (home base); all others should be status 0.
     std::vector<std::string> garage_targets = {
-        "garage.san_francisco",  // OWNED — must show a non-zero status nearby
-        "garage.los_angeles",    // not owned
+        "garage.san_francisco",  "garage.los_angeles",
         "garage.sacramento",     "garage.fresno",
         "garage.bakersfield",    "garage.stockton",
         "garage.eureka",         "garage.redding",
@@ -1022,55 +529,35 @@ static void run_discovery() {
         "garage.flagstaff",      "garage.phoenix",
         "garage.tucson",         "garage.prescott",
     };
-
-    // Wide range (±256), values 1–10, with hex dump to see raw object layout.
     auto garage_matches = scan_heap_for_strings(garage_targets, 100, 256, 1, 10, true);
-
     log("--- GARAGE RESULTS (" + std::to_string(garage_matches.size()) + " matches) ---");
     for (const auto& m : garage_matches) log_match("G", m);
 
-    // ── Recruitment office IDs ─────────────────────────────────────────────────
-    // "recruitment_agency.X" is the canonical object prefix (confirmed by scan 1).
-    // All offices will show zeros until the player drives past one (status 0 = undiscovered).
-    // Run a second scan AFTER visiting at least one office to see the flag flip.
     std::vector<std::string> office_targets = {
-        "recruitment_agency.san_francisco",
-        "recruitment_agency.los_angeles",
-        "recruitment_agency.sacramento",
-        "recruitment_agency.fresno",
-        "recruitment_agency.bakersfield",
-        "recruitment_agency.stockton",
-        "recruitment_agency.eureka",
-        "recruitment_agency.redding",
-        "recruitment_agency.san_diego",
-        "recruitment_agency.las_vegas",
-        "recruitment_agency.reno",
-        "recruitment_agency.elko",
-        "recruitment_agency.flagstaff",
-        "recruitment_agency.phoenix",
-        "recruitment_agency.tucson",
-        "recruitment_agency.prescott",
+        "recruitment_agency.san_francisco", "recruitment_agency.los_angeles",
+        "recruitment_agency.sacramento",    "recruitment_agency.fresno",
+        "recruitment_agency.bakersfield",   "recruitment_agency.stockton",
+        "recruitment_agency.eureka",        "recruitment_agency.redding",
+        "recruitment_agency.san_diego",     "recruitment_agency.las_vegas",
+        "recruitment_agency.reno",          "recruitment_agency.elko",
+        "recruitment_agency.flagstaff",     "recruitment_agency.phoenix",
+        "recruitment_agency.tucson",        "recruitment_agency.prescott",
     };
-
     auto office_matches = scan_heap_for_strings(office_targets, 100, 256, 1, 10, true);
-
     log("--- OFFICE RESULTS (" + std::to_string(office_matches.size()) + " matches) ---");
     for (const auto& m : office_matches) log_match("O", m);
 
-    // ── Truck model IDs ────────────────────────────────────────────────────────
     std::vector<std::string> truck_targets = {
-        "kenworth_w900", "kenworth_t800", "kenworth_t660", "kenworth_k100e",
-        "peterbilt_389", "peterbilt_388", "peterbilt_367",
+        "kenworth_w900",    "kenworth_t800",    "kenworth_t660",  "kenworth_k100e",
+        "peterbilt_389",    "peterbilt_388",    "peterbilt_367",
         "western_star_49x", "western_star_57x",
         "freightliner_114sd", "freightliner_coronado",
-        "mack_anthem", "mack_pinnacle",
+        "mack_anthem",      "mack_pinnacle",
         "international_lt",
-        "vehicle.kenworth_w900", "vehicle.peterbilt_389",
+        "vehicle.kenworth_w900",    "vehicle.peterbilt_389",
         "vehicle.western_star_49x", "vehicle.freightliner_coronado",
     };
-
     auto truck_matches = scan_heap_for_strings(truck_targets, 100, 128, 1, 10, false);
-
     log("--- TRUCK RESULTS (" + std::to_string(truck_matches.size()) + " matches) ---");
     for (const auto& m : truck_matches) log_match("T", m);
 
@@ -1080,15 +567,14 @@ static void run_discovery() {
 
 static void maybe_run_discovery(double now) {
     if (g_discovery_done) return;
-    // Wait 15 s after plugin init so the game has fully loaded the save.
-    if (now - g_startup_time < 15.0) return;
-
+    if (now - g_startup_time < 15.0) return;  // wait for game to finish loading
     fs::path flag = g_comm_dir / "discovery_mode.txt";
-    if (!fs::exists(flag)) return;  // Keep checking every frame — file may appear later.
-
+    if (!fs::exists(flag)) return;
     run_discovery();
     try { fs::remove(flag); } catch (...) {}
 }
+
+// ── Frame callback — drives all periodic operations ───────────────────────────
 
 SCSAPI_VOID telemetry_frame_start(const scs_event_t event,
                                    const void* const event_info,
@@ -1122,13 +608,10 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
 
     g_log = p->common.log;
     log("Archipelago plugin initializing v" + std::string(PLUGIN_VERSION));
-    init_module_base();
-    install_xp_hook();
 
     g_comm_dir    = get_documents_path() / "American Truck Simulator" / "archipelago";
     g_events_file = g_comm_dir / "events.json";
     g_items_file  = g_comm_dir / "items.json";
-    g_grants_file = g_comm_dir / "grants.json";
 
     if (!fs::exists(g_comm_dir)) {
         fs::create_directories(g_comm_dir);
@@ -1136,13 +619,12 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
 
     log("Communication folder: " + g_comm_dir.string());
 
-    load_grants_file();
     read_items_file();
 
-    p->register_for_event(SCS_TELEMETRY_EVENT_frame_start,   telemetry_frame_start,   nullptr);
-    p->register_for_event(SCS_TELEMETRY_EVENT_paused,        telemetry_paused,        nullptr);
-    p->register_for_event(SCS_TELEMETRY_EVENT_started,       telemetry_started,       nullptr);
-    p->register_for_event(SCS_TELEMETRY_EVENT_configuration, telemetry_configuration, nullptr);
+    p->register_for_event(SCS_TELEMETRY_EVENT_frame_start,   telemetry_frame_start,    nullptr);
+    p->register_for_event(SCS_TELEMETRY_EVENT_paused,        telemetry_paused,         nullptr);
+    p->register_for_event(SCS_TELEMETRY_EVENT_started,       telemetry_started,        nullptr);
+    p->register_for_event(SCS_TELEMETRY_EVENT_configuration, telemetry_configuration,  nullptr);
     p->register_for_event(SCS_TELEMETRY_EVENT_gameplay,      telemetry_gameplay_event, nullptr);
 
     p->register_for_channel(
@@ -1167,7 +649,6 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
 }
 
 SCSAPI_VOID scs_telemetry_shutdown() {
-    uninstall_xp_hook();
     {
         std::lock_guard<std::mutex> lock(g_state_mutex);
         g_state.plugin_alive = false;

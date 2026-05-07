@@ -83,6 +83,31 @@ _BSII_AES_KEY = bytes([
     0x3c, 0x7f, 0x50, 0x29, 0xd4, 0xe1, 0x6a, 0x38,
 ])
 
+# ── Save-grant persistence ────────────────────────────────────────────────────
+# Tracks how much XP / money has already been written into the save file so we
+# never double-apply across sessions.  Stored in grants.json next to items.json.
+
+GRANTS_FILE = COMM_DIR / "grants.json"
+
+
+def _load_save_grants() -> "tuple[int, int]":
+    """Return (applied_xp, applied_money) from the last session, or (0, 0)."""
+    try:
+        if GRANTS_FILE.exists():
+            data = _read_json(GRANTS_FILE)
+            return int(data.get("applied_xp", 0)), int(data.get("applied_money", 0))
+    except Exception:
+        pass
+    return 0, 0
+
+
+def _persist_save_grants(applied_xp: int, applied_money: int) -> None:
+    try:
+        _write_json(GRANTS_FILE, {"applied_xp": applied_xp, "applied_money": applied_money})
+    except Exception as e:
+        logger.error(f"[ATS] Could not write grants.json: {e}")
+
+
 # Cumulative XP required to reach each level (index = level number).
 # Needs calibration against in-game observation — verify with /status once
 # connected and playing. These match community-documented ATS XP tables.
@@ -187,9 +212,41 @@ def _decrypt_bsii_v3(payload: bytes) -> Optional[bytes]:
         cipher = Cipher(algorithms.AES(_BSII_AES_KEY), modes.ECB(), backend=default_backend())
         dec = cipher.decryptor()
         decrypted = dec.update(payload) + dec.finalize()
-        return zlib.decompress(decrypted)
+        # Use decompressobj so trailing zero-padding bytes (AES block alignment)
+        # are silently stored in unused_data instead of raising zlib.error.
+        d = zlib.decompressobj()
+        return d.decompress(decrypted)
     except Exception:
         return None
+
+
+def _write_sii_save(path: Path, text: str) -> bool:
+    """Encode plaintext SiiNunit text as a BSII v3 (AES-256-ECB + zlib) save file."""
+    try:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+        from cryptography.hazmat.backends import default_backend
+
+        raw = text.encode("utf-8")
+        compressed = zlib.compress(raw, level=9)
+
+        # Pad to 16-byte AES block boundary with zero bytes.
+        # The game's C++ zlib inflate() reads until Z_STREAM_END and ignores trailing bytes.
+        rem = len(compressed) % 16
+        if rem:
+            compressed += b"\x00" * (16 - rem)
+
+        cipher = Cipher(algorithms.AES(_BSII_AES_KEY), modes.ECB(), backend=default_backend())
+        enc = cipher.encryptor()
+        encrypted = enc.update(compressed) + enc.finalize()
+
+        header = b"BSII" + struct.pack("<I", 3)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_bytes(header + encrypted)
+        tmp.replace(path)
+        return True
+    except Exception as e:
+        logger.error(f"[ATS] _write_sii_save failed for {path}: {e}")
+        return False
 
 
 def _read_sii_text(path: Path) -> Optional[str]:
@@ -359,6 +416,16 @@ class ATSContext(CommonContext):
         self._save_path_logged: bool = False
         self.current_xp: int = 0
 
+        # Save-grant tracking: how much XP / money has been baked into the save
+        # file already (persisted across sessions in grants.json).
+        self._save_applied_xp: int
+        self._save_applied_money: int
+        self._save_applied_xp, self._save_applied_money = _load_save_grants()
+
+        # Incremented each time we write a patched save; DLL watches this value
+        # and fires F9 (quick-load) when it changes.
+        self._reload_counter: int = 0
+
     # ── Archipelago callbacks ──────────────────────────────────────────────────
 
     async def server_auth(self, password_requested: bool = False) -> None:
@@ -496,9 +563,8 @@ class ATSContext(CommonContext):
             "shuffle_trucks": self.slot_data.get("shuffle_trucks", True),
             "shuffle_truck_upgrades": self.slot_data.get("shuffle_truck_upgrades", False),
             "item_notifications": self._notifications,
-            # Used by the C++ plugin to locate the player object in memory.
-            "current_money_hint": self.current_money,
-            "current_xp_hint": self.current_xp,
+            # Incremented each time we patch the save; DLL fires F9 on change.
+            "reload_counter": self._reload_counter,
         }
         _write_json(ITEMS_FILE, payload)
 
@@ -688,13 +754,72 @@ class ATSContext(CommonContext):
 
         # Update live game state read by _check_win_condition
         level = _xp_to_level(save["experience_points"])
-        self.current_level = level
-        new_money = save["money"]
-        new_xp    = save["experience_points"]
-        if new_money != self.current_money or new_xp != self.current_xp:
-            self.current_money = new_money
-            self.current_xp    = new_xp
-            self._write_items_file()  # push updated hints to plugin
+        self.current_level  = level
+        self.current_money  = save["money"]
+        self.current_xp     = save["experience_points"]
+
+        # ── Apply pending XP / money grants to the save file ──────────────────
+        # total_*_granted = cumulative amount AP has sent this session.
+        # _save_applied_*  = cumulative amount already written into the save.
+        # The delta is what still needs to be added.
+        xp_delta    = self._total_xp_granted    - self._save_applied_xp
+        money_delta = self._total_money_granted - self._save_applied_money
+
+        if (xp_delta > 0 or money_delta > 0) and text is not None:
+            new_xp    = self.current_xp    + xp_delta
+            new_money = self.current_money + money_delta
+
+            # Patch the decrypted text (first occurrence of each field).
+            modified = text
+            if xp_delta > 0:
+                modified = re.sub(
+                    r'\bexperience_points\s*:\s*\d+',
+                    f'experience_points: {new_xp}',
+                    modified, count=1,
+                )
+            if money_delta > 0:
+                modified = re.sub(
+                    r'\bmoney_account\s*:\s*-?\d+',
+                    f'money_account: {new_money}',
+                    modified, count=1,
+                )
+
+            wrote_autosave = _write_sii_save(save_path, modified)
+
+            # Also write to the quicksave slot so F9 (quick-load) picks it up.
+            quicksave_dir  = save_path.parent.parent / "quicksave"
+            quicksave_path = quicksave_dir / "game.sii"
+            wrote_quicksave = False
+            try:
+                quicksave_dir.mkdir(parents=True, exist_ok=True)
+                wrote_quicksave = _write_sii_save(quicksave_path, modified)
+            except Exception as e:
+                logger.warning(f"[ATS] Could not write quicksave: {e}")
+
+            if wrote_autosave or wrote_quicksave:
+                self._save_applied_xp    += xp_delta
+                self._save_applied_money += money_delta
+                _persist_save_grants(self._save_applied_xp, self._save_applied_money)
+
+                self.current_xp    = new_xp
+                self.current_money = new_money
+                self._reload_counter += 1
+
+                logger.info(
+                    f"[ATS] Grants written to save: "
+                    f"+{xp_delta:,} XP (total {new_xp:,}), "
+                    f"+${money_delta:,} (total ${new_money:,}) — "
+                    f"reload_counter={self._reload_counter} "
+                    f"(autosave={'ok' if wrote_autosave else 'FAIL'}, "
+                    f"quicksave={'ok' if wrote_quicksave else 'FAIL'})"
+                )
+                self._write_items_file()   # sends reload_counter to DLL
+            else:
+                logger.error("[ATS] Grant write failed for both autosave and quicksave")
+        else:
+            # No pending grants — still write items.json if anything else changed
+            # (handled by the caller / item-receive path; no extra write needed here)
+            pass
 
         from worlds.american_truck_simulator.locations import (
             ALL_LOCATIONS, CITY_ARRIVAL_LOCATIONS, GARAGE_UPGRADE_LOCATIONS,
