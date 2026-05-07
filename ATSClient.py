@@ -164,43 +164,100 @@ def _xp_to_level(xp: int) -> int:
     return 1
 
 
+_ATS_STEAM_APP_ID_STR = "270880"
+
+
+def _find_steam_path() -> Optional[Path]:
+    """Return the Steam installation directory by reading the Windows Registry."""
+    try:
+        import winreg
+        for hive, flag in [
+            (winreg.HKEY_LOCAL_MACHINE, winreg.KEY_READ | winreg.KEY_WOW64_32KEY),
+            (winreg.HKEY_LOCAL_MACHINE, winreg.KEY_READ | winreg.KEY_WOW64_64KEY),
+            (winreg.HKEY_CURRENT_USER,  winreg.KEY_READ),
+        ]:
+            try:
+                key = winreg.OpenKey(hive, r"SOFTWARE\Valve\Steam", 0, flag)
+                val, _ = winreg.QueryValueEx(key, "InstallPath")
+                winreg.CloseKey(key)
+                p = Path(val)
+                if p.is_dir():
+                    return p
+            except OSError:
+                pass
+    except ImportError:
+        pass
+    return None
+
+
+def _steam_userdata_roots() -> List[Path]:
+    """Return every <SteamPath>/userdata/<uid>/270880/remote/ directory found."""
+    roots: List[Path] = []
+    steam = _find_steam_path()
+    if not steam:
+        return roots
+    userdata = steam / "userdata"
+    if not userdata.is_dir():
+        return roots
+    for uid_dir in userdata.iterdir():
+        if not uid_dir.is_dir():
+            continue
+        remote = uid_dir / _ATS_STEAM_APP_ID_STR / "remote"
+        if remote.is_dir():
+            roots.append(remote)
+    return roots
+
+
+def _scan_profiles_dir(profiles_dir: Path, best: Optional[Path], best_mtime: float):
+    """Walk a profiles root and return (best_path, best_mtime)."""
+    if not profiles_dir.is_dir():
+        return best, best_mtime
+    for profile in profiles_dir.iterdir():
+        if not profile.is_dir():
+            continue
+        save_dir = profile / "save"
+        if not save_dir.is_dir():
+            continue
+        for slot in save_dir.iterdir():
+            if not slot.is_dir():
+                continue
+            game_sii = slot / "game.sii"
+            if game_sii.exists():
+                try:
+                    mtime = game_sii.stat().st_mtime
+                    if mtime > best_mtime:
+                        best_mtime = mtime
+                        best = game_sii
+                except OSError:
+                    pass
+    return best, best_mtime
+
+
 def _find_ats_save_file() -> Optional[Path]:
     """Return the most-recently-modified game.sii across all ATS profiles/slots.
 
-    ATS stores saves in one of two locations depending on whether Steam Cloud
-    sync is enabled:
-      - <Documents>/American Truck Simulator/profiles/          (local)
-      - <Documents>/American Truck Simulator/steam/profiles/    (Steam Cloud)
-    We search both and return whichever game.sii was modified most recently.
+    Searches (in order of preference):
+      1. Steam userdata directory (Steam Cloud saves):
+           <SteamPath>/userdata/<uid>/270880/remote/steam/profiles/
+      2. Documents (local / non-Cloud saves):
+           <Documents>/American Truck Simulator/profiles/
+           <Documents>/American Truck Simulator/steam/profiles/
     """
     docs = Path(os.environ.get("USERPROFILE", Path.home())) / "Documents" / "American Truck Simulator"
-    candidate_roots = [
-        docs / "profiles",
-        docs / "steam" / "profiles",
-    ]
+
     best: Optional[Path] = None
     best_mtime = 0.0
-    for profiles_dir in candidate_roots:
-        if not profiles_dir.exists():
-            continue
-        for profile in profiles_dir.iterdir():
-            if not profile.is_dir():
-                continue
-            save_dir = profile / "save"
-            if not save_dir.exists():
-                continue
-            for slot in save_dir.iterdir():
-                if not slot.is_dir():
-                    continue
-                game_sii = slot / "game.sii"
-                if game_sii.exists():
-                    try:
-                        mtime = game_sii.stat().st_mtime
-                        if mtime > best_mtime:
-                            best_mtime = mtime
-                            best = game_sii
-                    except OSError:
-                        pass
+
+    # 1. Steam userdata (covers Steam Cloud / PC_steam_cloud profile type)
+    for remote in _steam_userdata_roots():
+        best, best_mtime = _scan_profiles_dir(remote / "steam" / "profiles", best, best_mtime)
+        # Some older setups store directly under remote/profiles
+        best, best_mtime = _scan_profiles_dir(remote / "profiles", best, best_mtime)
+
+    # 2. Documents fallback (local saves, non-Cloud)
+    best, best_mtime = _scan_profiles_dir(docs / "profiles", best, best_mtime)
+    best, best_mtime = _scan_profiles_dir(docs / "steam" / "profiles", best, best_mtime)
+
     return best
 
 
@@ -744,10 +801,18 @@ class ATSContext(CommonContext):
             if not self._save_not_found_warned:
                 self._save_not_found_warned = True
                 _docs = Path(os.environ.get("USERPROFILE", Path.home())) / "Documents" / "American Truck Simulator"
+                _steam_roots = _steam_userdata_roots()
+                _searched = [
+                    f"  {_docs / 'profiles'}",
+                    f"  {_docs / 'steam' / 'profiles'}",
+                ]
+                for _r in _steam_roots:
+                    _searched.append(f"  {_r / 'steam' / 'profiles'} (Steam Cloud)")
+                if not _steam_roots:
+                    _searched.append("  (Steam install not found in registry)")
                 logger.warning(
                     "[ATS] No ATS save file (game.sii) found. Searched:\n"
-                    f"  {_docs / 'profiles'}\n"
-                    f"  {_docs / 'steam' / 'profiles'}\n"
+                    + "\n".join(_searched) + "\n"
                     "XP/money grants cannot be applied until a save file is found. "
                     "Make sure ATS has been saved at least once."
                 )
