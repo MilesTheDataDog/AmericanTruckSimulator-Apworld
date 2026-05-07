@@ -257,6 +257,12 @@ static std::atomic<int32_t> g_money_offset{-1};
 static bool                 g_money_is_int64 = false;
 static std::atomic<int64_t> g_money_hint{0};
 
+// Warning-once flags — reset when a new game session starts so failures are re-logged.
+static bool g_warn_xp_no_obj     = false;
+static bool g_warn_money_no_obj  = false;
+static bool g_warn_money_no_hint = false;
+static bool g_warn_money_no_scan = false;
+
 static bool install_xp_hook() {
     if (g_module_base == 0 || g_hook_installed) return false;
 
@@ -399,8 +405,7 @@ static int32_t scan_money_offset(uintptr_t obj, int64_t hint) {
 static bool grant_money_memory(int64_t amount) {
     uintptr_t obj = g_player_object;
     if (obj == 0) {
-        static bool s_w = false;
-        if (!s_w) { s_w = true;
+        if (!g_warn_money_no_obj) { g_warn_money_no_obj = true;
             log("grant_money: player object not yet captured — waiting for first XP write",
                 SCS_LOG_TYPE_warning); }
         return false;
@@ -409,16 +414,14 @@ static bool grant_money_memory(int64_t amount) {
     if (moff < 0) {
         int64_t hint = g_money_hint.load(std::memory_order_acquire);
         if (hint <= 0) {
-            static bool s_w2 = false;
-            if (!s_w2) { s_w2 = true;
+            if (!g_warn_money_no_hint) { g_warn_money_no_hint = true;
                 log("grant_money: waiting for money hint from save file",
                     SCS_LOG_TYPE_warning); }
             return false;
         }
         moff = scan_money_offset(obj, hint);
         if (moff < 0) {
-            static bool s_w3 = false;
-            if (!s_w3) { s_w3 = true;
+            if (!g_warn_money_no_scan) { g_warn_money_no_scan = true;
                 log("grant_money: money value not found in player object (hint=$" +
                     std::to_string(hint) + ") — will retry", SCS_LOG_TYPE_warning); }
             return false;
@@ -448,8 +451,7 @@ static bool grant_money_memory(int64_t amount) {
 static bool grant_xp_memory(int32_t amount) {
     uintptr_t obj = g_player_object;
     if (obj == 0) {
-        static bool s_w = false;
-        if (!s_w) { s_w = true;
+        if (!g_warn_xp_no_obj) { g_warn_xp_no_obj = true;
             log("grant_xp: player object not yet captured — waiting for first XP write",
                 SCS_LOG_TYPE_warning); }
         return false;
@@ -682,7 +684,10 @@ SCSAPI_VOID telemetry_paused(const scs_event_t event,
                               const scs_context_t context) {
     std::lock_guard<std::mutex> lock(g_state_mutex);
     g_state.in_game = false;
-    g_player_object = 0;  // stale between sessions; hook refreshes on next XP write
+    // Do NOT reset g_player_object here. The pointer stays valid for the whole
+    // game session and is captured by the trampoline hook on the first XP write.
+    // Resetting it on every pause (delivery screen, menu, ESC) would prevent
+    // grants from applying between the delivery event and the next poll tick.
 }
 
 SCSAPI_VOID telemetry_started(const scs_event_t event,
@@ -690,6 +695,15 @@ SCSAPI_VOID telemetry_started(const scs_event_t event,
                                const scs_context_t context) {
     std::lock_guard<std::mutex> lock(g_state_mutex);
     g_state.in_game = true;
+    // Reset money offset so we rescan against the current save's balance.
+    // On a fresh save load the player object base address may differ; the
+    // cached offset from a prior session would point to the wrong location.
+    g_money_offset.store(-1, std::memory_order_release);
+    // Reset warning-once flags so any new failures are logged.
+    g_warn_xp_no_obj     = false;
+    g_warn_money_no_obj  = false;
+    g_warn_money_no_hint = false;
+    g_warn_money_no_scan = false;
 }
 
 // ── Frame callback — drives all periodic operations ───────────────────────────
