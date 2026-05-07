@@ -232,27 +232,237 @@ static uintptr_t follow_chain(uintptr_t module_base, uintptr_t static_offset,
     return p + final_offset;
 }
 
+// ── Trampoline hook for player-object capture ──────────────────────────────────
+// XP write instruction in ATS 1.59 (amtrucks.exe+0x422196):
+//   89 BE 2C 06 00 00  =  mov [rsi+0x62C],edi
+// RSI is the player/economy heap object.
+//
+// Technique (same as the community CE table): allocate a code cave near the
+// hook site, write a 6-byte relative JMP there, and in the cave store RSI then
+// execute the original instruction and jump back.  No VEH, no debug registers.
+//
+// Money offset is auto-discovered by scanning the player object for the current
+// balance read from the save file (written into items.json by the Python client).
+
+static const uint32_t XP_WRITE_INST_OFFSET = 0x422196;
+static const uint32_t XP_OFFSET_IN_OBJ     = 0x62C;
+static const uint8_t  XP_WRITE_BYTES[6]    = {0x89, 0xBE, 0x2C, 0x06, 0x00, 0x00};
+
+// Written by the code cave (plain aligned store is hardware-atomic on x64).
+alignas(8) static volatile uintptr_t g_player_object = 0;
+static uint8_t* g_cave_mem       = nullptr;
+static bool     g_hook_installed = false;
+
+static std::atomic<int32_t> g_money_offset{-1};
+static bool                 g_money_is_int64 = false;
+static std::atomic<int64_t> g_money_hint{0};
+
+static bool install_xp_hook() {
+    if (g_module_base == 0 || g_hook_installed) return false;
+
+    uint8_t* site = reinterpret_cast<uint8_t*>(g_module_base + XP_WRITE_INST_OFFSET);
+
+    if (memcmp(site, XP_WRITE_BYTES, 6) != 0) {
+        log("XP hook: instruction bytes at +0x422196 don't match expected — "
+            "ATS version may have changed; hook not installed",
+            SCS_LOG_TYPE_warning);
+        return false;
+    }
+
+    // Allocate executable code cave within ±2 GB of the hook site so the
+    // 5-byte E9 relative JMP can reach it.
+    const size_t   CAVE_SIZE    = 64;
+    const intptr_t SEARCH_RANGE = 0x70000000;
+
+    g_cave_mem = nullptr;
+    for (int sign : {-1, 1}) {
+        for (intptr_t delta = 0x1000; delta < SEARCH_RANGE && !g_cave_mem; delta += 0x1000) {
+            void* hint = reinterpret_cast<void*>(
+                reinterpret_cast<intptr_t>(site) + sign * delta);
+            void* p = VirtualAlloc(hint, CAVE_SIZE,
+                                   MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+            if (p) {
+                intptr_t rel = reinterpret_cast<intptr_t>(p) -
+                               reinterpret_cast<intptr_t>(site + 5);
+                if (rel >= INT32_MIN && rel <= INT32_MAX) {
+                    g_cave_mem = reinterpret_cast<uint8_t*>(p);
+                } else {
+                    VirtualFree(p, 0, MEM_RELEASE);
+                }
+            }
+        }
+        if (g_cave_mem) break;
+    }
+    if (!g_cave_mem) {
+        log("XP hook: failed to allocate code cave within JMP range", SCS_LOG_TYPE_warning);
+        return false;
+    }
+
+    // Code cave layout (36 bytes):
+    //  +0   50                       push rax
+    //  +1   48 B8 <8B addr>          movabs rax, &g_player_object
+    //  +11  48 89 30                 mov [rax], rsi     ← captures player object
+    //  +14  58                       pop rax
+    //  +15  89 BE 2C 06 00 00        mov [rsi+0x62C],edi  (original instruction)
+    //  +21  FF 25 01 00 00 00        jmp [rip+1]  (rip=+27, addr at +28)
+    //  +27  90                       nop (alignment)
+    //  +28  <8B return addr>         = site + 6
+    uint8_t  cc[36];
+    memset(cc, 0x90, sizeof(cc));
+    uint64_t po_addr  = reinterpret_cast<uint64_t>(
+                            const_cast<uintptr_t*>(&g_player_object));
+    uint64_t ret_addr = reinterpret_cast<uint64_t>(site + 6);
+
+    cc[0]  = 0x50;
+    cc[1]  = 0x48; cc[2]  = 0xB8;
+    memcpy(cc + 3, &po_addr, 8);
+    cc[11] = 0x48; cc[12] = 0x89; cc[13] = 0x30;
+    cc[14] = 0x58;
+    memcpy(cc + 15, XP_WRITE_BYTES, 6);
+    cc[21] = 0xFF; cc[22] = 0x25;
+    cc[23] = 0x01; cc[24] = 0x00; cc[25] = 0x00; cc[26] = 0x00;
+    cc[27] = 0x90;
+    memcpy(cc + 28, &ret_addr, 8);
+
+    memcpy(g_cave_mem, cc, sizeof(cc));
+    FlushInstructionCache(GetCurrentProcess(), g_cave_mem, sizeof(cc));
+
+    // Overwrite hook site with: E9 <rel32> 90
+    DWORD old_prot;
+    if (!VirtualProtect(site, 6, PAGE_EXECUTE_READWRITE, &old_prot)) {
+        VirtualFree(g_cave_mem, 0, MEM_RELEASE);
+        g_cave_mem = nullptr;
+        log("XP hook: VirtualProtect failed", SCS_LOG_TYPE_warning);
+        return false;
+    }
+    int32_t rel = static_cast<int32_t>(
+        reinterpret_cast<intptr_t>(g_cave_mem) -
+        reinterpret_cast<intptr_t>(site + 5));
+    uint8_t patch[6] = {0xE9, 0, 0, 0, 0, 0x90};
+    memcpy(patch + 1, &rel, 4);
+    memcpy(site, patch, 6);
+    VirtualProtect(site, 6, old_prot, &old_prot);
+    FlushInstructionCache(GetCurrentProcess(), site, 6);
+
+    g_hook_installed = true;
+    log("XP hook: trampoline installed @ " + hex_addr(g_module_base + XP_WRITE_INST_OFFSET) +
+        "  cave @ " + hex_addr(reinterpret_cast<uintptr_t>(g_cave_mem)));
+    return true;
+}
+
+static void uninstall_xp_hook() {
+    if (!g_hook_installed || g_module_base == 0) return;
+    uint8_t* site = reinterpret_cast<uint8_t*>(g_module_base + XP_WRITE_INST_OFFSET);
+    DWORD old_prot;
+    if (VirtualProtect(site, 6, PAGE_EXECUTE_READWRITE, &old_prot)) {
+        memcpy(site, XP_WRITE_BYTES, 6);
+        VirtualProtect(site, 6, old_prot, &old_prot);
+        FlushInstructionCache(GetCurrentProcess(), site, 6);
+    }
+    if (g_cave_mem) { VirtualFree(g_cave_mem, 0, MEM_RELEASE); g_cave_mem = nullptr; }
+    g_hook_installed = false;
+    log("XP hook uninstalled.");
+}
+
+static int32_t scan_money_offset(uintptr_t obj, int64_t hint) {
+    if (obj == 0 || hint <= 0) return -1;
+    MEMORY_BASIC_INFORMATION mbi;
+    if (VirtualQuery(reinterpret_cast<LPCVOID>(obj), &mbi, sizeof(mbi)) != sizeof(mbi)) return -1;
+    if (mbi.State != MEM_COMMIT || !(mbi.Protect & (PAGE_READWRITE | PAGE_WRITECOPY))) return -1;
+    uintptr_t limit = (std::min)(obj + 0x1400ULL,
+        reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize);
+
+    for (uintptr_t off = 0x400; obj + off + 8 <= limit; off += 8) {
+        int64_t v = 0; memcpy(&v, reinterpret_cast<void*>(obj + off), 8);
+        if (v == hint) {
+            g_money_is_int64 = true;
+            log("Money offset (int64): +" + hex_addr(off) + "  $" + std::to_string(v));
+            return static_cast<int32_t>(off);
+        }
+    }
+    if (hint <= static_cast<int64_t>(INT32_MAX)) {
+        auto h32 = static_cast<int32_t>(hint);
+        for (uintptr_t off = 0x400; obj + off + 4 <= limit; off += 4) {
+            int32_t v = 0; memcpy(&v, reinterpret_cast<void*>(obj + off), 4);
+            if (v == h32) {
+                g_money_is_int64 = false;
+                log("Money offset (int32): +" + hex_addr(off) + "  $" + std::to_string(v));
+                return static_cast<int32_t>(off);
+            }
+        }
+    }
+    return -1;
+}
+
 // ── In-process money and XP grants ────────────────────────────────────────────
-// NOTE: These are currently stubs pending a Lua-based implementation.
-// Memory-injection approaches proved unstable; we will use the ATS Lua scripting
-// API (discovered by reading an existing XP/money mod) instead.
 
 static bool grant_money_memory(int64_t amount) {
-    static bool s_warned = false;
-    if (!s_warned) { s_warned = true;
-        log("grant_money: Lua-based grants not yet implemented — pending mod analysis",
-            SCS_LOG_TYPE_warning);
+    uintptr_t obj = g_player_object;
+    if (obj == 0) {
+        static bool s_w = false;
+        if (!s_w) { s_w = true;
+            log("grant_money: player object not yet captured — waiting for first XP write",
+                SCS_LOG_TYPE_warning); }
+        return false;
     }
-    return false;
+    int32_t moff = g_money_offset.load(std::memory_order_acquire);
+    if (moff < 0) {
+        int64_t hint = g_money_hint.load(std::memory_order_acquire);
+        if (hint <= 0) {
+            static bool s_w2 = false;
+            if (!s_w2) { s_w2 = true;
+                log("grant_money: waiting for money hint from save file",
+                    SCS_LOG_TYPE_warning); }
+            return false;
+        }
+        moff = scan_money_offset(obj, hint);
+        if (moff < 0) {
+            static bool s_w3 = false;
+            if (!s_w3) { s_w3 = true;
+                log("grant_money: money value not found in player object (hint=$" +
+                    std::to_string(hint) + ") — will retry", SCS_LOG_TYPE_warning); }
+            return false;
+        }
+        g_money_offset.store(moff, std::memory_order_release);
+    }
+    uintptr_t addr = obj + static_cast<uint32_t>(moff);
+    MEMORY_BASIC_INFORMATION mbi;
+    if (VirtualQuery(reinterpret_cast<LPCVOID>(addr), &mbi, sizeof(mbi)) != sizeof(mbi)) return false;
+    if (mbi.State != MEM_COMMIT || !(mbi.Protect & (PAGE_READWRITE | PAGE_WRITECOPY))) return false;
+    if (g_money_is_int64) {
+        int64_t cur = 0; memcpy(&cur, reinterpret_cast<void*>(addr), 8);
+        int64_t nv = cur + amount;
+        memcpy(reinterpret_cast<void*>(addr), &nv, 8);
+        log("grant_money: $" + std::to_string(cur) + " → $" + std::to_string(nv));
+        g_money_hint.store(nv, std::memory_order_release);
+    } else {
+        int32_t cur = 0; memcpy(&cur, reinterpret_cast<void*>(addr), 4);
+        int32_t nv = cur + static_cast<int32_t>(amount);
+        memcpy(reinterpret_cast<void*>(addr), &nv, 4);
+        log("grant_money: $" + std::to_string(cur) + " → $" + std::to_string(nv));
+        g_money_hint.store(static_cast<int64_t>(nv), std::memory_order_release);
+    }
+    return true;
 }
 
 static bool grant_xp_memory(int32_t amount) {
-    static bool s_warned = false;
-    if (!s_warned) { s_warned = true;
-        log("grant_xp: Lua-based grants not yet implemented — pending mod analysis",
-            SCS_LOG_TYPE_warning);
+    uintptr_t obj = g_player_object;
+    if (obj == 0) {
+        static bool s_w = false;
+        if (!s_w) { s_w = true;
+            log("grant_xp: player object not yet captured — waiting for first XP write",
+                SCS_LOG_TYPE_warning); }
+        return false;
     }
-    return false;
+    uintptr_t addr = obj + XP_OFFSET_IN_OBJ;
+    MEMORY_BASIC_INFORMATION mbi;
+    if (VirtualQuery(reinterpret_cast<LPCVOID>(addr), &mbi, sizeof(mbi)) != sizeof(mbi)) return false;
+    if (mbi.State != MEM_COMMIT || !(mbi.Protect & (PAGE_READWRITE | PAGE_WRITECOPY))) return false;
+    int32_t cur = 0; memcpy(&cur, reinterpret_cast<void*>(addr), 4);
+    int32_t nv = cur + amount;
+    memcpy(reinterpret_cast<void*>(addr), &nv, 4);
+    log("grant_xp: " + std::to_string(cur) + " → " + std::to_string(nv));
+    return true;
 }
 
 // ── Read items.json (written by Python client) ─────────────────────────────────
@@ -282,6 +492,9 @@ static void read_items_file() {
             g_items.goal_money             = (long long)(j.value("goal_money_thousands", 1000)) * 1000;
             g_items.total_money_granted    = j.value("total_money_granted", (int64_t)0);
             g_items.total_xp_granted       = j.value("total_xp_granted",   (int32_t)0);
+
+            int64_t hint = j.value("current_money_hint", (int64_t)0);
+            if (hint > 0) g_money_hint.store(hint, std::memory_order_release);
 
             g_items.upgrade_tiers.clear();
             if (j.contains("upgrade_tiers") && j["upgrade_tiers"].is_object()) {
@@ -469,6 +682,7 @@ SCSAPI_VOID telemetry_paused(const scs_event_t event,
                               const scs_context_t context) {
     std::lock_guard<std::mutex> lock(g_state_mutex);
     g_state.in_game = false;
+    g_player_object = 0;  // stale between sessions; hook refreshes on next XP write
 }
 
 SCSAPI_VOID telemetry_started(const scs_event_t event,
@@ -726,6 +940,7 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
     g_log = p->common.log;
     log("Archipelago plugin initializing v" + std::string(PLUGIN_VERSION));
     init_module_base();
+    install_xp_hook();
 
     g_comm_dir    = get_documents_path() / "American Truck Simulator" / "archipelago";
     g_events_file = g_comm_dir / "events.json";
@@ -769,6 +984,7 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
 }
 
 SCSAPI_VOID scs_telemetry_shutdown() {
+    uninstall_xp_hook();
     {
         std::lock_guard<std::mutex> lock(g_state_mutex);
         g_state.plugin_alive = false;
