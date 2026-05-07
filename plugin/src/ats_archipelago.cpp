@@ -27,7 +27,6 @@
 #endif
 #include <windows.h>
 #include <shlobj.h>    // SHGetFolderPathW
-#include <tlhelp32.h>  // CreateToolhelp32Snapshot / Thread32*
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -233,233 +232,27 @@ static uintptr_t follow_chain(uintptr_t module_base, uintptr_t static_offset,
     return p + final_offset;
 }
 
-// ── Hardware-breakpoint player-object capture ──────────────────────────────────
-// Identified via Cheat Engine on ATS 1.59.1.0:
-//   amtrucks.exe+0x422196  →  89 BE 2C 06 00 00  →  mov [rsi+0x62C],edi
-//
-// RSI is the player/economy heap object (allocated fresh each game session).
-// We install an x64 hardware execute breakpoint (DR0) at this address. The VEH
-// fires on every XP write and refreshes g_player_object = RSI.
-//
-// Money offset is auto-discovered by scanning the player object for the current
-// balance, which the Python client writes into items.json as "current_money_hint".
-
-static const uint32_t XP_WRITE_INST_OFFSET = 0x422196;
-static const uint32_t XP_OFFSET_IN_OBJ     = 0x62C;
-
-static std::atomic<uintptr_t> g_player_object{0};
-static PVOID   g_veh_handle      = nullptr;
-static bool    g_hw_bp_installed = false;
-
-static std::atomic<int32_t> g_money_offset{-1};  // -1 = not yet discovered
-static bool                 g_money_is_int64 = false;
-static std::atomic<int64_t> g_money_hint{0};      // current balance hint from save file
-
-LONG WINAPI player_object_veh(EXCEPTION_POINTERS* ep) {
-    if (ep->ExceptionRecord->ExceptionCode != EXCEPTION_SINGLE_STEP) {
-        return EXCEPTION_CONTINUE_SEARCH;
-    }
-    if (!(ep->ContextRecord->Dr6 & 0x1ULL)) {  // only when DR0 fired
-        return EXCEPTION_CONTINUE_SEARCH;
-    }
-    if (g_module_base == 0) return EXCEPTION_CONTINUE_SEARCH;
-
-    uintptr_t target = g_module_base + XP_WRITE_INST_OFFSET;
-    uintptr_t hit    = reinterpret_cast<uintptr_t>(ep->ExceptionRecord->ExceptionAddress);
-    if (hit != target) return EXCEPTION_CONTINUE_SEARCH;
-
-    uintptr_t obj = ep->ContextRecord->Rsi;
-    if (obj != 0) {
-        g_player_object.store(obj, std::memory_order_release);
-    }
-    ep->ContextRecord->Dr6 &= ~0x1ULL;  // clear DR0 status bit
-    return EXCEPTION_CONTINUE_EXECUTION;
-}
-
-static void set_hw_bp_on_thread(HANDLE th) {
-    if (g_module_base == 0) return;
-    CONTEXT ctx = {};
-    ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
-    if (!GetThreadContext(th, &ctx)) return;
-    ctx.Dr0 = g_module_base + XP_WRITE_INST_OFFSET;
-    // DR7: local enable DR0 (bit 0), execute condition (bits 16-17 = 00), 1-byte size (bits 18-19 = 00)
-    ctx.Dr7 = (ctx.Dr7 & ~0x000F0003ULL) | 0x00000001ULL;
-    SetThreadContext(th, &ctx);
-}
-
-static void install_player_object_bp() {
-    if (g_module_base == 0) return;
-    if (g_hw_bp_installed) return;
-
-    if (!g_veh_handle) {
-        g_veh_handle = AddVectoredExceptionHandler(1, player_object_veh);
-    }
-
-    DWORD pid    = GetCurrentProcessId();
-    DWORD my_tid = GetCurrentThreadId();
-    int   count  = 0;
-
-    set_hw_bp_on_thread(GetCurrentThread());
-    ++count;
-
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-    if (snap != INVALID_HANDLE_VALUE) {
-        THREADENTRY32 te = {};
-        te.dwSize = sizeof(te);
-        if (Thread32First(snap, &te)) {
-            do {
-                if (te.th32OwnerProcessID != pid) continue;
-                if (te.th32ThreadID == my_tid) continue;
-                HANDLE th = OpenThread(
-                    THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_SET_CONTEXT,
-                    FALSE, te.th32ThreadID);
-                if (!th) continue;
-                SuspendThread(th);
-                set_hw_bp_on_thread(th);
-                ResumeThread(th);
-                CloseHandle(th);
-                ++count;
-            } while (Thread32Next(snap, &te));
-        }
-        CloseHandle(snap);
-    }
-
-    g_hw_bp_installed = true;
-    log("Player-object capture: DR0 installed on " + std::to_string(count) +
-        " thread(s) @ " + hex_addr(g_module_base + XP_WRITE_INST_OFFSET));
-}
-
-// Scan the player object for the current money balance.
-// Returns the byte offset within the object, or -1 if not found.
-static int32_t scan_money_offset(uintptr_t obj, int64_t hint) {
-    if (obj == 0 || hint <= 0) return -1;
-
-    MEMORY_BASIC_INFORMATION mbi;
-    if (VirtualQuery(reinterpret_cast<LPCVOID>(obj), &mbi, sizeof(mbi)) != sizeof(mbi)) return -1;
-    if (mbi.State != MEM_COMMIT || !(mbi.Protect & (PAGE_READWRITE | PAGE_WRITECOPY))) return -1;
-
-    uintptr_t region_end = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
-    uintptr_t scan_limit = (std::min)(obj + 0x1400ULL, region_end);
-
-    // int64 scan first (8-byte aligned)
-    for (uintptr_t off = 0x400; obj + off + 8 <= scan_limit; off += 8) {
-        int64_t v = 0;
-        memcpy(&v, reinterpret_cast<void*>(obj + off), 8);
-        if (v == hint) {
-            g_money_is_int64 = true;
-            log("Money offset discovered (int64): +" + hex_addr(off) +
-                "  value=$" + std::to_string(v));
-            return static_cast<int32_t>(off);
-        }
-    }
-
-    // int32 scan (4-byte aligned, for balances < 2.1 B)
-    if (hint <= static_cast<int64_t>(INT32_MAX) && hint > 0) {
-        auto hint32 = static_cast<int32_t>(hint);
-        for (uintptr_t off = 0x400; obj + off + 4 <= scan_limit; off += 4) {
-            int32_t v = 0;
-            memcpy(&v, reinterpret_cast<void*>(obj + off), 4);
-            if (v == hint32) {
-                g_money_is_int64 = false;
-                log("Money offset discovered (int32): +" + hex_addr(off) +
-                    "  value=$" + std::to_string(v));
-                return static_cast<int32_t>(off);
-            }
-        }
-    }
-
-    return -1;
-}
-
 // ── In-process money and XP grants ────────────────────────────────────────────
+// NOTE: These are currently stubs pending a Lua-based implementation.
+// Memory-injection approaches proved unstable; we will use the ATS Lua scripting
+// API (discovered by reading an existing XP/money mod) instead.
 
 static bool grant_money_memory(int64_t amount) {
-    uintptr_t obj = g_player_object.load(std::memory_order_acquire);
-    if (obj == 0) {
-        static bool s_warned = false;
-        if (!s_warned) { s_warned = true;
-            log("grant_money: player object not yet captured — waiting for first XP write",
-                SCS_LOG_TYPE_warning);
-        }
-        return false;
+    static bool s_warned = false;
+    if (!s_warned) { s_warned = true;
+        log("grant_money: Lua-based grants not yet implemented — pending mod analysis",
+            SCS_LOG_TYPE_warning);
     }
-
-    int32_t moff = g_money_offset.load(std::memory_order_acquire);
-    if (moff < 0) {
-        int64_t hint = g_money_hint.load(std::memory_order_acquire);
-        if (hint <= 0) {
-            static bool s_w2 = false;
-            if (!s_w2) { s_w2 = true;
-                log("grant_money: waiting for money hint from save file", SCS_LOG_TYPE_warning);
-            }
-            return false;
-        }
-        moff = scan_money_offset(obj, hint);
-        if (moff < 0) {
-            static bool s_w3 = false;
-            if (!s_w3) { s_w3 = true;
-                log("grant_money: money not found in player object (hint=$" +
-                    std::to_string(hint) + ") — will retry on next poll", SCS_LOG_TYPE_warning);
-            }
-            return false;
-        }
-        g_money_offset.store(moff, std::memory_order_release);
-    }
-
-    uintptr_t addr = obj + static_cast<uint32_t>(moff);
-    MEMORY_BASIC_INFORMATION mbi;
-    if (VirtualQuery(reinterpret_cast<LPCVOID>(addr), &mbi, sizeof(mbi)) != sizeof(mbi)) return false;
-    if (mbi.State != MEM_COMMIT || !(mbi.Protect & (PAGE_READWRITE | PAGE_WRITECOPY))) {
-        log("grant_money: address not writable @ " + hex_addr(addr), SCS_LOG_TYPE_warning);
-        return false;
-    }
-
-    if (g_money_is_int64) {
-        int64_t cur = 0;
-        memcpy(&cur, reinterpret_cast<void*>(addr), sizeof(cur));
-        int64_t nv = cur + amount;
-        memcpy(reinterpret_cast<void*>(addr), &nv, sizeof(nv));
-        log("grant_money: $" + std::to_string(cur) + " + $" + std::to_string(amount) +
-            " = $" + std::to_string(nv) + " @ " + hex_addr(addr));
-        g_money_hint.store(nv, std::memory_order_release);
-    } else {
-        int32_t cur = 0;
-        memcpy(&cur, reinterpret_cast<void*>(addr), sizeof(cur));
-        int32_t nv = cur + static_cast<int32_t>(amount);
-        memcpy(reinterpret_cast<void*>(addr), &nv, sizeof(nv));
-        log("grant_money: $" + std::to_string(cur) + " + $" + std::to_string(amount) +
-            " = $" + std::to_string(nv) + " @ " + hex_addr(addr));
-        g_money_hint.store(static_cast<int64_t>(nv), std::memory_order_release);
-    }
-    return true;
+    return false;
 }
 
 static bool grant_xp_memory(int32_t amount) {
-    uintptr_t obj = g_player_object.load(std::memory_order_acquire);
-    if (obj == 0) {
-        static bool s_warned = false;
-        if (!s_warned) { s_warned = true;
-            log("grant_xp: player object not yet captured — waiting for first XP write",
-                SCS_LOG_TYPE_warning);
-        }
-        return false;
+    static bool s_warned = false;
+    if (!s_warned) { s_warned = true;
+        log("grant_xp: Lua-based grants not yet implemented — pending mod analysis",
+            SCS_LOG_TYPE_warning);
     }
-
-    uintptr_t addr = obj + XP_OFFSET_IN_OBJ;
-    MEMORY_BASIC_INFORMATION mbi;
-    if (VirtualQuery(reinterpret_cast<LPCVOID>(addr), &mbi, sizeof(mbi)) != sizeof(mbi)) return false;
-    if (mbi.State != MEM_COMMIT || !(mbi.Protect & (PAGE_READWRITE | PAGE_WRITECOPY))) {
-        log("grant_xp: address not writable @ " + hex_addr(addr), SCS_LOG_TYPE_warning);
-        return false;
-    }
-
-    int32_t cur = 0;
-    memcpy(&cur, reinterpret_cast<void*>(addr), sizeof(cur));
-    int32_t nv = cur + amount;
-    memcpy(reinterpret_cast<void*>(addr), &nv, sizeof(nv));
-    log("grant_xp: " + std::to_string(cur) + " + " + std::to_string(amount) +
-        " = " + std::to_string(nv) + " @ " + hex_addr(addr));
-    return true;
+    return false;
 }
 
 // ── Read items.json (written by Python client) ─────────────────────────────────
@@ -489,10 +282,6 @@ static void read_items_file() {
             g_items.goal_money             = (long long)(j.value("goal_money_thousands", 1000)) * 1000;
             g_items.total_money_granted    = j.value("total_money_granted", (int64_t)0);
             g_items.total_xp_granted       = j.value("total_xp_granted",   (int32_t)0);
-
-            // Update money hint so grant_money_memory can discover the offset
-            int64_t hint = j.value("current_money_hint", (int64_t)0);
-            if (hint > 0) g_money_hint.store(hint, std::memory_order_release);
 
             g_items.upgrade_tiers.clear();
             if (j.contains("upgrade_tiers") && j["upgrade_tiers"].is_object()) {
@@ -680,9 +469,6 @@ SCSAPI_VOID telemetry_paused(const scs_event_t event,
                               const scs_context_t context) {
     std::lock_guard<std::mutex> lock(g_state_mutex);
     g_state.in_game = false;
-    // Invalidate captured object pointer so we don't write to a freed/recycled address
-    // until the VEH refreshes it from the next session's XP write.
-    g_player_object.store(0, std::memory_order_release);
 }
 
 SCSAPI_VOID telemetry_started(const scs_event_t event,
@@ -940,7 +726,6 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
     g_log = p->common.log;
     log("Archipelago plugin initializing v" + std::string(PLUGIN_VERSION));
     init_module_base();
-    install_player_object_bp();
 
     g_comm_dir    = get_documents_path() / "American Truck Simulator" / "archipelago";
     g_events_file = g_comm_dir / "events.json";
@@ -995,10 +780,5 @@ SCSAPI_VOID scs_telemetry_shutdown() {
 
 // ── DLL entry point ────────────────────────────────────────────────────────────
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
-    // Set the execute breakpoint on each new thread so the VEH fires regardless
-    // of which thread performs the XP write.
-    if (ul_reason_for_call == DLL_THREAD_ATTACH && g_hw_bp_installed && g_module_base != 0) {
-        set_hw_bp_on_thread(GetCurrentThread());
-    }
     return TRUE;
 }
