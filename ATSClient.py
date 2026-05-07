@@ -495,6 +495,8 @@ class ATSContext(CommonContext):
             "shuffle_trucks": self.slot_data.get("shuffle_trucks", True),
             "shuffle_truck_upgrades": self.slot_data.get("shuffle_truck_upgrades", False),
             "item_notifications": self._notifications,
+            # Hint for the C++ plugin's memory scan to discover the money offset
+            "current_money_hint": self.current_money,
         }
         _write_json(ITEMS_FILE, payload)
 
@@ -685,7 +687,12 @@ class ATSContext(CommonContext):
         # Update live game state read by _check_win_condition
         level = _xp_to_level(save["experience_points"])
         self.current_level = level
-        self.current_money = save["money"]
+        new_money = save["money"]
+        if new_money != self.current_money:
+            self.current_money = new_money
+            # Refresh items.json so the C++ plugin gets an up-to-date money hint
+            # for its scan_money_offset() discovery.
+            self._write_items_file()
 
         from worlds.american_truck_simulator.locations import (
             ALL_LOCATIONS, CITY_ARRIVAL_LOCATIONS, GARAGE_UPGRADE_LOCATIONS,
