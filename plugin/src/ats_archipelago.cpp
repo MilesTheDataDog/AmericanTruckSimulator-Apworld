@@ -250,12 +250,14 @@ static void read_items_file() {
     }
 
     if (reload_counter > g_last_reload_counter) {
-        g_last_reload_counter = reload_counter;
         if (in_game) {
+            g_last_reload_counter = reload_counter;
             trigger_quick_load();
         } else {
-            log("quick_load: reload requested but simulation not running — "
-                "will apply when player is in game");
+            log("quick_load: deferred — grants written but simulation not running yet; "
+                "will trigger on next poll once player is in game");
+            // Do NOT advance g_last_reload_counter — leave it pending so the
+            // next poll (after telemetry_started sets in_game=true) fires F9.
         }
     }
 }

@@ -739,6 +739,19 @@ class ATSContext(CommonContext):
         logger.debug(f"[ATS] Save parsed: {len(save['visited_cities'])} visited cities, "
                      f"xp={save['experience_points']}, money={save['money']}")
 
+        # Sanity check: if save XP is below what we've tracked as applied, the
+        # save was replaced (new profile, deleted profile, manual save swap, etc.).
+        # XP never decreases in ATS, so this reliably detects a stale grants.json.
+        if save["experience_points"] < self._save_applied_xp:
+            logger.warning(
+                f"[ATS] Save XP ({save['experience_points']:,}) < applied grants "
+                f"({self._save_applied_xp:,}) — save was likely replaced. "
+                "Resetting grant tracking so grants are re-applied."
+            )
+            self._save_applied_xp = 0
+            self._save_applied_money = 0
+            _persist_save_grants(0, 0)
+
         # One-time fresh-save check. Only warn when the server has no checked
         # locations yet — if it does, the player is resuming a legitimate run.
         if not self._fresh_save_checked:
