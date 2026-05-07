@@ -239,7 +239,10 @@ def _write_sii_save(path: Path, text: str) -> bool:
         enc = cipher.encryptor()
         encrypted = enc.update(compressed) + enc.finalize()
 
-        header = b"BSII" + struct.pack("<I", 3)
+        # BSII v3 layout: magic(4) + version(4) + plaintext_size(4) + encrypted_data
+        # The 4-byte plaintext size is written by ATS itself between the version
+        # and encrypted data; without it ATS silently rejects the file on load.
+        header = b"BSII" + struct.pack("<I", 3) + struct.pack("<I", len(raw))
         tmp = path.with_suffix(".tmp")
         tmp.write_bytes(header + encrypted)
         tmp.replace(path)
@@ -719,7 +722,13 @@ class ATSContext(CommonContext):
         except OSError:
             return
 
-        if mtime <= self._save_last_mtime:
+        # If there are pending grants we need to apply, bypass the mtime guard
+        # so we don't wait for the next game autosave to bake them in.
+        pending_xp    = self._total_xp_granted    - self._save_applied_xp
+        pending_money = self._total_money_granted - self._save_applied_money
+        has_pending   = pending_xp > 0 or pending_money > 0
+
+        if not has_pending and mtime <= self._save_last_mtime:
             return
         self._save_last_mtime = mtime
 
@@ -736,8 +745,10 @@ class ATSContext(CommonContext):
         self._save_warned_unreadable = False
 
         save = _parse_sii_save(text)
-        logger.debug(f"[ATS] Save parsed: {len(save['visited_cities'])} visited cities, "
-                     f"xp={save['experience_points']}, money={save['money']}")
+        log_fn = logger.info if has_pending else logger.debug
+        log_fn(f"[ATS] Save parsed: xp={save['experience_points']:,}, "
+               f"money=${save['money']:,}, cities={len(save['visited_cities'])}"
+               + (f" — pending grants: +{pending_xp:,} XP, +${pending_money:,}" if has_pending else ""))
 
         # Sanity check: if save XP is below what we've tracked as applied, the
         # save was replaced (new profile, deleted profile, manual save swap, etc.).
