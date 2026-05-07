@@ -408,7 +408,12 @@ static int32_t scan_money_offset(uintptr_t obj, int64_t hint) {
 // Scans PAGE_READWRITE heap for xp_hint at [addr+XP_OFFSET_IN_OBJ], then
 // cross-validates by checking money_hint exists at [candidate+0x400..+0x1400].
 static uintptr_t scan_for_player_object(int32_t xp_hint, int64_t money_hint) {
-    if (xp_hint <= 0 || money_hint <= 0) return 0;
+    if (money_hint <= 0) return 0;
+
+    // When xp_hint == 0 (level-1 player) we can't use XP as search key because
+    // 0 appears everywhere in memory.  Fall back to scanning for money_hint and
+    // treating any matching address as the candidate base.
+    const bool xp_valid = xp_hint > 0;
 
     MEMORY_BASIC_INFORMATION mbi;
     uintptr_t addr = 0x10000;
@@ -425,41 +430,82 @@ static uintptr_t scan_for_player_object(int32_t xp_hint, int64_t money_hint) {
             uintptr_t      rbase    = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
             size_t         rsize    = mbi.RegionSize;
 
-            for (size_t i = XP_OFFSET_IN_OBJ; i + 4 <= rsize; i += 4) {
-                int32_t v = 0;
-                memcpy(&v, region + i, 4);
-                if (v != xp_hint) continue;
+            if (xp_valid) {
+                // Primary path: find xp_hint at offset XP_OFFSET_IN_OBJ, then
+                // cross-validate that money_hint appears at [candidate+0x400..+0x1400).
+                for (size_t i = XP_OFFSET_IN_OBJ; i + 4 <= rsize; i += 4) {
+                    int32_t v = 0;
+                    memcpy(&v, region + i, 4);
+                    if (v != xp_hint) continue;
 
-                uintptr_t candidate = rbase + i - XP_OFFSET_IN_OBJ;
-                ++candidates;
+                    uintptr_t candidate = rbase + i - XP_OFFSET_IN_OBJ;
+                    ++candidates;
 
-                // Cross-check: money_hint must appear in [candidate+0x400, candidate+0x1400).
-                uintptr_t scan_lo = candidate + 0x400;
-                uintptr_t scan_hi = candidate + 0x1400;
-                if (scan_lo < rbase) continue;
-                scan_hi = (std::min)(scan_hi, rbase + rsize);
+                    uintptr_t scan_lo = candidate + 0x400;
+                    uintptr_t scan_hi = candidate + 0x1400;
+                    if (scan_lo < rbase) continue;
+                    scan_hi = (std::min)(scan_hi, rbase + rsize);
 
-                bool money_ok = false;
-                // Try int64
-                for (uintptr_t a = scan_lo; a + 8 <= scan_hi && !money_ok; a += 8) {
-                    int64_t mv = 0; memcpy(&mv, reinterpret_cast<void*>(a), 8);
-                    if (mv == money_hint) money_ok = true;
+                    bool money_ok = false;
+                    for (uintptr_t a = scan_lo; a + 8 <= scan_hi && !money_ok; a += 8) {
+                        int64_t mv = 0; memcpy(&mv, reinterpret_cast<void*>(a), 8);
+                        if (mv == money_hint) money_ok = true;
+                    }
+                    if (!money_ok && money_hint <= static_cast<int64_t>(INT32_MAX)) {
+                        auto mh32 = static_cast<int32_t>(money_hint);
+                        for (uintptr_t a = scan_lo; a + 4 <= scan_hi && !money_ok; a += 4) {
+                            int32_t mv = 0; memcpy(&mv, reinterpret_cast<void*>(a), 4);
+                            if (mv == mh32) money_ok = true;
+                        }
+                    }
+                    if (!money_ok) continue;
+
+                    log("scan: player object found @ " + hex_addr(candidate) +
+                        "  xp=" + std::to_string(xp_hint) +
+                        "  money=$" + std::to_string(money_hint) +
+                        "  candidates_checked=" + std::to_string(candidates));
+                    return candidate;
                 }
-                // Try int32 if hint fits
-                if (!money_ok && money_hint <= static_cast<int64_t>(INT32_MAX)) {
-                    auto mh32 = static_cast<int32_t>(money_hint);
-                    for (uintptr_t a = scan_lo; a + 4 <= scan_hi && !money_ok; a += 4) {
-                        int32_t mv = 0; memcpy(&mv, reinterpret_cast<void*>(a), 4);
-                        if (mv == mh32) money_ok = true;
+            } else {
+                // Fallback path (xp_hint == 0, level-1 player): scan for money_hint in
+                // [region+0x400..region+0x1400), then derive candidate = match - moneyOff.
+                // We don't know the exact money offset so we brute-force 0x400..0x1400
+                // and verify the derived object base is within the same region and
+                // can plausibly hold the XP field (0 is ok here).
+                uintptr_t scan_hi_region = rbase + (rsize > 0x1400 ? rsize - 0x1400 : 0);
+                for (uintptr_t mo = 0x400; mo < 0x1400 && mo + 8 <= 0x1400; mo += 8) {
+                    for (uintptr_t base = rbase; base + mo + 8 <= rbase + rsize &&
+                                                 base >= rbase && base <= scan_hi_region; base += 8) {
+                        int64_t mv = 0; memcpy(&mv, reinterpret_cast<void*>(base + mo), 8);
+                        if (mv != money_hint) continue;
+                        // Verify candidate has XP_OFFSET_IN_OBJ within region
+                        if (base + XP_OFFSET_IN_OBJ + 4 > rbase + rsize) continue;
+                        ++candidates;
+                        log("scan(money-only): player object candidate @ " + hex_addr(base) +
+                            "  money_off=+" + hex_addr(mo) +
+                            "  money=$" + std::to_string(money_hint) +
+                            "  candidates=" + std::to_string(candidates));
+                        return base;
                     }
                 }
-                if (!money_ok) continue;
-
-                log("scan: player object found @ " + hex_addr(candidate) +
-                    "  xp=" + std::to_string(xp_hint) +
-                    "  money=$" + std::to_string(money_hint) +
-                    "  candidates_checked=" + std::to_string(candidates));
-                return candidate;
+                // Also try int32 money
+                if (money_hint <= static_cast<int64_t>(INT32_MAX)) {
+                    auto mh32 = static_cast<int32_t>(money_hint);
+                    for (uintptr_t mo = 0x400; mo < 0x1400 && mo + 4 <= 0x1400; mo += 4) {
+                        for (uintptr_t base = rbase; base + mo + 4 <= rbase + rsize &&
+                                                     base >= rbase && base <= scan_hi_region; base += 4) {
+                            int32_t mv = 0; memcpy(&mv, reinterpret_cast<void*>(base + mo), 4);
+                            if (mv != mh32) continue;
+                            if (base + XP_OFFSET_IN_OBJ + 4 > rbase + rsize) continue;
+                            ++candidates;
+                            log("scan(money-only,i32): player object candidate @ " + hex_addr(base) +
+                                "  money_off=+" + hex_addr(mo) +
+                                "  money=$" + std::to_string(money_hint) +
+                                "  candidates=" + std::to_string(candidates));
+                            return base;
+                        }
+                    }
+                }
             }
         }
         if (mbi.RegionSize == 0) break;
@@ -640,8 +686,14 @@ static void read_items_file() {
             g_last_scan_attempt = now;
             int32_t xhint = g_xp_hint.load(std::memory_order_acquire);
             int64_t mhint = g_money_hint.load(std::memory_order_acquire);
-            uintptr_t found = scan_for_player_object(xhint, mhint);
-            if (found) g_player_object = found;
+            if (mhint <= 0) {
+                log("scan: waiting for hints from AP client (xp=" + std::to_string(xhint) +
+                    " money=" + std::to_string(mhint) + ") — is ATSClient.py running?",
+                    SCS_LOG_TYPE_warning);
+            } else {
+                uintptr_t found = scan_for_player_object(xhint, mhint);
+                if (found) g_player_object = found;
+            }
         }
     }
 
