@@ -250,6 +250,7 @@ static const uint8_t  XP_WRITE_BYTES[6]    = {0x89, 0xBE, 0x2C, 0x06, 0x00, 0x00
 
 // Written by the code cave (plain aligned store is hardware-atomic on x64).
 alignas(8) static volatile uintptr_t g_player_object = 0;
+static uintptr_t g_player_object_logged = 0; // last value we logged so we only log changes
 static uint8_t* g_cave_mem       = nullptr;
 static bool     g_hook_installed = false;
 
@@ -430,8 +431,16 @@ static bool grant_money_memory(int64_t amount) {
     }
     uintptr_t addr = obj + static_cast<uint32_t>(moff);
     MEMORY_BASIC_INFORMATION mbi;
-    if (VirtualQuery(reinterpret_cast<LPCVOID>(addr), &mbi, sizeof(mbi)) != sizeof(mbi)) return false;
-    if (mbi.State != MEM_COMMIT || !(mbi.Protect & (PAGE_READWRITE | PAGE_WRITECOPY))) return false;
+    if (VirtualQuery(reinterpret_cast<LPCVOID>(addr), &mbi, sizeof(mbi)) != sizeof(mbi)) {
+        log("grant_money: VirtualQuery failed @ " + hex_addr(addr), SCS_LOG_TYPE_warning);
+        return false;
+    }
+    if (mbi.State != MEM_COMMIT || !(mbi.Protect & (PAGE_READWRITE | PAGE_WRITECOPY))) {
+        log("grant_money: bad memory at " + hex_addr(addr) +
+            " state=" + std::to_string(mbi.State) + " prot=" + std::to_string(mbi.Protect),
+            SCS_LOG_TYPE_warning);
+        return false;
+    }
     if (g_money_is_int64) {
         int64_t cur = 0; memcpy(&cur, reinterpret_cast<void*>(addr), 8);
         int64_t nv = cur + amount;
@@ -458,8 +467,16 @@ static bool grant_xp_memory(int32_t amount) {
     }
     uintptr_t addr = obj + XP_OFFSET_IN_OBJ;
     MEMORY_BASIC_INFORMATION mbi;
-    if (VirtualQuery(reinterpret_cast<LPCVOID>(addr), &mbi, sizeof(mbi)) != sizeof(mbi)) return false;
-    if (mbi.State != MEM_COMMIT || !(mbi.Protect & (PAGE_READWRITE | PAGE_WRITECOPY))) return false;
+    if (VirtualQuery(reinterpret_cast<LPCVOID>(addr), &mbi, sizeof(mbi)) != sizeof(mbi)) {
+        log("grant_xp: VirtualQuery failed @ " + hex_addr(addr), SCS_LOG_TYPE_warning);
+        return false;
+    }
+    if (mbi.State != MEM_COMMIT || !(mbi.Protect & (PAGE_READWRITE | PAGE_WRITECOPY))) {
+        log("grant_xp: bad memory at " + hex_addr(addr) +
+            " state=" + std::to_string(mbi.State) + " prot=" + std::to_string(mbi.Protect),
+            SCS_LOG_TYPE_warning);
+        return false;
+    }
     int32_t cur = 0; memcpy(&cur, reinterpret_cast<void*>(addr), 4);
     int32_t nv = cur + amount;
     memcpy(reinterpret_cast<void*>(addr), &nv, 4);
@@ -523,6 +540,16 @@ static void read_items_file() {
             log(std::string("Failed to read items.json: ") + e.what(), SCS_LOG_TYPE_warning);
             return;
         }
+    }
+
+    // Log when the hook first captures the player object (or recaptures after reset).
+    uintptr_t cur_obj = g_player_object;
+    if (cur_obj != g_player_object_logged) {
+        g_player_object_logged = cur_obj;
+        if (cur_obj != 0)
+            log("player object captured @ " + hex_addr(cur_obj));
+        else
+            log("player object cleared", SCS_LOG_TYPE_warning);
     }
 
     // Apply money/XP grant deltas when the simulation is running.
@@ -704,6 +731,8 @@ SCSAPI_VOID telemetry_started(const scs_event_t event,
     g_warn_money_no_obj  = false;
     g_warn_money_no_hint = false;
     g_warn_money_no_scan = false;
+    // Force re-log of player object address (it may have changed with the new save load).
+    g_player_object_logged = ~g_player_object;
 }
 
 // ── Frame callback — drives all periodic operations ───────────────────────────
