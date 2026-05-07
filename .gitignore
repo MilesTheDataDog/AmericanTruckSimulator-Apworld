@@ -10,3 +10,5 @@ __pycache__/
 build/
 dist/
 *.egg-info/
+# Pre-built plugin binary for distribution — keep tracked
+!release/ats_archipelago.dll
