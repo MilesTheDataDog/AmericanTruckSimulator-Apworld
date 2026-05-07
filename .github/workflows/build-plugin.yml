@@ -13,15 +13,21 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install MinGW-w64 cross-compiler
+      - name: Install MinGW-w64 x86_64 cross-compiler
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y mingw-w64 cmake
+          sudo apt-get install -y --no-install-recommends \
+            gcc-mingw-w64-x86-64-win32 \
+            g++-mingw-w64-x86-64-win32 \
+            binutils-mingw-w64-x86-64 \
+            cmake
 
       - name: Download nlohmann/json single-header
         run: |
@@ -47,3 +53,12 @@ jobs:
           name: ats_archipelago-dll
           path: plugin/build/ats_archipelago.dll
           if-no-files-found: error
+
+      - name: Update release/ats_archipelago.dll
+        run: |
+          cp plugin/build/ats_archipelago.dll release/ats_archipelago.dll
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add release/ats_archipelago.dll
+          git diff --cached --quiet || git commit -m "ci: update release/ats_archipelago.dll [skip ci]"
+          git push
