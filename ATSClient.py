@@ -261,6 +261,52 @@ def _find_ats_save_file() -> Optional[Path]:
     return best
 
 
+def _ensure_cryptography() -> bool:
+    """Return True if the cryptography package is importable.
+
+    If it is not present, attempt a one-time pip install into the *same*
+    Python interpreter that is currently running the client.  This is
+    necessary because users frequently run `pip install cryptography` in a
+    system Python while the Archipelago client runs in its own venv.
+    """
+    try:
+        from cryptography.hazmat.primitives.ciphers import Cipher  # noqa: F401
+        return True
+    except ImportError:
+        pass
+
+    import subprocess
+    import importlib
+    logger.info(
+        "[ATS] 'cryptography' not found in this Python environment — "
+        "auto-installing now (this may take ~30 s) ..."
+    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "cryptography"],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode == 0:
+            importlib.invalidate_caches()
+            try:
+                from cryptography.hazmat.primitives.ciphers import Cipher  # noqa: F401
+                logger.info("[ATS] 'cryptography' auto-installed successfully.")
+                return True
+            except ImportError:
+                logger.warning(
+                    "[ATS] 'cryptography' was installed but could not be imported. "
+                    "Please restart the ATS client."
+                )
+        else:
+            logger.warning(
+                f"[ATS] Auto-install of 'cryptography' failed:\n"
+                f"{result.stderr.strip() or result.stdout.strip()}"
+            )
+    except Exception as exc:
+        logger.warning(f"[ATS] Could not auto-install 'cryptography': {exc}")
+    return False
+
+
 def _decrypt_bsii_v3(payload: bytes) -> Optional[bytes]:
     """AES-256-ECB decrypt a BSII v3 payload, then zlib-decompress it."""
     try:
@@ -273,7 +319,10 @@ def _decrypt_bsii_v3(payload: bytes) -> Optional[bytes]:
         # are silently stored in unused_data instead of raising zlib.error.
         d = zlib.decompressobj()
         return d.decompress(decrypted)
-    except Exception:
+    except ImportError:
+        return None  # cryptography not available — caller handles this
+    except Exception as exc:
+        logger.debug(f"[ATS] BSII v3 decrypt attempt failed: {exc}")
         return None
 
 
@@ -324,45 +373,55 @@ def _write_sii_save(path: Path, text: str, plain: bool = False) -> bool:
     return _write_sii_encrypted(path, text)
 
 
-def _read_sii_text(path: Path) -> Optional[str]:
-    """Read a .sii save file and return plaintext SiiNunit content, or None on failure."""
+def _read_sii_text(path: Path) -> "tuple[Optional[str], str]":
+    """Read a .sii save file.
+
+    Returns (text, format_tag) where format_tag is one of:
+      'plain'    — SiiN plain text (success)
+      'bsii_v2'  — BSII v2 zlib (success or failure noted in text=None)
+      'bsii_v3'  — BSII v3 AES+zlib (success or failure noted in text=None)
+      'no_crypto' — BSII v3 but cryptography package missing
+      'unknown'  — unrecognised magic
+    """
     try:
         data = path.read_bytes()
     except OSError:
-        return None
+        return None, "unreadable"
 
     if len(data) < 8:
-        return None
+        return None, "too_small"
 
     magic = data[:4]
 
     if magic == _SIIN_MAGIC:
-        # Already plaintext
-        return data.decode("utf-8", errors="replace")
+        return data.decode("utf-8", errors="replace"), "plain"
 
     if magic != _BSII_MAGIC:
-        return None
+        return None, f"unknown_magic_{magic!r}"
 
     version = struct.unpack_from("<I", data, 4)[0]
     payload = data[8:]
 
     if version == 2:
-        # Raw zlib deflate
         try:
-            return zlib.decompress(payload).decode("utf-8", errors="replace")
+            return zlib.decompress(payload).decode("utf-8", errors="replace"), "bsii_v2"
         except zlib.error:
-            return None
+            return None, "bsii_v2"
 
     if version == 3:
-        # AES-256-ECB then zlib. Some files have a 4-byte plaintext-size
-        # prefix before the encrypted data; try both layouts.
+        try:
+            from cryptography.hazmat.primitives.ciphers import Cipher  # noqa: F401
+        except ImportError:
+            return None, "no_crypto"
+
+        # Try both payload layouts: with or without a 4-byte uncompressed-size prefix.
         for skip in (0, 4):
             result = _decrypt_bsii_v3(payload[skip:])
             if result and result[:4] == _SIIN_MAGIC:
-                return result.decode("utf-8", errors="replace")
-        return None
+                return result.decode("utf-8", errors="replace"), "bsii_v3"
+        return None, "bsii_v3"
 
-    return None
+    return None, f"bsii_v{version}"
 
 
 def _parse_sii_save(text: str) -> Dict[str, Any]:
@@ -838,52 +897,69 @@ class ATSContext(CommonContext):
             return
         self._save_last_mtime = mtime
 
-        # Detect save format before parsing so we can write back in the same format.
-        try:
-            raw_header = save_path.read_bytes()[:4]
-            self._save_is_plain = (raw_header == _SIIN_MAGIC)
-        except OSError:
-            self._save_is_plain = False
+        text, fmt = _read_sii_text(save_path)
+        self._save_is_plain = (fmt == "plain")
 
-        text = _read_sii_text(save_path)
         if text is None:
-            if not self._save_warned_unreadable:
-                self._save_warned_unreadable = True
-                # Try to tell the user which config.cfg to edit, including the
-                # Steam Cloud remote path if that's where the save was found.
-                _cfg_paths = []
-                _save_remote = None
-                for _part in save_path.parts:
-                    pass  # walk handled below
-                # Check if the save is under a Steam userdata remote dir
-                for _remote in _steam_userdata_roots():
-                    try:
-                        save_path.relative_to(_remote)
-                        _save_remote = _remote
-                        break
-                    except ValueError:
-                        pass
-                if _save_remote:
-                    _cfg_paths.append(str(_save_remote / "config.cfg"))
-                _docs_cfg = (
-                    Path(os.environ.get("USERPROFILE", Path.home()))
-                    / "Documents" / "American Truck Simulator" / "config.cfg"
-                )
-                _cfg_paths.append(str(_docs_cfg))
-                _cfg_hint = "\n  ".join(_cfg_paths)
-                logger.warning(
-                    "[ATS] Could not read save file (save is encrypted BSII v3).\n"
-                    "To fix, pick ONE of these options:\n"
-                    "  Option A — Install the cryptography package:\n"
-                    "    pip install cryptography\n"
-                    "  Option B — Switch ATS to plain-text saves:\n"
-                    f"  1. Open config.cfg (try these locations):\n"
-                    f"       {_cfg_hint}\n"
-                    "  2. Add this line:  uset g_save_format \"2\"\n"
-                    "  3. In ATS: pause menu → Save & Exit  (so a new plain-text save is written)\n"
-                    "  4. Restart the client."
-                )
-            return
+            if fmt == "no_crypto":
+                # cryptography not installed — try auto-installing once, then retry
+                if not self._save_warned_unreadable:
+                    self._save_warned_unreadable = True
+                    logger.warning(
+                        "[ATS] Save is BSII v3 encrypted but 'cryptography' is not "
+                        "installed in this Python. Attempting auto-install..."
+                    )
+                    if _ensure_cryptography():
+                        text, fmt = _read_sii_text(save_path)
+                        self._save_is_plain = (fmt == "plain")
+                        if text is not None:
+                            self._save_warned_unreadable = False
+                            logger.info("[ATS] Save read successfully after auto-installing cryptography.")
+                        else:
+                            logger.warning("[ATS] Still cannot read save after install — see below.")
+                if text is None:
+                    return
+
+            if text is None:
+                if not self._save_warned_unreadable:
+                    self._save_warned_unreadable = True
+                    # Build config.cfg path hints
+                    _cfg_paths = []
+                    for _remote in _steam_userdata_roots():
+                        try:
+                            save_path.relative_to(_remote)
+                            _cfg_paths.append(str(_remote / "config.cfg"))
+                            break
+                        except ValueError:
+                            pass
+                    _docs_cfg = (
+                        Path(os.environ.get("USERPROFILE", Path.home()))
+                        / "Documents" / "American Truck Simulator" / "config.cfg"
+                    )
+                    _cfg_paths.append(str(_docs_cfg))
+                    _cfg_hint = "\n       ".join(_cfg_paths)
+
+                    if fmt == "bsii_v3":
+                        logger.warning(
+                            f"[ATS] Save is BSII v3 encrypted but decryption failed "
+                            f"(the AES key may not match this game version).\n"
+                            "Switch ATS to plain-text saves instead:\n"
+                            f"  1. Open config.cfg:\n"
+                            f"       {_cfg_hint}\n"
+                            "  2. Add:  uset g_save_format \"2\"\n"
+                            "  3. In ATS: Escape → Save → do any delivery to trigger autosave\n"
+                            "  4. Restart the client.\n"
+                            "NOTE: 'Current profile saved' in the game log is NOT the "
+                            "autosave — you must complete a delivery or use pause → Save."
+                        )
+                    else:
+                        logger.warning(
+                            f"[ATS] Could not read save file (detected format: {fmt}).\n"
+                            "  cryptography installed: yes\n"
+                            "  Install the cryptography package and try again, or\n"
+                            "  add 'uset g_save_format \"2\"' to config.cfg and save in-game."
+                        )
+                return
         self._save_warned_unreadable = False
 
         save = _parse_sii_save(text)
@@ -1112,6 +1188,11 @@ async def game_watcher(ctx: ATSContext) -> None:
     """Polls the plugin events file and ATS save file, managing game state."""
     logger.info("[ATS] Game watcher started.")
     logger.info(f"[ATS] Communication folder: {COMM_DIR}")
+
+    # Ensure cryptography is available in the background so BSII v3 saves
+    # can be read/written without blocking the event loop.
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _ensure_cryptography)
 
     if ctx.auto_launch_game:
         _launch_ats_steam()
