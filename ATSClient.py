@@ -478,7 +478,7 @@ def _decode_scsc(data: bytes) -> "Optional[tuple[bytes, Optional[dict]]]":
 
     Header layout (56 bytes before ciphertext):
         [  0- 3]  magic    "ScsC"
-        [  4-35]  HMAC-SHA256 over ciphertext (32 bytes), keyed with _SCSC_AES_KEY
+        [  4-35]  HMAC-SHA256 over IV+DataSize+ciphertext (32 bytes), keyed with _SCSC_AES_KEY
         [ 36-51]  AES-IV   random 16-byte IV
         [ 52-55]  DataSize uint32-LE — uncompressed size after decryption+inflation
         [ 56+  ]  ciphertext — AES-256-CBC, zero-padded to 16-byte boundary
@@ -545,13 +545,16 @@ def _write_scsc(path: Path, text: str, meta: dict) -> bool:
 
         iv         = os.urandom(16)
         ciphertext = _aes_cbc_encrypt(_SCSC_AES_KEY, iv, plaintext)
-        mac        = _hmac.new(_SCSC_AES_KEY, ciphertext, hashlib.sha256).digest()
+        # HMAC covers everything after magic+HMAC: IV + DataSize + ciphertext.
+        # This matches how SCS validates the save (same as SII_Decrypt tool).
+        data_size_bytes = struct.pack("<I", len(raw))
+        mac        = _hmac.new(_SCSC_AES_KEY, iv + data_size_bytes + ciphertext, hashlib.sha256).digest()
 
         file_bytes = (
             _SCSC_MAGIC
             + mac
             + iv
-            + struct.pack("<I", len(raw))
+            + data_size_bytes
             + ciphertext
         )
 
@@ -709,9 +712,15 @@ def _parse_sii_save(text: str) -> Dict[str, Any]:
         "owned_garages": set(),
     }
 
-    # Pin to the economy.economy block so we never accidentally read a hired
-    # driver's experience_points, which appears as the same field name.
-    _econ_m = re.search(r'\beconomy\s*:\s*economy\.\w+\s*\{', text)
+    # Pin to the economy/player block so we never accidentally read a hired
+    # driver's experience_points. ATS 1.x formats vary:
+    #   "economy : economy.economy {"  (older)
+    #   "economy : economy {"          (some versions, no dot+id)
+    #   "player : player.player {"     (newer ATS builds)
+    _econ_m = (
+        re.search(r'\beconomy\s*:\s*economy(?:\.\w+)?\s*\{', text)
+        or re.search(r'\bplayer\s*:\s*player(?:\.\w+)?\s*\{', text)
+    )
     _xp_region = text[_econ_m.end():_econ_m.end() + 20_000] if _econ_m else text
     xp_m = re.search(r"\bexperience_points\s*:\s*(\d+)", _xp_region)
     if xp_m:
@@ -1287,11 +1296,14 @@ class ATSContext(CommonContext):
             new_xp    = self.current_xp    + xp_delta
             new_money = self.current_money + money_delta
 
-            # Patch the decrypted text, pinned to the economy.economy block so we
+            # Patch the decrypted text, pinned to the economy/player block so we
             # never accidentally overwrite a hired driver's experience_points field.
             modified = text
             if xp_delta > 0:
-                _econ_patch = re.search(r'\beconomy\s*:\s*economy\.\w+\s*\{', modified)
+                _econ_patch = (
+                    re.search(r'\beconomy\s*:\s*economy(?:\.\w+)?\s*\{', modified)
+                    or re.search(r'\bplayer\s*:\s*player(?:\.\w+)?\s*\{', modified)
+                )
                 if _econ_patch:
                     _before = modified[:_econ_patch.end()]
                     _after  = modified[_econ_patch.end():]
@@ -1301,9 +1313,9 @@ class ATSContext(CommonContext):
                         _after, count=1,
                     )
                     modified = _before + _after
-                    logger.debug(f"[ATS] Patched economy.economy XP -> {new_xp:,}")
+                    logger.debug(f"[ATS] Patched {_econ_patch.group(0)[:40].strip()} XP -> {new_xp:,}")
                 else:
-                    logger.warning("[ATS] economy.economy block not found; patching first occurrence of experience_points")
+                    logger.warning("[ATS] No economy/player block found; patching first occurrence of experience_points")
                     modified = re.sub(
                         r'\bexperience_points\s*:\s*\d+',
                         f'experience_points: {new_xp}',
@@ -1345,18 +1357,26 @@ class ATSContext(CommonContext):
                     try:
                         _vtext, _vfmt, _ = _read_sii_text(quicksave_path)
                         if _vtext:
-                            _vecon = re.search(r'\beconomy\s*:\s*economy\.\w+\s*\{', _vtext)
+                            _vecon = (
+                                re.search(r'\beconomy\s*:\s*economy(?:\.\w+)?\s*\{', _vtext)
+                                or re.search(r'\bplayer\s*:\s*player(?:\.\w+)?\s*\{', _vtext)
+                            )
                             if _vecon:
                                 _vregion = _vtext[_vecon.end():_vecon.end() + 20_000]
                                 _vxp = re.search(r'\bexperience_points\s*:\s*(\d+)', _vregion)
                                 logger.info(
-                                    f"[ATS] VERIFY quicksave economy XP = "
+                                    f"[ATS] VERIFY quicksave XP = "
                                     f"{int(_vxp.group(1)):,} (expected {new_xp:,})"
                                     if _vxp else
-                                    "[ATS] VERIFY quicksave: experience_points not found in economy block"
+                                    "[ATS] VERIFY quicksave: experience_points not found in block"
                                 )
                             else:
-                                logger.warning("[ATS] VERIFY quicksave: economy.economy block not found in file")
+                                # Log first 600 chars to diagnose the actual block structure
+                                _snippet = _vtext[:600].replace('\n', '\\n')
+                                logger.warning(
+                                    "[ATS] VERIFY: no economy/player block found. "
+                                    f"Save starts with: {_snippet!r}"
+                                )
                     except Exception as _ve:
                         logger.warning(f"[ATS] VERIFY quicksave read-back failed: {_ve}")
             except Exception as e:
