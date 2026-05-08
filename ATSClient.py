@@ -73,6 +73,7 @@ SLOT_DATA_FILE = COMM_DIR / "slot_data.json"
 
 _BSII_MAGIC = b"BSII"
 _SIIN_MAGIC = b"SiiN"
+_SCSC_MAGIC = b"ScsC"
 
 # AES-256 key used by SCS in BSII v3 saves (sourced from the open-source
 # SII_Decrypt community tool by Zukf / Xpericode).
@@ -262,10 +263,10 @@ def _find_ats_save_file() -> Optional[Path]:
         except OSError:
             logger.debug(f"[ATS] Save scan: could not open {path}")
             continue
-        if magic in (_SIIN_MAGIC, _BSII_MAGIC):
-            logger.debug(f"[ATS] Save scan: accepted {path}")
+        if magic in (_SIIN_MAGIC, _BSII_MAGIC, _SCSC_MAGIC):
+            logger.debug(f"[ATS] Save scan: accepted {path} (magic={magic!r})")
             return path
-        logger.info(f"[ATS] Save scan: skipped {path} (magic={magic!r}, expected SiiN or BSII)")
+        logger.info(f"[ATS] Save scan: skipped {path} (magic={magic!r}, unrecognised format)")
 
     return None
 
@@ -296,6 +297,144 @@ def _decrypt_bsii_v3(payload: bytes) -> Optional[bytes]:
     except Exception as exc:
         logger.debug(f"[ATS] BSII v3 decrypt attempt failed: {exc}")
         return None
+
+
+def _decode_scsc(data: bytes) -> "Optional[tuple[bytes, Optional[dict]]]":
+    """Extract the inner game.sii content from an SCS HashFS save container (ScsC magic).
+
+    Returns (inner_bytes, meta) where meta is a dict suitable for _write_scsc, or
+    (inner_bytes, None) if the structure was found via raw magic scan only.
+    Returns None if extraction failed entirely.
+
+    ScsC header (20 bytes):
+        magic(4) + version(4) + salt(4) + hash_type(4) + entry_count(4)
+    Entry (32 bytes, 8-byte offset layout):
+        hash(8) + offset(8) + flags(4) + crc(4) + size(4) + zsize(4)
+    Flags: bit 0 = zlib-compressed, bit 1 = directory entry
+    """
+    if len(data) < 20:
+        return None
+
+    version    = struct.unpack_from("<I", data, 4)[0]
+    salt       = struct.unpack_from("<I", data, 8)[0]
+    hash_type  = struct.unpack_from("<I", data, 12)[0]
+    entry_count = struct.unpack_from("<I", data, 16)[0]
+
+    if 0 < entry_count <= 256:
+        # Try two common header sizes × two entry offset widths
+        for hdr_size in (20, 24):
+            for ent_size, off_fmt in ((32, "<Q"), (28, "<I")):
+                table_end = hdr_size + entry_count * ent_size
+                if table_end > len(data):
+                    continue
+                for i in range(entry_count):
+                    base     = hdr_size + i * ent_size
+                    try:
+                        entry_hash   = struct.unpack_from("<Q", data, base)[0]
+                        file_offset  = struct.unpack_from(off_fmt, data, base + 8)[0]
+                        tail         = base + 8 + struct.calcsize(off_fmt)
+                        entry_flags  = struct.unpack_from("<I", data, tail)[0]
+                        # crc        = struct.unpack_from("<I", data, tail + 4)[0]
+                        size         = struct.unpack_from("<I", data, tail + 8)[0]
+                        # zsize      = struct.unpack_from("<I", data, tail + 12)[0]
+                    except struct.error:
+                        break
+
+                    if entry_flags & 2:  # directory entry — no file data
+                        continue
+                    if file_offset == 0 or file_offset >= len(data):
+                        continue
+                    if size == 0 or file_offset + size > len(data):
+                        continue
+
+                    chunk = data[file_offset: file_offset + size]
+                    if entry_flags & 1:
+                        try:
+                            inner = zlib.decompress(chunk)
+                        except zlib.error:
+                            continue
+                    else:
+                        inner = chunk
+
+                    if inner[:4] in (_SIIN_MAGIC, _BSII_MAGIC):
+                        logger.debug(
+                            f"[ATS] ScsC: extracted inner content via entry {i} "
+                            f"(hdr={hdr_size}B, ent={ent_size}B, "
+                            f"compressed={bool(entry_flags & 1)}, "
+                            f"size={size}, inner_magic={inner[:4]!r})"
+                        )
+                        meta = {
+                            "version":     version,
+                            "salt":        salt,
+                            "hash_type":   hash_type,
+                            "entry_hash":  entry_hash,
+                            "entry_flags": entry_flags,
+                            "header_size": hdr_size,
+                            "entry_size":  ent_size,
+                        }
+                        return inner, meta
+
+    # Fallback: raw scan for SiiN/BSII magic anywhere after the header
+    for needle in (_SIIN_MAGIC, _BSII_MAGIC):
+        pos = data.find(needle, 24)
+        if pos != -1:
+            logger.debug(f"[ATS] ScsC: found {needle!r} at raw offset {pos} (fallback scan)")
+            return data[pos:], None  # no meta — write-back will use plain SiiN
+
+    logger.warning(
+        "[ATS] ScsC: could not extract inner content; "
+        f"header bytes: {' '.join(f'{b:02x}' for b in data[:64])}"
+    )
+    return None
+
+
+def _write_scsc(path: Path, text: str, meta: dict) -> bool:
+    """Write SiiNunit text back into an SCS HashFS (ScsC) save container.
+
+    Preserves the original version/salt/hash_type/entry_hash so the game
+    engine can locate the inner game.sii file by its CityHash64 key.
+    Always zlib-compresses the inner content.
+    """
+    try:
+        raw        = text.encode("utf-8")
+        compressed = zlib.compress(raw, level=6)
+        crc        = zlib.crc32(raw) & 0xFFFFFFFF
+
+        hdr_size  = meta.get("header_size", 20)
+        ent_size  = meta.get("entry_size",  32)
+        off_fmt   = "<Q" if ent_size == 32 else "<I"
+
+        # Data starts immediately after the single-entry table.
+        data_offset = hdr_size + ent_size
+
+        # Header
+        header = struct.pack(
+            "<4sIIII",
+            _SCSC_MAGIC,
+            meta["version"],
+            meta["salt"],
+            meta["hash_type"],
+            1,  # entry_count — we only write the content entry
+        )
+        if hdr_size == 24:
+            header += struct.pack("<I", 0)  # padding / unknown field
+
+        # Entry: flags=1 (compressed), crc, size, zsize
+        entry_flags = (meta["entry_flags"] & ~0x3) | 1  # clear dir bit, set compressed
+        entry = struct.pack("<Q", meta["entry_hash"])
+        entry += struct.pack(off_fmt, data_offset)
+        entry += struct.pack("<IIII", entry_flags, crc, len(compressed), len(raw))
+        # Pad entry to declared entry_size if needed (e.g. extra fields in some versions)
+        if len(entry) < ent_size:
+            entry += b"\x00" * (ent_size - len(entry))
+
+        tmp = path.with_suffix(".tmp")
+        tmp.write_bytes(header + entry + compressed)
+        tmp.replace(path)
+        return True
+    except Exception as e:
+        logger.error(f"[ATS] _write_scsc failed for {path}: {e}")
+        return False
 
 
 def _write_sii_plain(path: Path, text: str) -> bool:
@@ -345,55 +484,85 @@ def _write_sii_save(path: Path, text: str, plain: bool = False) -> bool:
     return _write_sii_encrypted(path, text)
 
 
-def _read_sii_text(path: Path) -> "tuple[Optional[str], str]":
+def _read_sii_text(path: Path) -> "tuple[Optional[str], str, Optional[dict]]":
     """Read a .sii save file.
 
-    Returns (text, format_tag) where format_tag is one of:
-      'plain'    — SiiN plain text (success)
-      'bsii_v2'  — BSII v2 zlib (success or failure noted in text=None)
-      'bsii_v3'  — BSII v3 AES+zlib (success or failure noted in text=None)
-      'no_crypto' — BSII v3 but cryptography package missing
-      'unknown'  — unrecognised magic
+    Returns (text, format_tag, scsc_meta) where:
+      text       — decoded SiiNunit text, or None on failure
+      format_tag — one of: 'plain', 'bsii_v2', 'bsii_v3', 'scsc_plain',
+                   'scsc_bsii_v2', 'scsc_bsii_v3', 'no_crypto',
+                   'scsc_unreadable', 'unknown_magic_...', 'unreadable', 'too_small'
+      scsc_meta  — dict for _write_scsc if the file was an ScsC container,
+                   None for all other formats
     """
     try:
         data = path.read_bytes()
     except OSError:
-        return None, "unreadable"
+        return None, "unreadable", None
 
     if len(data) < 8:
-        return None, "too_small"
+        return None, "too_small", None
 
     magic = data[:4]
 
     if magic == _SIIN_MAGIC:
-        return data.decode("utf-8", errors="replace"), "plain"
+        return data.decode("utf-8", errors="replace"), "plain", None
+
+    if magic == _SCSC_MAGIC:
+        result = _decode_scsc(data)
+        if result is None:
+            return None, "scsc_unreadable", None
+        inner, scsc_meta = result
+        inner_magic = inner[:4]
+        if inner_magic == _SIIN_MAGIC:
+            return inner.decode("utf-8", errors="replace"), "scsc_plain", scsc_meta
+        if inner_magic == _BSII_MAGIC:
+            inner_version = struct.unpack_from("<I", inner, 4)[0]
+            inner_payload = inner[8:]
+            if inner_version == 2:
+                try:
+                    text = zlib.decompress(inner_payload).decode("utf-8", errors="replace")
+                    return text, "scsc_bsii_v2", scsc_meta
+                except zlib.error:
+                    return None, "scsc_bsii_v2", scsc_meta
+            if inner_version == 3:
+                try:
+                    from cryptography.hazmat.primitives.ciphers import Cipher  # noqa: F401
+                except ImportError:
+                    return None, "no_crypto", scsc_meta
+                for skip in (0, 4):
+                    dec = _decrypt_bsii_v3(inner_payload[skip:])
+                    if dec and dec[:4] == _SIIN_MAGIC:
+                        return dec.decode("utf-8", errors="replace"), "scsc_bsii_v3", scsc_meta
+                return None, "scsc_bsii_v3", scsc_meta
+        return None, "scsc_unreadable", scsc_meta
 
     if magic != _BSII_MAGIC:
-        return None, f"unknown_magic_{magic!r}"
+        return None, f"unknown_magic_{magic!r}", None
 
     version = struct.unpack_from("<I", data, 4)[0]
     payload = data[8:]
 
     if version == 2:
         try:
-            return zlib.decompress(payload).decode("utf-8", errors="replace"), "bsii_v2"
+            return zlib.decompress(payload).decode("utf-8", errors="replace"), "bsii_v2", None
         except zlib.error:
-            return None, "bsii_v2"
+            return None, "bsii_v2", None
 
     if version == 3:
         try:
             from cryptography.hazmat.primitives.ciphers import Cipher  # noqa: F401
         except ImportError:
-            return None, "no_crypto"
+            return None, "no_crypto", None
 
         # Try both payload layouts: with or without a 4-byte uncompressed-size prefix.
         for skip in (0, 4):
             result = _decrypt_bsii_v3(payload[skip:])
             if result and result[:4] == _SIIN_MAGIC:
-                return result.decode("utf-8", errors="replace"), "bsii_v3"
-        return None, "bsii_v3"
+                return result.decode("utf-8", errors="replace"), "bsii_v3", None
+        return None, "bsii_v3", None
 
-    return None, f"bsii_v{version}"
+    return None, f"bsii_v{version}", None
 
 
 def _parse_sii_save(text: str) -> Dict[str, Any]:
@@ -527,6 +696,7 @@ class ATSContext(CommonContext):
         self._save_path_logged: bool = False
         self.current_xp: int = 0
         self._save_is_plain: bool = False  # True when save uses SiiN (g_save_format 2)
+        self._save_scsc_meta: "Optional[dict]" = None  # set when save is an ScsC container
         self._save_not_found_warned: bool = False
 
         # Save-grant tracking: how much XP / money has been baked into the save
@@ -873,8 +1043,9 @@ class ATSContext(CommonContext):
             return
         self._save_last_mtime = mtime
 
-        text, fmt = _read_sii_text(save_path)
-        self._save_is_plain = (fmt == "plain")
+        text, fmt, scsc_meta = _read_sii_text(save_path)
+        self._save_is_plain  = fmt in ("plain", "scsc_plain")
+        self._save_scsc_meta = scsc_meta
 
         if text is None:
             if not self._save_warned_unreadable:
@@ -895,7 +1066,14 @@ class ATSContext(CommonContext):
                 _cfg_paths.append(str(_docs_cfg))
                 _cfg_hint = "\n       ".join(_cfg_paths)
 
-                if fmt == "no_crypto":
+                if fmt == "scsc_unreadable":
+                    logger.warning(
+                        "[ATS] Save file is in SCS HashFS (ScsC) container format but "
+                        "the inner content could not be extracted.\n"
+                        "This is unexpected for ATS 1.59 — please report this error "
+                        "along with the hex bytes logged above."
+                    )
+                elif fmt == "no_crypto":
                     # The startup executor should have installed cryptography already.
                     # If we still get here it means the install failed — tell the user.
                     logger.warning(
@@ -910,7 +1088,7 @@ class ATSContext(CommonContext):
                         "     the autosave file — you must actually save via the game menu.\n"
                         "  4. Restart the client."
                     )
-                elif fmt == "bsii_v3":
+                elif fmt in ("bsii_v3", "scsc_bsii_v3"):
                     logger.warning(
                         "[ATS] Save is BSII v3 encrypted but decryption failed.\n"
                         "Most likely cause: the autosave on disk is from BEFORE you added\n"
@@ -1009,8 +1187,21 @@ class ATSContext(CommonContext):
                     modified, count=1,
                 )
 
-            plain = self._save_is_plain
-            logger.info(f"[ATS] Writing grants — format={'plain-text' if plain else 'BSII-v3-encrypted'}")
+            plain     = self._save_is_plain
+            scsc_meta = self._save_scsc_meta
+
+            if scsc_meta is not None:
+                _fmt_label = "ScsC (SCS HashFS container)"
+            elif plain:
+                _fmt_label = "SiiN plain-text"
+            else:
+                _fmt_label = "BSII-v3-encrypted"
+            logger.info(f"[ATS] Writing grants — format={_fmt_label}")
+
+            def _write_save(dest: Path, content: str) -> bool:
+                if scsc_meta is not None:
+                    return _write_scsc(dest, content, scsc_meta)
+                return _write_sii_save(dest, content, plain=plain)
 
             # Write to the quicksave slot first — F9 loads quicksave (slot 1), not autosave.
             # ATS stores the F5/F9 quicksave at save/1/game.sii, NOT save/quicksave/.
@@ -1019,11 +1210,11 @@ class ATSContext(CommonContext):
             wrote_quicksave = False
             try:
                 quicksave_dir.mkdir(parents=True, exist_ok=True)
-                wrote_quicksave = _write_sii_save(quicksave_path, modified, plain=plain)
+                wrote_quicksave = _write_save(quicksave_path, modified)
                 # Verify: read the file back and confirm economy XP landed correctly.
                 if wrote_quicksave:
                     try:
-                        _vtext, _vplain = _read_sii_text(quicksave_path)
+                        _vtext, _vfmt, _ = _read_sii_text(quicksave_path)
                         if _vtext:
                             _vecon = re.search(r'\beconomy\s*:\s*economy\.\w+\s*\{', _vtext)
                             if _vecon:
@@ -1044,7 +1235,7 @@ class ATSContext(CommonContext):
 
             # Also write back to the autosave slot so the next natural autosave
             # does not stomp the grants if the player saves before F9 fires.
-            wrote_autosave = _write_sii_save(save_path, modified, plain=plain)
+            wrote_autosave = _write_save(save_path, modified)
 
             if wrote_quicksave:
                 # Only increment reload_counter when quicksave succeeded —
@@ -1082,7 +1273,7 @@ class ATSContext(CommonContext):
             else:
                 logger.error(
                     "[ATS] Grant write FAILED for both autosave and quicksave. "
-                    f"format={'plain-text' if plain else 'BSII-v3'}. "
+                    f"format={_fmt_label}. "
                     "If saves are encrypted, install the 'cryptography' package "
                     "or set 'g_save_format 2' in config.cfg."
                 )
