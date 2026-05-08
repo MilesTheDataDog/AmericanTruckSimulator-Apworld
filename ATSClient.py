@@ -985,8 +985,9 @@ class ATSContext(CommonContext):
             plain = self._save_is_plain
             logger.info(f"[ATS] Writing grants — format={'plain-text' if plain else 'BSII-v3-encrypted'}")
 
-            # Write to the quicksave slot first — F9 loads quicksave, not autosave.
-            quicksave_dir  = save_path.parent.parent / "quicksave"
+            # Write to the quicksave slot first — F9 loads quicksave (slot 1), not autosave.
+            # ATS stores the F5/F9 quicksave at save/1/game.sii, NOT save/quicksave/.
+            quicksave_dir  = save_path.parent.parent / "1"
             quicksave_path = quicksave_dir / "game.sii"
             wrote_quicksave = False
             try:
