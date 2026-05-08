@@ -261,50 +261,13 @@ def _find_ats_save_file() -> Optional[Path]:
     return best
 
 
-def _ensure_cryptography() -> bool:
-    """Return True if the cryptography package is importable.
-
-    If it is not present, attempt a one-time pip install into the *same*
-    Python interpreter that is currently running the client.  This is
-    necessary because users frequently run `pip install cryptography` in a
-    system Python while the Archipelago client runs in its own venv.
-    """
+def _cryptography_available() -> bool:
+    """Return True if the cryptography package can be imported."""
     try:
         from cryptography.hazmat.primitives.ciphers import Cipher  # noqa: F401
         return True
     except ImportError:
-        pass
-
-    import subprocess
-    import importlib
-    logger.info(
-        "[ATS] 'cryptography' not found in this Python environment — "
-        "auto-installing now (this may take ~30 s) ..."
-    )
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "cryptography"],
-            capture_output=True, text=True, timeout=120,
-        )
-        if result.returncode == 0:
-            importlib.invalidate_caches()
-            try:
-                from cryptography.hazmat.primitives.ciphers import Cipher  # noqa: F401
-                logger.info("[ATS] 'cryptography' auto-installed successfully.")
-                return True
-            except ImportError:
-                logger.warning(
-                    "[ATS] 'cryptography' was installed but could not be imported. "
-                    "Please restart the ATS client."
-                )
-        else:
-            logger.warning(
-                f"[ATS] Auto-install of 'cryptography' failed:\n"
-                f"{result.stderr.strip() or result.stdout.strip()}"
-            )
-    except Exception as exc:
-        logger.warning(f"[ATS] Could not auto-install 'cryptography': {exc}")
-    return False
+        return False
 
 
 def _decrypt_bsii_v3(payload: bytes) -> Optional[bytes]:
@@ -1182,10 +1145,14 @@ async def game_watcher(ctx: ATSContext) -> None:
     logger.info("[ATS] Game watcher started.")
     logger.info(f"[ATS] Communication folder: {COMM_DIR}")
 
-    # Ensure cryptography is available in the background so BSII v3 saves
-    # can be read/written without blocking the event loop.
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, _ensure_cryptography)
+    if _cryptography_available():
+        logger.info("[ATS] cryptography package found — BSII v3 saves supported.")
+    else:
+        logger.warning(
+            "[ATS] 'cryptography' package not found. Encrypted (BSII v3) saves "
+            "cannot be read. To fix, run:  pip install cryptography  "
+            "in the same Python environment as this client, then restart."
+        )
 
     if ctx.auto_launch_game:
         _launch_ats_steam()
