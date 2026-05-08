@@ -1423,10 +1423,6 @@ async def game_watcher(ctx: ATSContext) -> None:
     logger.info("[ATS] Game watcher started.")
     logger.info(f"[ATS] Communication folder: {COMM_DIR}")
 
-    # ScsC save files (ATS 1.49+) require AES-256-CBC decryption.
-    # Auto-install if missing; the function logs progress and any errors.
-    _ensure_cryptography()
-
     if ctx.auto_launch_game:
         _launch_ats_steam()
 
@@ -1476,6 +1472,10 @@ def launch():
     )
     args, _ = parser.parse_known_args()
     colorama.init()
+
+    # Install cryptography before asyncio starts — blocking here is safe and
+    # ensures the package is importable before any save polling begins.
+    _ensure_cryptography()
 
     async def main():
         ctx = ATSContext(
