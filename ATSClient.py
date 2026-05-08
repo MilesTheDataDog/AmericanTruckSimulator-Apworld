@@ -404,7 +404,11 @@ def _parse_sii_save(text: str) -> Dict[str, Any]:
         "owned_garages": set(),
     }
 
-    xp_m = re.search(r"\bexperience_points\s*:\s*(\d+)", text)
+    # Pin to the economy.economy block so we never accidentally read a hired
+    # driver's experience_points, which appears as the same field name.
+    _econ_m = re.search(r'\beconomy\s*:\s*economy\.\w+\s*\{', text)
+    _xp_region = text[_econ_m.end():_econ_m.end() + 20_000] if _econ_m else text
+    xp_m = re.search(r"\bexperience_points\s*:\s*(\d+)", _xp_region)
     if xp_m:
         result["experience_points"] = int(xp_m.group(1))
 
@@ -967,14 +971,28 @@ class ATSContext(CommonContext):
             new_xp    = self.current_xp    + xp_delta
             new_money = self.current_money + money_delta
 
-            # Patch the decrypted text (first occurrence of each field).
+            # Patch the decrypted text, pinned to the economy.economy block so we
+            # never accidentally overwrite a hired driver's experience_points field.
             modified = text
             if xp_delta > 0:
-                modified = re.sub(
-                    r'\bexperience_points\s*:\s*\d+',
-                    f'experience_points: {new_xp}',
-                    modified, count=1,
-                )
+                _econ_patch = re.search(r'\beconomy\s*:\s*economy\.\w+\s*\{', modified)
+                if _econ_patch:
+                    _before = modified[:_econ_patch.end()]
+                    _after  = modified[_econ_patch.end():]
+                    _after  = re.sub(
+                        r'\bexperience_points\s*:\s*\d+',
+                        f'experience_points: {new_xp}',
+                        _after, count=1,
+                    )
+                    modified = _before + _after
+                    logger.debug(f"[ATS] Patched economy.economy XP -> {new_xp:,}")
+                else:
+                    logger.warning("[ATS] economy.economy block not found; patching first occurrence of experience_points")
+                    modified = re.sub(
+                        r'\bexperience_points\s*:\s*\d+',
+                        f'experience_points: {new_xp}',
+                        modified, count=1,
+                    )
             if money_delta > 0:
                 modified = re.sub(
                     r'\bmoney_account\s*:\s*-?\d+',
@@ -993,6 +1011,25 @@ class ATSContext(CommonContext):
             try:
                 quicksave_dir.mkdir(parents=True, exist_ok=True)
                 wrote_quicksave = _write_sii_save(quicksave_path, modified, plain=plain)
+                # Verify: read the file back and confirm economy XP landed correctly.
+                if wrote_quicksave:
+                    try:
+                        _vtext, _vplain = _read_sii_text(quicksave_path)
+                        if _vtext:
+                            _vecon = re.search(r'\beconomy\s*:\s*economy\.\w+\s*\{', _vtext)
+                            if _vecon:
+                                _vregion = _vtext[_vecon.end():_vecon.end() + 20_000]
+                                _vxp = re.search(r'\bexperience_points\s*:\s*(\d+)', _vregion)
+                                logger.info(
+                                    f"[ATS] VERIFY quicksave economy XP = "
+                                    f"{int(_vxp.group(1)):,} (expected {new_xp:,})"
+                                    if _vxp else
+                                    "[ATS] VERIFY quicksave: experience_points not found in economy block"
+                                )
+                            else:
+                                logger.warning("[ATS] VERIFY quicksave: economy.economy block not found in file")
+                    except Exception as _ve:
+                        logger.warning(f"[ATS] VERIFY quicksave read-back failed: {_ve}")
             except Exception as e:
                 logger.warning(f"[ATS] Could not write quicksave: {e}")
 
