@@ -478,7 +478,7 @@ def _decode_scsc(data: bytes) -> "Optional[tuple[bytes, Optional[dict]]]":
 
     Header layout (56 bytes before ciphertext):
         [  0- 3]  magic    "ScsC"
-        [  4-35]  HMAC-SHA256 over IV+DataSize+ciphertext (32 bytes), keyed with _SCSC_AES_KEY
+        [  4-35]  HMAC-SHA256 over ciphertext only (32 bytes), keyed with _SCSC_AES_KEY
         [ 36-51]  AES-IV   random 16-byte IV
         [ 52-55]  DataSize uint32-LE — uncompressed size after decryption+inflation
         [ 56+  ]  ciphertext — AES-256-CBC, zero-padded to 16-byte boundary
@@ -533,22 +533,24 @@ def _write_scsc(path: Path, text: str, meta: dict) -> bool:
 
     Mirrors the container format read by _decode_scsc:
         magic(4) + HMAC-SHA256(32) + fresh-IV(16) + DataSize(4) + AES-256-CBC ciphertext
+
+    HMAC is keyed with _SCSC_AES_KEY and covers the ciphertext only (not IV or DataSize).
+    AES-CBC uses PKCS7 padding (standard).
     """
     try:
         raw       = text.encode("utf-8")
-        plaintext = zlib.compress(raw, level=6)
+        compressed = zlib.compress(raw, level=6)
 
-        # Pad plaintext to AES block boundary (zero-pad, same as the game)
-        rem = len(plaintext) % 16
-        if rem:
-            plaintext += b"\x00" * (16 - rem)
+        # PKCS7 padding to AES block boundary (1..16 bytes, never 0)
+        pad_len   = 16 - (len(compressed) % 16)
+        plaintext = compressed + bytes([pad_len] * pad_len)
 
         iv         = os.urandom(16)
         ciphertext = _aes_cbc_encrypt(_SCSC_AES_KEY, iv, plaintext)
-        # HMAC covers everything after magic+HMAC: IV + DataSize + ciphertext.
-        # This matches how SCS validates the save (same as SII_Decrypt tool).
+        # HMAC covers the ciphertext only, keyed with the AES key.
+        # (per TheLazyTomcat/SII_Decrypt and fangyi-zhou/sii-decode-rs)
         data_size_bytes = struct.pack("<I", len(raw))
-        mac        = _hmac.new(_SCSC_AES_KEY, iv + data_size_bytes + ciphertext, hashlib.sha256).digest()
+        mac        = _hmac.new(_SCSC_AES_KEY, ciphertext, hashlib.sha256).digest()
 
         file_bytes = (
             _SCSC_MAGIC
@@ -1332,7 +1334,11 @@ class ATSContext(CommonContext):
             scsc_meta = self._save_scsc_meta
 
             if scsc_meta is not None:
-                _fmt_label = "ScsC (SCS HashFS container)"
+                # Write as plain SiiNunit even when source was ScsC-encrypted.
+                # ATS checks magic bytes on load and handles any format;
+                # re-encrypting into ScsC has caused save corruption in testing
+                # (zero-padding vs PKCS7 mismatch with the game's AES-CBC strip).
+                _fmt_label = "SiiN plain-text (downgraded from ScsC)"
             elif plain:
                 _fmt_label = "SiiN plain-text"
             else:
@@ -1341,7 +1347,7 @@ class ATSContext(CommonContext):
 
             def _write_save(dest: Path, content: str) -> bool:
                 if scsc_meta is not None:
-                    return _write_scsc(dest, content, scsc_meta)
+                    return _write_sii_plain(dest, content)
                 return _write_sii_save(dest, content, plain=plain)
 
             # Write to the quicksave slot first — F9 loads quicksave (slot 1), not autosave.
@@ -1423,8 +1429,8 @@ class ATSContext(CommonContext):
                 logger.error(
                     "[ATS] Grant write FAILED for both autosave and quicksave. "
                     f"format={_fmt_label}. "
-                    "If saves are encrypted, install the 'cryptography' package "
-                    "or set 'g_save_format 2' in config.cfg."
+                    "If saves are BSII v3 encrypted, install the 'cryptography' package "
+                    "or set 'g_save_format 0' in config.cfg."
                 )
         else:
             # No pending grants — still write items.json if anything else changed
