@@ -209,7 +209,14 @@ def _steam_userdata_roots() -> List[Path]:
 
 
 def _scan_profiles_dir(profiles_dir: Path, best: Optional[Path], best_mtime: float):
-    """Walk a profiles root and return (best_path, best_mtime)."""
+    """Walk a profiles root and return (best_path, best_mtime).
+
+    Only considers files whose first 4 bytes are a known ATS save magic
+    (SiiN plain-text or BSII encrypted).  This skips ScsC hashfs containers
+    that Steam may leave behind in userdata after a cloud-profile deletion —
+    those files are unreadable as saves and often have inflated mtimes due to
+    Steam background sync, causing them to shadow valid local-profile saves.
+    """
     if not profiles_dir.is_dir():
         return best, best_mtime
     for profile in profiles_dir.iterdir():
@@ -222,14 +229,19 @@ def _scan_profiles_dir(profiles_dir: Path, best: Optional[Path], best_mtime: flo
             if not slot.is_dir():
                 continue
             game_sii = slot / "game.sii"
-            if game_sii.exists():
-                try:
-                    mtime = game_sii.stat().st_mtime
-                    if mtime > best_mtime:
-                        best_mtime = mtime
-                        best = game_sii
-                except OSError:
-                    pass
+            if not game_sii.exists():
+                continue
+            try:
+                with game_sii.open("rb") as _f:
+                    magic = _f.read(4)
+                if magic not in (_SIIN_MAGIC, _BSII_MAGIC):
+                    continue  # ScsC container or unknown — not a valid save
+                mtime = game_sii.stat().st_mtime
+                if mtime > best_mtime:
+                    best_mtime = mtime
+                    best = game_sii
+            except OSError:
+                pass
     return best, best_mtime
 
 
