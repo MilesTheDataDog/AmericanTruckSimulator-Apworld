@@ -208,17 +208,10 @@ def _steam_userdata_roots() -> List[Path]:
     return roots
 
 
-def _scan_profiles_dir(profiles_dir: Path, best: Optional[Path], best_mtime: float):
-    """Walk a profiles root and return (best_path, best_mtime).
-
-    Only considers files whose first 4 bytes are a known ATS save magic
-    (SiiN plain-text or BSII encrypted).  This skips ScsC hashfs containers
-    that Steam may leave behind in userdata after a cloud-profile deletion —
-    those files are unreadable as saves and often have inflated mtimes due to
-    Steam background sync, causing them to shadow valid local-profile saves.
-    """
+def _scan_profiles_dir(profiles_dir: Path, candidates: "list[tuple[float, Path]]") -> None:
+    """Append (mtime, path) for every game.sii found under profiles_dir."""
     if not profiles_dir.is_dir():
-        return best, best_mtime
+        return
     for profile in profiles_dir.iterdir():
         if not profile.is_dir():
             continue
@@ -232,45 +225,49 @@ def _scan_profiles_dir(profiles_dir: Path, best: Optional[Path], best_mtime: flo
             if not game_sii.exists():
                 continue
             try:
-                with game_sii.open("rb") as _f:
-                    magic = _f.read(4)
-                if magic not in (_SIIN_MAGIC, _BSII_MAGIC):
-                    continue  # ScsC container or unknown — not a valid save
-                mtime = game_sii.stat().st_mtime
-                if mtime > best_mtime:
-                    best_mtime = mtime
-                    best = game_sii
+                candidates.append((game_sii.stat().st_mtime, game_sii))
             except OSError:
                 pass
-    return best, best_mtime
 
 
 def _find_ats_save_file() -> Optional[Path]:
-    """Return the most-recently-modified game.sii across all ATS profiles/slots.
+    """Return the most-recently-modified READABLE game.sii across all ATS profiles/slots.
 
-    Searches (in order of preference):
-      1. Steam userdata directory (Steam Cloud saves):
-           <SteamPath>/userdata/<uid>/270880/remote/steam/profiles/
-      2. Documents (local / non-Cloud saves):
-           <Documents>/American Truck Simulator/profiles/
-           <Documents>/American Truck Simulator/steam/profiles/
+    Collects every game.sii candidate from all known save locations, sorts
+    newest-first, then returns the first file whose magic bytes are SiiN
+    (plain-text) or BSII (encrypted).  Files with other magic (e.g. ScsC
+    hashfs containers left in Steam userdata after a cloud-profile deletion)
+    are logged and skipped so the next-newest valid save is used instead.
     """
     docs = Path(os.environ.get("USERPROFILE", Path.home())) / "Documents" / "American Truck Simulator"
 
-    best: Optional[Path] = None
-    best_mtime = 0.0
+    candidates: "list[tuple[float, Path]]" = []
 
-    # 1. Steam userdata (covers Steam Cloud / PC_steam_cloud profile type)
+    # Steam userdata (Steam Cloud / PC_steam_cloud profile type)
     for remote in _steam_userdata_roots():
-        best, best_mtime = _scan_profiles_dir(remote / "steam" / "profiles", best, best_mtime)
-        # Some older setups store directly under remote/profiles
-        best, best_mtime = _scan_profiles_dir(remote / "profiles", best, best_mtime)
+        _scan_profiles_dir(remote / "steam" / "profiles", candidates)
+        _scan_profiles_dir(remote / "profiles", candidates)
 
-    # 2. Documents fallback (local saves, non-Cloud)
-    best, best_mtime = _scan_profiles_dir(docs / "profiles", best, best_mtime)
-    best, best_mtime = _scan_profiles_dir(docs / "steam" / "profiles", best, best_mtime)
+    # Documents (local / PC_local profile type)
+    _scan_profiles_dir(docs / "profiles", candidates)
+    _scan_profiles_dir(docs / "steam" / "profiles", candidates)
 
-    return best
+    # Try candidates newest-first; return the first one with valid SiiN/BSII magic.
+    # This naturally skips ScsC containers, zero-byte files, and other non-saves
+    # without hiding valid files that happen to sort after an unreadable one.
+    for _mtime, path in sorted(candidates, key=lambda x: x[0], reverse=True):
+        try:
+            with path.open("rb") as _f:
+                magic = _f.read(4)
+        except OSError:
+            logger.debug(f"[ATS] Save scan: could not open {path}")
+            continue
+        if magic in (_SIIN_MAGIC, _BSII_MAGIC):
+            logger.debug(f"[ATS] Save scan: accepted {path}")
+            return path
+        logger.info(f"[ATS] Save scan: skipped {path} (magic={magic!r}, expected SiiN or BSII)")
+
+    return None
 
 
 def _cryptography_available() -> bool:
