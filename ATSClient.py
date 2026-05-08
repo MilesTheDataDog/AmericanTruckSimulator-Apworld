@@ -901,65 +901,58 @@ class ATSContext(CommonContext):
         self._save_is_plain = (fmt == "plain")
 
         if text is None:
-            if fmt == "no_crypto":
-                # cryptography not installed — try auto-installing once, then retry
-                if not self._save_warned_unreadable:
-                    self._save_warned_unreadable = True
+            if not self._save_warned_unreadable:
+                self._save_warned_unreadable = True
+                # Build config.cfg path hints for the user message.
+                _cfg_paths = []
+                for _remote in _steam_userdata_roots():
+                    try:
+                        save_path.relative_to(_remote)
+                        _cfg_paths.append(str(_remote / "config.cfg"))
+                        break
+                    except ValueError:
+                        pass
+                _docs_cfg = (
+                    Path(os.environ.get("USERPROFILE", Path.home()))
+                    / "Documents" / "American Truck Simulator" / "config.cfg"
+                )
+                _cfg_paths.append(str(_docs_cfg))
+                _cfg_hint = "\n       ".join(_cfg_paths)
+
+                if fmt == "no_crypto":
+                    # The startup executor should have installed cryptography already.
+                    # If we still get here it means the install failed — tell the user.
                     logger.warning(
-                        "[ATS] Save is BSII v3 encrypted but 'cryptography' is not "
-                        "installed in this Python. Attempting auto-install..."
+                        "[ATS] Save is BSII v3 encrypted and 'cryptography' could not be "
+                        "auto-installed in this Python environment.\n"
+                        "Switch ATS to plain-text saves instead:\n"
+                        f"  1. Open config.cfg:\n"
+                        f"       {_cfg_hint}\n"
+                        "  2. Add this line:  uset g_save_format \"2\"\n"
+                        "  3. In ATS: complete any delivery (autosave) OR use pause → Save\n"
+                        "     NOTE: 'Current profile saved' in the game log does NOT update\n"
+                        "     the autosave file — you must actually save via the game menu.\n"
+                        "  4. Restart the client."
                     )
-                    if _ensure_cryptography():
-                        text, fmt = _read_sii_text(save_path)
-                        self._save_is_plain = (fmt == "plain")
-                        if text is not None:
-                            self._save_warned_unreadable = False
-                            logger.info("[ATS] Save read successfully after auto-installing cryptography.")
-                        else:
-                            logger.warning("[ATS] Still cannot read save after install — see below.")
-                if text is None:
-                    return
-
-            if text is None:
-                if not self._save_warned_unreadable:
-                    self._save_warned_unreadable = True
-                    # Build config.cfg path hints
-                    _cfg_paths = []
-                    for _remote in _steam_userdata_roots():
-                        try:
-                            save_path.relative_to(_remote)
-                            _cfg_paths.append(str(_remote / "config.cfg"))
-                            break
-                        except ValueError:
-                            pass
-                    _docs_cfg = (
-                        Path(os.environ.get("USERPROFILE", Path.home()))
-                        / "Documents" / "American Truck Simulator" / "config.cfg"
+                elif fmt == "bsii_v3":
+                    logger.warning(
+                        "[ATS] Save is BSII v3 encrypted but decryption failed.\n"
+                        "Most likely cause: the autosave on disk is from BEFORE you added\n"
+                        "'g_save_format 2' to config.cfg.  To create a fresh plain-text save:\n"
+                        f"  1. Config.cfg location:\n"
+                        f"       {_cfg_hint}\n"
+                        "  2. Confirm this line is present:  uset g_save_format \"2\"\n"
+                        "  3. In ATS: complete any delivery (autosave) OR pause → Save\n"
+                        "     NOTE: 'Current profile saved' in the game log is profile metadata,\n"
+                        "     NOT the autosave file — you must trigger a real save.\n"
+                        "  4. Restart the client."
                     )
-                    _cfg_paths.append(str(_docs_cfg))
-                    _cfg_hint = "\n       ".join(_cfg_paths)
-
-                    if fmt == "bsii_v3":
-                        logger.warning(
-                            f"[ATS] Save is BSII v3 encrypted but decryption failed "
-                            f"(the AES key may not match this game version).\n"
-                            "Switch ATS to plain-text saves instead:\n"
-                            f"  1. Open config.cfg:\n"
-                            f"       {_cfg_hint}\n"
-                            "  2. Add:  uset g_save_format \"2\"\n"
-                            "  3. In ATS: Escape → Save → do any delivery to trigger autosave\n"
-                            "  4. Restart the client.\n"
-                            "NOTE: 'Current profile saved' in the game log is NOT the "
-                            "autosave — you must complete a delivery or use pause → Save."
-                        )
-                    else:
-                        logger.warning(
-                            f"[ATS] Could not read save file (detected format: {fmt}).\n"
-                            "  cryptography installed: yes\n"
-                            "  Install the cryptography package and try again, or\n"
-                            "  add 'uset g_save_format \"2\"' to config.cfg and save in-game."
-                        )
-                return
+                else:
+                    logger.warning(
+                        f"[ATS] Could not read save file (format tag: {fmt}).\n"
+                        "This is unexpected — please report this error."
+                    )
+            return
         self._save_warned_unreadable = False
 
         save = _parse_sii_save(text)
@@ -1191,7 +1184,7 @@ async def game_watcher(ctx: ATSContext) -> None:
 
     # Ensure cryptography is available in the background so BSII v3 saves
     # can be read/written without blocking the event loop.
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, _ensure_cryptography)
 
     if ctx.auto_launch_game:
