@@ -292,6 +292,53 @@ def _cryptography_available() -> bool:
         return False
 
 
+def _ensure_cryptography() -> bool:
+    """Import cryptography; auto-install via pip if missing. Returns True when available."""
+    if _cryptography_available():
+        return True
+
+    logger.info(
+        "[ATS] 'cryptography' package not found — attempting auto-install "
+        "(required to read/write ATS 1.49+ ScsC save files)..."
+    )
+    try:
+        import subprocess
+        import importlib
+
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--quiet", "cryptography"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                f"[ATS] pip install cryptography failed (exit {result.returncode}).\n"
+                f"{result.stderr.strip()}\n"
+                "Please run:  pip install cryptography  in the same Python environment "
+                "as the Archipelago launcher, then restart the client."
+            )
+            return False
+
+        importlib.invalidate_caches()
+
+        if _cryptography_available():
+            logger.info("[ATS] 'cryptography' installed successfully.")
+            return True
+        else:
+            logger.warning(
+                "[ATS] 'cryptography' was installed but still cannot be imported. "
+                "Please restart the Archipelago launcher."
+            )
+            return False
+    except Exception as exc:
+        logger.warning(
+            f"[ATS] Could not auto-install 'cryptography': {exc}\n"
+            "Please run:  pip install cryptography  then restart."
+        )
+        return False
+
+
 def _decrypt_bsii_v3(payload: bytes) -> Optional[bytes]:
     """AES-256-ECB decrypt a BSII v3 payload, then zlib-decompress it."""
     try:
@@ -337,7 +384,7 @@ def _decode_scsc(data: bytes) -> "Optional[tuple[bytes, Optional[dict]]]":
         from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
         from cryptography.hazmat.backends import default_backend
     except ImportError:
-        logger.warning("[ATS] ScsC: 'cryptography' package not available — cannot decrypt save")
+        logger.warning("[ATS] ScsC: 'cryptography' unavailable — restart the launcher to retry auto-install")
         return None
 
     iv         = data[36:52]
@@ -389,7 +436,7 @@ def _write_scsc(path: Path, text: str, meta: dict) -> bool:
         from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
         from cryptography.hazmat.backends import default_backend
     except ImportError:
-        logger.error("[ATS] _write_scsc: 'cryptography' package not available")
+        logger.error("[ATS] _write_scsc: 'cryptography' unavailable — restart the launcher to retry auto-install")
         return False
 
     try:
@@ -1376,14 +1423,9 @@ async def game_watcher(ctx: ATSContext) -> None:
     logger.info("[ATS] Game watcher started.")
     logger.info(f"[ATS] Communication folder: {COMM_DIR}")
 
-    if _cryptography_available():
-        logger.info("[ATS] cryptography package found — BSII v3 saves supported.")
-    else:
-        logger.warning(
-            "[ATS] 'cryptography' package not found. Encrypted (BSII v3) saves "
-            "cannot be read. To fix, run:  pip install cryptography  "
-            "in the same Python environment as this client, then restart."
-        )
+    # ScsC save files (ATS 1.49+) require AES-256-CBC decryption.
+    # Auto-install if missing; the function logs progress and any errors.
+    _ensure_cryptography()
 
     if ctx.auto_launch_game:
         _launch_ats_steam()
