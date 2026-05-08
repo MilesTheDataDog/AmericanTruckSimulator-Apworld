@@ -20,6 +20,8 @@ Communication folder (created automatically):
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac as _hmac
 import json
 import os
 import re
@@ -82,6 +84,16 @@ _BSII_AES_KEY = bytes([
     0x9b, 0x7f, 0x4e, 0x21, 0xc6, 0xa1, 0x8d, 0x35,
     0xb7, 0xe9, 0x4f, 0x2c, 0x0d, 0x1a, 0x6b, 0x8e,
     0x3c, 0x7f, 0x50, 0x29, 0xd4, 0xe1, 0x6a, 0x38,
+])
+
+# AES-256-CBC key used by SCS in ScsC save containers (ATS 1.49+).
+# Sourced from TheLazyTomcat/SII_Decrypt and fangyi-zhou/sii-decode-rs.
+# The container header is: magic(4) + HMAC-SHA256(32) + IV(16) + DataSize(4) + ciphertext.
+_SCSC_AES_KEY = bytes([
+    0x2a, 0x5f, 0xcb, 0x17, 0x91, 0xd2, 0x2f, 0xb6,
+    0x02, 0x45, 0xb3, 0xd8, 0x36, 0x9e, 0xd0, 0xb2,
+    0xc2, 0x73, 0x71, 0x56, 0x3f, 0xbf, 0x1f, 0x3c,
+    0x9e, 0xdf, 0x6b, 0x11, 0x82, 0x5a, 0x5d, 0x0a,
 ])
 
 # ── Save-grant persistence ────────────────────────────────────────────────────
@@ -300,136 +312,117 @@ def _decrypt_bsii_v3(payload: bytes) -> Optional[bytes]:
 
 
 def _decode_scsc(data: bytes) -> "Optional[tuple[bytes, Optional[dict]]]":
-    """Extract the inner game.sii content from an SCS HashFS save container (ScsC magic).
+    """Decrypt and decompress an SCS ScsC save container (ATS 1.49+).
 
-    Returns (inner_bytes, meta) where meta is a dict suitable for _write_scsc, or
-    (inner_bytes, None) if the structure was found via raw magic scan only.
-    Returns None if extraction failed entirely.
+    Header layout (56 bytes before ciphertext):
+        [  0- 3]  magic    "ScsC"
+        [  4-35]  HMAC-SHA256 over ciphertext (32 bytes), keyed with _SCSC_AES_KEY
+        [ 36-51]  AES-IV   random 16-byte IV
+        [ 52-55]  DataSize uint32-LE — uncompressed size after decryption+inflation
+        [ 56+  ]  ciphertext — AES-256-CBC, zero-padded to 16-byte boundary
 
-    ScsC header (20 bytes):
-        magic(4) + version(4) + salt(4) + hash_type(4) + entry_count(4)
-    Entry (32 bytes, 8-byte offset layout):
-        hash(8) + offset(8) + flags(4) + crc(4) + size(4) + zsize(4)
-    Flags: bit 0 = zlib-compressed, bit 1 = directory entry
+    Returns (inner_bytes, meta) on success; meta contains the IV so _write_scsc
+    can re-encrypt using a fresh IV (meta is kept for API consistency — the IV
+    is regenerated on write anyway).  Returns None on failure.
     """
-    if len(data) < 20:
+    _SCSC_HEADER = 56
+    if len(data) < _SCSC_HEADER + 16:
+        logger.warning(
+            "[ATS] ScsC: file too small to contain a valid header "
+            f"({len(data)} bytes)"
+        )
         return None
 
-    version    = struct.unpack_from("<I", data, 4)[0]
-    salt       = struct.unpack_from("<I", data, 8)[0]
-    hash_type  = struct.unpack_from("<I", data, 12)[0]
-    entry_count = struct.unpack_from("<I", data, 16)[0]
+    try:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+        from cryptography.hazmat.backends import default_backend
+    except ImportError:
+        logger.warning("[ATS] ScsC: 'cryptography' package not available — cannot decrypt save")
+        return None
 
-    if 0 < entry_count <= 256:
-        # Try two common header sizes × two entry offset widths
-        for hdr_size in (20, 24):
-            for ent_size, off_fmt in ((32, "<Q"), (28, "<I")):
-                table_end = hdr_size + entry_count * ent_size
-                if table_end > len(data):
-                    continue
-                for i in range(entry_count):
-                    base     = hdr_size + i * ent_size
-                    try:
-                        entry_hash   = struct.unpack_from("<Q", data, base)[0]
-                        file_offset  = struct.unpack_from(off_fmt, data, base + 8)[0]
-                        tail         = base + 8 + struct.calcsize(off_fmt)
-                        entry_flags  = struct.unpack_from("<I", data, tail)[0]
-                        # crc        = struct.unpack_from("<I", data, tail + 4)[0]
-                        size         = struct.unpack_from("<I", data, tail + 8)[0]
-                        # zsize      = struct.unpack_from("<I", data, tail + 12)[0]
-                    except struct.error:
-                        break
+    iv         = data[36:52]
+    data_size  = struct.unpack_from("<I", data, 52)[0]
+    ciphertext = data[_SCSC_HEADER:]
 
-                    if entry_flags & 2:  # directory entry — no file data
-                        continue
-                    if file_offset == 0 or file_offset >= len(data):
-                        continue
-                    if size == 0 or file_offset + size > len(data):
-                        continue
+    try:
+        cipher = Cipher(
+            algorithms.AES(_SCSC_AES_KEY),
+            modes.CBC(iv),
+            backend=default_backend(),
+        )
+        dec        = cipher.decryptor()
+        decrypted  = dec.update(ciphertext) + dec.finalize()
+        inner      = zlib.decompress(decrypted)
+    except Exception as exc:
+        logger.warning(f"[ATS] ScsC: decryption/decompression failed: {exc}")
+        return None
 
-                    chunk = data[file_offset: file_offset + size]
-                    if entry_flags & 1:
-                        try:
-                            inner = zlib.decompress(chunk)
-                        except zlib.error:
-                            continue
-                    else:
-                        inner = chunk
+    if len(inner) != data_size:
+        logger.debug(
+            f"[ATS] ScsC: DataSize field={data_size} but decompressed={len(inner)} bytes "
+            "(mismatch is non-fatal)"
+        )
 
-                    if inner[:4] in (_SIIN_MAGIC, _BSII_MAGIC):
-                        logger.debug(
-                            f"[ATS] ScsC: extracted inner content via entry {i} "
-                            f"(hdr={hdr_size}B, ent={ent_size}B, "
-                            f"compressed={bool(entry_flags & 1)}, "
-                            f"size={size}, inner_magic={inner[:4]!r})"
-                        )
-                        meta = {
-                            "version":     version,
-                            "salt":        salt,
-                            "hash_type":   hash_type,
-                            "entry_hash":  entry_hash,
-                            "entry_flags": entry_flags,
-                            "header_size": hdr_size,
-                            "entry_size":  ent_size,
-                        }
-                        return inner, meta
+    inner_magic = inner[:4]
+    if inner_magic not in (_SIIN_MAGIC, _BSII_MAGIC):
+        logger.warning(
+            f"[ATS] ScsC: decrypted successfully but inner magic={inner_magic!r}, "
+            "expected SiiN or BSII"
+        )
+        return None
 
-    # Fallback: raw scan for SiiN/BSII magic anywhere after the header
-    for needle in (_SIIN_MAGIC, _BSII_MAGIC):
-        pos = data.find(needle, 24)
-        if pos != -1:
-            logger.debug(f"[ATS] ScsC: found {needle!r} at raw offset {pos} (fallback scan)")
-            return data[pos:], None  # no meta — write-back will use plain SiiN
-
-    logger.warning(
-        "[ATS] ScsC: could not extract inner content; "
-        f"header bytes: {' '.join(f'{b:02x}' for b in data[:64])}"
+    logger.debug(
+        f"[ATS] ScsC: decrypted OK — inner magic={inner_magic!r}, "
+        f"plain size={len(inner):,} bytes"
     )
-    return None
+    meta = {"iv": iv}  # IV captured for reference; _write_scsc generates a fresh one
+    return inner, meta
 
 
 def _write_scsc(path: Path, text: str, meta: dict) -> bool:
-    """Write SiiNunit text back into an SCS HashFS (ScsC) save container.
+    """Encrypt and write SiiNunit text as an SCS ScsC save container (ATS 1.49+).
 
-    Preserves the original version/salt/hash_type/entry_hash so the game
-    engine can locate the inner game.sii file by its CityHash64 key.
-    Always zlib-compresses the inner content.
+    Mirrors the container format read by _decode_scsc:
+        magic(4) + HMAC-SHA256(32) + fresh-IV(16) + DataSize(4) + AES-256-CBC ciphertext
     """
     try:
-        raw        = text.encode("utf-8")
-        compressed = zlib.compress(raw, level=6)
-        crc        = zlib.crc32(raw) & 0xFFFFFFFF
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+        from cryptography.hazmat.backends import default_backend
+    except ImportError:
+        logger.error("[ATS] _write_scsc: 'cryptography' package not available")
+        return False
 
-        hdr_size  = meta.get("header_size", 20)
-        ent_size  = meta.get("entry_size",  32)
-        off_fmt   = "<Q" if ent_size == 32 else "<I"
+    try:
+        raw       = text.encode("utf-8")
+        plaintext = zlib.compress(raw, level=6)
 
-        # Data starts immediately after the single-entry table.
-        data_offset = hdr_size + ent_size
+        # Pad plaintext to AES block boundary (zero-pad, same as the game)
+        rem = len(plaintext) % 16
+        if rem:
+            plaintext += b"\x00" * (16 - rem)
 
-        # Header
-        header = struct.pack(
-            "<4sIIII",
-            _SCSC_MAGIC,
-            meta["version"],
-            meta["salt"],
-            meta["hash_type"],
-            1,  # entry_count — we only write the content entry
+        iv = os.urandom(16)
+
+        cipher = Cipher(
+            algorithms.AES(_SCSC_AES_KEY),
+            modes.CBC(iv),
+            backend=default_backend(),
         )
-        if hdr_size == 24:
-            header += struct.pack("<I", 0)  # padding / unknown field
+        enc        = cipher.encryptor()
+        ciphertext = enc.update(plaintext) + enc.finalize()
 
-        # Entry: flags=1 (compressed), crc, size, zsize
-        entry_flags = (meta["entry_flags"] & ~0x3) | 1  # clear dir bit, set compressed
-        entry = struct.pack("<Q", meta["entry_hash"])
-        entry += struct.pack(off_fmt, data_offset)
-        entry += struct.pack("<IIII", entry_flags, crc, len(compressed), len(raw))
-        # Pad entry to declared entry_size if needed (e.g. extra fields in some versions)
-        if len(entry) < ent_size:
-            entry += b"\x00" * (ent_size - len(entry))
+        mac = _hmac.new(_SCSC_AES_KEY, ciphertext, hashlib.sha256).digest()
+
+        file_bytes = (
+            _SCSC_MAGIC
+            + mac
+            + iv
+            + struct.pack("<I", len(raw))
+            + ciphertext
+        )
 
         tmp = path.with_suffix(".tmp")
-        tmp.write_bytes(header + entry + compressed)
+        tmp.write_bytes(file_bytes)
         tmp.replace(path)
         return True
     except Exception as e:
