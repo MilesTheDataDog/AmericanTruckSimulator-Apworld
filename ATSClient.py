@@ -283,60 +283,175 @@ def _find_ats_save_file() -> Optional[Path]:
     return None
 
 
-def _cryptography_available() -> bool:
-    """Return True if the cryptography package can be imported."""
-    try:
-        from cryptography.hazmat.primitives.ciphers import Cipher  # noqa: F401
-        return True
-    except ImportError:
-        return False
+# ── Pure-Python AES-256-CBC ───────────────────────────────────────────────────
+# No external dependencies — works in frozen PyInstaller builds and bare Python.
+
+_AES_SBOX = bytes([
+    0x63,0x7c,0x77,0x7b,0xf2,0x6b,0x6f,0xc5,0x30,0x01,0x67,0x2b,0xfe,0xd7,0xab,0x76,
+    0xca,0x82,0xc9,0x7d,0xfa,0x59,0x47,0xf0,0xad,0xd4,0xa2,0xaf,0x9c,0xa4,0x72,0xc0,
+    0xb7,0xfd,0x93,0x26,0x36,0x3f,0xf7,0xcc,0x34,0xa5,0xe5,0xf1,0x71,0xd8,0x31,0x15,
+    0x04,0xc7,0x23,0xc3,0x18,0x96,0x05,0x9a,0x07,0x12,0x80,0xe2,0xeb,0x27,0xb2,0x75,
+    0x09,0x83,0x2c,0x1a,0x1b,0x6e,0x5a,0xa0,0x52,0x3b,0xd6,0xb3,0x29,0xe3,0x2f,0x84,
+    0x53,0xd1,0x00,0xed,0x20,0xfc,0xb1,0x5b,0x6a,0xcb,0xbe,0x39,0x4a,0x4c,0x58,0xcf,
+    0xd0,0xef,0xaa,0xfb,0x43,0x4d,0x33,0x85,0x45,0xf9,0x02,0x7f,0x50,0x3c,0x9f,0xa8,
+    0x51,0xa3,0x40,0x8f,0x92,0x9d,0x38,0xf5,0xbc,0xb6,0xda,0x21,0x10,0xff,0xf3,0xd2,
+    0xcd,0x0c,0x13,0xec,0x5f,0x97,0x44,0x17,0xc4,0xa7,0x7e,0x3d,0x64,0x5d,0x19,0x73,
+    0x60,0x81,0x4f,0xdc,0x22,0x2a,0x90,0x88,0x46,0xee,0xb8,0x14,0xde,0x5e,0x0b,0xdb,
+    0xe0,0x32,0x3a,0x0a,0x49,0x06,0x24,0x5c,0xc2,0xd3,0xac,0x62,0x91,0x95,0xe4,0x79,
+    0xe7,0xc8,0x37,0x6d,0x8d,0xd5,0x4e,0xa9,0x6c,0x56,0xf4,0xea,0x65,0x7a,0xae,0x08,
+    0xba,0x78,0x25,0x2e,0x1c,0xa6,0xb4,0xc6,0xe8,0xdd,0x74,0x1f,0x4b,0xbd,0x8b,0x8a,
+    0x70,0x3e,0xb5,0x66,0x48,0x03,0xf6,0x0e,0x61,0x35,0x57,0xb9,0x86,0xc1,0x1d,0x9e,
+    0xe1,0xf8,0x98,0x11,0x69,0xd9,0x8e,0x94,0x9b,0x1e,0x87,0xe9,0xce,0x55,0x28,0xdf,
+    0x8c,0xa1,0x89,0x0d,0xbf,0xe6,0x42,0x68,0x41,0x99,0x2d,0x0f,0xb0,0x54,0xbb,0x16,
+])
+_AES_INV_SBOX = bytes([
+    0x52,0x09,0x6a,0xd5,0x30,0x36,0xa5,0x38,0xbf,0x40,0xa3,0x9e,0x81,0xf3,0xd7,0xfb,
+    0x7c,0xe3,0x39,0x82,0x9b,0x2f,0xff,0x87,0x34,0x8e,0x43,0x44,0xc4,0xde,0xe9,0xcb,
+    0x54,0x7b,0x94,0x32,0xa6,0xc2,0x23,0x3d,0xee,0x4c,0x95,0x0b,0x42,0xfa,0xc3,0x4e,
+    0x08,0x2e,0xa1,0x66,0x28,0xd9,0x24,0xb2,0x76,0x5b,0xa2,0x49,0x6d,0x8b,0xd1,0x25,
+    0x72,0xf8,0xf6,0x64,0x86,0x68,0x98,0x16,0xd4,0xa4,0x5c,0xcc,0x5d,0x65,0xb6,0x92,
+    0x6c,0x70,0x48,0x50,0xfd,0xed,0xb9,0xda,0x5e,0x15,0x46,0x57,0xa7,0x8d,0x9d,0x84,
+    0x90,0xd8,0xab,0x00,0x8c,0xbc,0xd3,0x0a,0xf7,0xe4,0x58,0x05,0xb8,0xb3,0x45,0x06,
+    0xd0,0x2c,0x1e,0x8f,0xca,0x3f,0x0f,0x02,0xc1,0xaf,0xbd,0x03,0x01,0x13,0x8a,0x6b,
+    0x3a,0x91,0x11,0x41,0x4f,0x67,0xdc,0xea,0x97,0xf2,0xcf,0xce,0xf0,0xb4,0xe6,0x73,
+    0x96,0xac,0x74,0x22,0xe7,0xad,0x35,0x85,0xe2,0xf9,0x37,0xe8,0x1c,0x75,0xdf,0x6e,
+    0x47,0xf1,0x1a,0x71,0x1d,0x29,0xc5,0x89,0x6f,0xb7,0x62,0x0e,0xaa,0x18,0xbe,0x1b,
+    0xfc,0x56,0x3e,0x4b,0xc6,0xd2,0x79,0x20,0x9a,0xdb,0xc0,0xfe,0x78,0xcd,0x5a,0xf4,
+    0x1f,0xdd,0xa8,0x33,0x88,0x07,0xc7,0x31,0xb1,0x12,0x10,0x59,0x27,0x80,0xec,0x5f,
+    0x60,0x51,0x7f,0xa9,0x19,0xb5,0x4a,0x0d,0x2d,0xe5,0x7a,0x9f,0x93,0xc9,0x9c,0xef,
+    0xa0,0xe0,0x3b,0x4d,0xae,0x2a,0xf5,0xb0,0xc8,0xeb,0xbb,0x3c,0x83,0x53,0x99,0x61,
+    0x17,0x2b,0x04,0x7e,0xba,0x77,0xd6,0x26,0xe1,0x69,0x14,0x63,0x55,0x21,0x0c,0x7d,
+])
+_AES_RCON = bytes([0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80,0x1b,0x36])
 
 
-def _ensure_cryptography() -> bool:
-    """Import cryptography; auto-install via pip if missing. Returns True when available."""
-    if _cryptography_available():
-        return True
+def _aes_gmul(a: int, b: int) -> int:
+    """GF(2^8) multiply under the AES irreducible polynomial x^8+x^4+x^3+x+1."""
+    p = 0
+    while b:
+        if b & 1:
+            p ^= a
+        hi = a & 0x80
+        a = (a << 1) & 0xff
+        if hi:
+            a ^= 0x1b
+        b >>= 1
+    return p
 
-    logger.info(
-        "[ATS] 'cryptography' package not found — attempting auto-install "
-        "(required to read/write ATS 1.49+ ScsC save files)..."
-    )
-    try:
-        import subprocess
-        import importlib
 
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "--quiet", "cryptography"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        if result.returncode != 0:
-            logger.warning(
-                f"[ATS] pip install cryptography failed (exit {result.returncode}).\n"
-                f"{result.stderr.strip()}\n"
-                "Please run:  pip install cryptography  in the same Python environment "
-                "as the Archipelago launcher, then restart the client."
-            )
-            return False
+# Pre-compute multiplication tables for InvMixColumns and MixColumns.
+_G2 = bytes(_aes_gmul(i, 2) for i in range(256))
+_G3 = bytes(_aes_gmul(i, 3) for i in range(256))
+_G9 = bytes(_aes_gmul(i, 9) for i in range(256))
+_GB = bytes(_aes_gmul(i, 0x0b) for i in range(256))
+_GD = bytes(_aes_gmul(i, 0x0d) for i in range(256))
+_GE = bytes(_aes_gmul(i, 0x0e) for i in range(256))
 
-        importlib.invalidate_caches()
 
-        if _cryptography_available():
-            logger.info("[ATS] 'cryptography' installed successfully.")
-            return True
-        else:
-            logger.warning(
-                "[ATS] 'cryptography' was installed but still cannot be imported. "
-                "Please restart the Archipelago launcher."
-            )
-            return False
-    except Exception as exc:
-        logger.warning(
-            f"[ATS] Could not auto-install 'cryptography': {exc}\n"
-            "Please run:  pip install cryptography  then restart."
-        )
-        return False
+def _aes256_key_expand(key: bytes) -> "list[bytearray]":
+    """Return list of 15 round-key bytearrays (each 16 bytes) for AES-256."""
+    # AES-256: Nk=8, Nr=14, so 15 round keys of 4 words each = 60 words total.
+    w = [bytearray(key[i*4:(i+1)*4]) for i in range(8)]
+    for i in range(8, 60):
+        temp = bytearray(w[i-1])
+        if i % 8 == 0:
+            temp = bytearray([
+                _AES_SBOX[temp[1]] ^ _AES_RCON[i//8 - 1],
+                _AES_SBOX[temp[2]],
+                _AES_SBOX[temp[3]],
+                _AES_SBOX[temp[0]],
+            ])
+        elif i % 8 == 4:
+            temp = bytearray(_AES_SBOX[b] for b in temp)
+        w.append(bytearray(a ^ b for a, b in zip(w[i-8], temp)))
+    # Pack into 15 round keys (4 words each)
+    return [bytearray(b for word in w[i*4:(i+1)*4] for b in word) for i in range(15)]
+
+
+def _aes_add_round_key(state: bytearray, rk: bytearray) -> None:
+    for i in range(16):
+        state[i] ^= rk[i]
+
+
+def _aes_decrypt_block(block: bytes, rks: "list[bytearray]") -> bytes:
+    """Decrypt a single 16-byte AES-256 block (14 rounds)."""
+    # State: column-major, s[row + 4*col]
+    state = bytearray(block)
+    _aes_add_round_key(state, rks[14])
+    for rnd in range(13, 0, -1):
+        # InvShiftRows
+        state[1], state[5], state[9], state[13] = state[13], state[1], state[5], state[9]
+        state[2], state[6], state[10], state[14] = state[10], state[14], state[2], state[6]
+        state[3], state[7], state[11], state[15] = state[7], state[11], state[15], state[3]
+        # InvSubBytes
+        for i in range(16):
+            state[i] = _AES_INV_SBOX[state[i]]
+        _aes_add_round_key(state, rks[rnd])
+        # InvMixColumns
+        for c in range(4):
+            s0, s1, s2, s3 = state[c*4], state[c*4+1], state[c*4+2], state[c*4+3]
+            state[c*4]   = _GE[s0] ^ _GB[s1] ^ _GD[s2] ^ _G9[s3]
+            state[c*4+1] = _G9[s0] ^ _GE[s1] ^ _GB[s2] ^ _GD[s3]
+            state[c*4+2] = _GD[s0] ^ _G9[s1] ^ _GE[s2] ^ _GB[s3]
+            state[c*4+3] = _GB[s0] ^ _GD[s1] ^ _G9[s2] ^ _GE[s3]
+    # Final round (no InvMixColumns)
+    state[1], state[5], state[9], state[13] = state[13], state[1], state[5], state[9]
+    state[2], state[6], state[10], state[14] = state[10], state[14], state[2], state[6]
+    state[3], state[7], state[11], state[15] = state[7], state[11], state[15], state[3]
+    for i in range(16):
+        state[i] = _AES_INV_SBOX[state[i]]
+    _aes_add_round_key(state, rks[0])
+    return bytes(state)
+
+
+def _aes_encrypt_block(block: bytes, rks: "list[bytearray]") -> bytes:
+    """Encrypt a single 16-byte AES-256 block (14 rounds)."""
+    state = bytearray(block)
+    _aes_add_round_key(state, rks[0])
+    for rnd in range(1, 15):
+        # SubBytes
+        for i in range(16):
+            state[i] = _AES_SBOX[state[i]]
+        # ShiftRows
+        state[1], state[5], state[9], state[13] = state[5], state[9], state[13], state[1]
+        state[2], state[6], state[10], state[14] = state[10], state[14], state[2], state[6]
+        state[3], state[7], state[11], state[15] = state[15], state[3], state[7], state[11]
+        if rnd < 14:
+            # MixColumns
+            for c in range(4):
+                s0, s1, s2, s3 = state[c*4], state[c*4+1], state[c*4+2], state[c*4+3]
+                state[c*4]   = _G2[s0] ^ _G3[s1] ^ s2 ^ s3
+                state[c*4+1] = s0 ^ _G2[s1] ^ _G3[s2] ^ s3
+                state[c*4+2] = s0 ^ s1 ^ _G2[s2] ^ _G3[s3]
+                state[c*4+3] = _G3[s0] ^ s1 ^ s2 ^ _G2[s3]
+        _aes_add_round_key(state, rks[rnd])
+    return bytes(state)
+
+
+def _aes_cbc_decrypt(key: bytes, iv: bytes, ciphertext: bytes) -> bytes:
+    """AES-256-CBC decrypt. ciphertext must be a multiple of 16 bytes."""
+    rks = _aes256_key_expand(key)
+    out = bytearray()
+    prev = iv
+    for i in range(0, len(ciphertext), 16):
+        block = ciphertext[i:i+16]
+        dec = _aes_decrypt_block(block, rks)
+        out.extend(a ^ b for a, b in zip(dec, prev))
+        prev = block
+    return bytes(out)
+
+
+def _aes_cbc_encrypt(key: bytes, iv: bytes, plaintext: bytes) -> bytes:
+    """AES-256-CBC encrypt. plaintext must be a multiple of 16 bytes."""
+    rks = _aes256_key_expand(key)
+    out = bytearray()
+    prev = bytearray(iv)
+    for i in range(0, len(plaintext), 16):
+        block = bytes(a ^ b for a, b in zip(plaintext[i:i+16], prev))
+        enc = _aes_encrypt_block(block, rks)
+        out.extend(enc)
+        prev = bytearray(enc)
+    return bytes(out)
 
 
 def _decrypt_bsii_v3(payload: bytes) -> Optional[bytes]:
@@ -380,26 +495,13 @@ def _decode_scsc(data: bytes) -> "Optional[tuple[bytes, Optional[dict]]]":
         )
         return None
 
-    try:
-        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-        from cryptography.hazmat.backends import default_backend
-    except ImportError:
-        logger.warning("[ATS] ScsC: 'cryptography' unavailable — restart the launcher to retry auto-install")
-        return None
-
     iv         = data[36:52]
     data_size  = struct.unpack_from("<I", data, 52)[0]
     ciphertext = data[_SCSC_HEADER:]
 
     try:
-        cipher = Cipher(
-            algorithms.AES(_SCSC_AES_KEY),
-            modes.CBC(iv),
-            backend=default_backend(),
-        )
-        dec        = cipher.decryptor()
-        decrypted  = dec.update(ciphertext) + dec.finalize()
-        inner      = zlib.decompress(decrypted)
+        decrypted = _aes_cbc_decrypt(_SCSC_AES_KEY, iv, ciphertext)
+        inner     = zlib.decompress(decrypted)
     except Exception as exc:
         logger.warning(f"[ATS] ScsC: decryption/decompression failed: {exc}")
         return None
@@ -433,13 +535,6 @@ def _write_scsc(path: Path, text: str, meta: dict) -> bool:
         magic(4) + HMAC-SHA256(32) + fresh-IV(16) + DataSize(4) + AES-256-CBC ciphertext
     """
     try:
-        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-        from cryptography.hazmat.backends import default_backend
-    except ImportError:
-        logger.error("[ATS] _write_scsc: 'cryptography' unavailable — restart the launcher to retry auto-install")
-        return False
-
-    try:
         raw       = text.encode("utf-8")
         plaintext = zlib.compress(raw, level=6)
 
@@ -448,17 +543,9 @@ def _write_scsc(path: Path, text: str, meta: dict) -> bool:
         if rem:
             plaintext += b"\x00" * (16 - rem)
 
-        iv = os.urandom(16)
-
-        cipher = Cipher(
-            algorithms.AES(_SCSC_AES_KEY),
-            modes.CBC(iv),
-            backend=default_backend(),
-        )
-        enc        = cipher.encryptor()
-        ciphertext = enc.update(plaintext) + enc.finalize()
-
-        mac = _hmac.new(_SCSC_AES_KEY, ciphertext, hashlib.sha256).digest()
+        iv         = os.urandom(16)
+        ciphertext = _aes_cbc_encrypt(_SCSC_AES_KEY, iv, plaintext)
+        mac        = _hmac.new(_SCSC_AES_KEY, ciphertext, hashlib.sha256).digest()
 
         file_bytes = (
             _SCSC_MAGIC
@@ -1079,7 +1166,9 @@ class ATSContext(CommonContext):
         pending_money = self._total_money_granted - self._save_applied_money
         has_pending   = pending_xp > 0 or pending_money > 0
 
-        if not has_pending and mtime <= self._save_last_mtime:
+        # Skip if: no pending grants AND file unchanged; OR file was already
+        # confirmed unreadable (no point retrying until the file actually changes).
+        if mtime <= self._save_last_mtime and (not has_pending or self._save_warned_unreadable):
             return
         self._save_last_mtime = mtime
 
@@ -1472,10 +1561,6 @@ def launch():
     )
     args, _ = parser.parse_known_args()
     colorama.init()
-
-    # Install cryptography before asyncio starts — blocking here is safe and
-    # ensures the package is importable before any save polling begins.
-    _ensure_cryptography()
 
     async def main():
         ctx = ATSContext(
