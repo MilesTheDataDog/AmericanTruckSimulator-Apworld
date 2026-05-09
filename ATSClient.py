@@ -740,46 +740,22 @@ def _read_sii_text(path: Path) -> "tuple[Optional[str], str, Optional[dict]]":
     return None, f"bsii_v{version}", None
 
 
-def _find_player_block(text: str) -> "Optional[re.Match]":
-    """Return a regex match whose .end() points just inside the player block header.
+def _find_xp_block(text: str) -> "Optional[re.Match]":
+    """Return a match whose .end() is just inside the block that contains
+    experience_points and money_account.
 
-    ATS save formats vary widely:
-      Named blocks (older):   "economy : economy.economy {"
-                              "player  : player.player {"
-      _nameless blocks (1.59+): "economy : _nameless.1cf.f166.0f00 {"
-                                 with "player: _nameless.1cf.8f37.ca80" inside it,
-                                 and "player : _nameless.1cf.8f37.ca80 {" elsewhere.
+    In all known ATS save formats these fields live in the economy unit:
+      "economy : economy.economy {"   (old named style)
+      "economy : _nameless.XXXXXXXX {" (ATS 1.59+ _nameless style)
 
-    Strategy:
-      1. Named economy or player block — matches directly.
-      2. Any economy block (named or _nameless) — extract the player reference ID
-         from within the first 2 KB of that block, then find the player block
-         definition for that ID anywhere in the text.
-      3. Any player block — last resort so we at least get a player-typed block.
+    Older/unusual saves occasionally put them directly in a player block;
+    that is handled as a fallback.
     """
-    # Strategy 1: named blocks (old-style saves)
-    m = (
-        re.search(r'\beconomy\s*:\s*economy(?:\.\w+)?\s*\{', text)
-        or re.search(r'\bplayer\s*:\s*player(?:\.\w+)?\s*\{', text)
-    )
+    # Economy block — handles both named and _nameless IDs
+    m = re.search(r'\beconomy\s*:\s*\S+\s*\{', text)
     if m:
         return m
-
-    # Strategy 2: _nameless economy block — follow the player reference
-    econ_m = re.search(r'\beconomy\s*:\s*\S+\s*\{', text)
-    if econ_m:
-        # Search first 2 KB inside the economy block for "player: <id>"
-        econ_inner = text[econ_m.end():econ_m.end() + 2048]
-        ref_m = re.search(r'\bplayer\s*:\s*(\S+)', econ_inner)
-        if ref_m:
-            player_id = ref_m.group(1)
-            block_m = re.search(
-                r'\bplayer\s*:\s*' + re.escape(player_id) + r'\s*\{', text
-            )
-            if block_m:
-                return block_m
-
-    # Strategy 3: any player-typed block (last resort)
+    # Fallback: older saves that use a top-level player block
     return re.search(r'\bplayer\s*:\s*\S+\s*\{', text)
 
 
@@ -800,8 +776,8 @@ def _parse_sii_save(text: str) -> Dict[str, Any]:
         "owned_garages": set(),
     }
 
-    _econ_m = _find_player_block(text)
-    _xp_region = text[_econ_m.end():_econ_m.end() + 20_000] if _econ_m else text
+    _econ_m = _find_xp_block(text)
+    _xp_region = text[_econ_m.end():_econ_m.end() + 100_000] if _econ_m else text
     xp_m = re.search(r"\bexperience_points\s*:\s*(\d+)", _xp_region)
     if xp_m:
         result["experience_points"] = int(xp_m.group(1))
@@ -1380,7 +1356,7 @@ class ATSContext(CommonContext):
             # never accidentally overwrite a hired driver's experience_points field.
             modified = text
             if xp_delta > 0:
-                _econ_patch = _find_player_block(modified)
+                _econ_patch = _find_xp_block(modified)
                 if _econ_patch:
                     _before = modified[:_econ_patch.end()]
                     _after  = modified[_econ_patch.end():]
@@ -1438,9 +1414,9 @@ class ATSContext(CommonContext):
                     try:
                         _vtext, _vfmt, _ = _read_sii_text(quicksave_path)
                         if _vtext:
-                            _vecon = _find_player_block(_vtext)
+                            _vecon = _find_xp_block(_vtext)
                             if _vecon:
-                                _vregion = _vtext[_vecon.end():_vecon.end() + 20_000]
+                                _vregion = _vtext[_vecon.end():_vecon.end() + 100_000]
                                 _vxp = re.search(r'\bexperience_points\s*:\s*(\d+)', _vregion)
                                 logger.info(
                                     f"[ATS] VERIFY quicksave XP = "
