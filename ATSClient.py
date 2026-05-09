@@ -1379,11 +1379,14 @@ class ATSContext(CommonContext):
                         "run please start a new profile in American Truck Simulator."
                     )
 
-        # Update live game state read by _check_win_condition
+        # Update live game state read by _check_win_condition.
+        # XP is strictly monotonic in ATS; use max so that reading the pre-quickload
+        # autosave (written by ATS immediately after F9 fires) never rolls back the
+        # XP we already know the player has in their loaded save.
         level = _xp_to_level(save["experience_points"])
         self.current_level  = level
         self.current_money  = save["money"]
-        self.current_xp     = save["experience_points"]
+        self.current_xp     = max(self.current_xp, save["experience_points"])
 
         # ── Apply pending XP / money grants to the save file ──────────────────
         # total_*_granted = cumulative amount AP has sent this session.

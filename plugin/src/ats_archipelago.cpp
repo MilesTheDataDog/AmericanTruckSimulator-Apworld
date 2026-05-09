@@ -178,15 +178,24 @@ static void trigger_quick_load() {
         return;
     }
 
-    UINT scan      = MapVirtualKeyA(VK_F9, MAPVK_VK_TO_VSC);
-    LPARAM lp_down = 1 | (scan << 16);
-    LPARAM lp_up   = 1 | (scan << 16) | (1 << 30) | (1 << 31);
+    // ATS ignores WM_KEYDOWN messages posted to its queue — it reads keyboard
+    // state via DirectInput / GetAsyncKeyState, not the Win32 message pump.
+    // SendInput injects at the OS level and is visible to all input APIs.
+    // SetForegroundWindow succeeds unconditionally here because we are running
+    // inside the ATS process itself.
+    SetForegroundWindow(hwnd);
 
-    PostMessageA(hwnd, WM_KEYDOWN, VK_F9, lp_down);
-    PostMessageA(hwnd, WM_KEYUP,   VK_F9, lp_up);
+    INPUT keys[2] = {};
+    keys[0].type       = INPUT_KEYBOARD;
+    keys[0].ki.wVk     = VK_F9;
+    keys[0].ki.dwFlags = 0;
+    keys[1].type       = INPUT_KEYBOARD;
+    keys[1].ki.wVk     = VK_F9;
+    keys[1].ki.dwFlags = KEYEVENTF_KEYUP;
 
-    log("quick_load: F9 sent to window " +
-        hex_addr(reinterpret_cast<uintptr_t>(hwnd)));
+    UINT sent = SendInput(2, keys, sizeof(INPUT));
+    log("quick_load: SendInput F9 sent=" + std::to_string(sent) +
+        " window=" + hex_addr(reinterpret_cast<uintptr_t>(hwnd)));
 }
 
 // ── Read items.json (written by Python client) ─────────────────────────────────
