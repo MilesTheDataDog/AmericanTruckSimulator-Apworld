@@ -243,31 +243,74 @@ def _scan_profiles_dir(profiles_dir: Path, candidates: "list[tuple[float, Path]]
                 pass
 
 
-def _find_ats_save_file() -> Optional[Path]:
-    """Return the most-recently-modified READABLE game.sii across all ATS profiles/slots.
+def _profile_id_from_config(docs: Path) -> "Optional[str]":
+    """Return the last-selected ATS profile ID from config.cfg, or None."""
+    try:
+        with (docs / "config.cfg").open("r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                m = re.search(r'\bg_last_select_profile_id\s+"([0-9A-Fa-f]+)"', line)
+                if m:
+                    return m.group(1)
+    except OSError:
+        pass
+    return None
 
-    Collects every game.sii candidate from all known save locations, sorts
-    newest-first, then returns the first file whose magic bytes are SiiN
-    (plain-text) or BSII (encrypted).  Files with other magic (e.g. ScsC
-    hashfs containers left in Steam userdata after a cloud-profile deletion)
-    are logged and skipped so the next-newest valid save is used instead.
+
+def _find_ats_save_file() -> Optional[Path]:
+    """Return the most-recently-modified READABLE game.sii for the active profile.
+
+    Strategy 1 (preferred): read g_last_select_profile_id from config.cfg and
+    scan only that profile's save directory.  This avoids picking up stale saves
+    from old profiles before the player loads their current session.
+
+    Strategy 2 (fallback): scan every profile across all known locations, sorted
+    newest-first.  Used when config.cfg is missing or its profile ID has no saves.
     """
     docs = Path(os.environ.get("USERPROFILE", Path.home())) / "Documents" / "American Truck Simulator"
 
     candidates: "list[tuple[float, Path]]" = []
 
-    # Steam userdata (Steam Cloud / PC_steam_cloud profile type)
-    for remote in _steam_userdata_roots():
-        _scan_profiles_dir(remote / "steam" / "profiles", candidates)
-        _scan_profiles_dir(remote / "profiles", candidates)
+    # Strategy 1: config.cfg tells us exactly which profile is active.
+    profile_id = _profile_id_from_config(docs)
+    if profile_id:
+        logger.debug(f"[ATS] config.cfg last profile: {profile_id}")
+        profile_dirs = [
+            docs / "profiles" / profile_id,
+            docs / "steam" / "profiles" / profile_id,
+        ]
+        for remote in _steam_userdata_roots():
+            profile_dirs.append(remote / "steam" / "profiles" / profile_id)
+            profile_dirs.append(remote / "profiles" / profile_id)
 
-    # Documents (local / PC_local profile type)
-    _scan_profiles_dir(docs / "profiles", candidates)
-    _scan_profiles_dir(docs / "steam" / "profiles", candidates)
+        for profile_dir in profile_dirs:
+            save_dir = profile_dir / "save"
+            if not save_dir.is_dir():
+                continue
+            for slot in save_dir.iterdir():
+                if not slot.is_dir():
+                    continue
+                game_sii = slot / "game.sii"
+                if not game_sii.exists():
+                    continue
+                try:
+                    candidates.append((game_sii.stat().st_mtime, game_sii))
+                except OSError:
+                    pass
 
-    # Try candidates newest-first; return the first one with valid SiiN/BSII magic.
-    # This naturally skips ScsC containers, zero-byte files, and other non-saves
-    # without hiding valid files that happen to sort after an unreadable one.
+    # Strategy 2: fall back to scanning all profiles if config gave us nothing.
+    if not candidates:
+        if profile_id:
+            logger.debug(
+                f"[ATS] Profile {profile_id} from config.cfg has no saves on disk — "
+                "falling back to full profile scan"
+            )
+        for remote in _steam_userdata_roots():
+            _scan_profiles_dir(remote / "steam" / "profiles", candidates)
+            _scan_profiles_dir(remote / "profiles", candidates)
+        _scan_profiles_dir(docs / "profiles", candidates)
+        _scan_profiles_dir(docs / "steam" / "profiles", candidates)
+
+    # Pick the newest readable save from whichever strategy produced candidates.
     for _mtime, path in sorted(candidates, key=lambda x: x[0], reverse=True):
         try:
             with path.open("rb") as _f:
