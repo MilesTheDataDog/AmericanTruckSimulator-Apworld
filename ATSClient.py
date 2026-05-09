@@ -103,20 +103,28 @@ _SCSC_AES_KEY = bytes([
 GRANTS_FILE = COMM_DIR / "grants.json"
 
 
-def _load_save_grants() -> "tuple[int, int]":
-    """Return (applied_xp, applied_money) from the last session, or (0, 0)."""
+def _load_save_grants() -> "tuple[int, int, int]":
+    """Return (applied_xp, applied_money, base_xp) from the last session, or (0, 0, 0)."""
     try:
         if GRANTS_FILE.exists():
             data = _read_json(GRANTS_FILE)
-            return int(data.get("applied_xp", 0)), int(data.get("applied_money", 0))
+            return (
+                int(data.get("applied_xp", 0)),
+                int(data.get("applied_money", 0)),
+                int(data.get("base_xp", 0)),
+            )
     except Exception:
         pass
-    return 0, 0
+    return 0, 0, 0
 
 
-def _persist_save_grants(applied_xp: int, applied_money: int) -> None:
+def _persist_save_grants(applied_xp: int, applied_money: int, base_xp: int = 0) -> None:
     try:
-        _write_json(GRANTS_FILE, {"applied_xp": applied_xp, "applied_money": applied_money})
+        _write_json(GRANTS_FILE, {
+            "applied_xp": applied_xp,
+            "applied_money": applied_money,
+            "base_xp": base_xp,
+        })
     except Exception as e:
         logger.error(f"[ATS] Could not write grants.json: {e}")
 
@@ -893,9 +901,21 @@ class ATSContext(CommonContext):
 
         # Save-grant tracking: how much XP / money has been baked into the save
         # file already (persisted across sessions in grants.json).
+        # base_xp = the natural (pre-first-grant) XP the player had; used to
+        # detect genuine save replacements vs stale pre-quickload autosaves.
         self._save_applied_xp: int
         self._save_applied_money: int
-        self._save_applied_xp, self._save_applied_money = _load_save_grants()
+        self._save_base_xp: int
+        (self._save_applied_xp,
+         self._save_applied_money,
+         self._save_base_xp) = _load_save_grants()
+        if self._save_applied_xp or self._save_applied_money:
+            logger.info(
+                f"[ATS] Loaded grant state from grants.json: "
+                f"applied_xp={self._save_applied_xp:,}, "
+                f"applied_money=${self._save_applied_money:,}, "
+                f"base_xp={self._save_base_xp:,}"
+            )
 
         # Incremented each time we write a patched save; DLL watches this value
         # and fires F9 (quick-load) when it changes.
@@ -1316,31 +1336,35 @@ class ATSContext(CommonContext):
                f"money=${save['money']:,}, cities={len(save['visited_cities'])}"
                + (f" — pending grants: +{pending_xp:,} XP, +${pending_money:,}" if has_pending else ""))
 
-        # Sanity check: if save XP is below what we've tracked as applied, the
-        # save was replaced (new profile, deleted profile, manual save swap, etc.).
-        # XP never decreases in ATS, so this reliably detects a stale grants.json.
-        if save["experience_points"] < self._save_applied_xp:
-            import time as _time
-            if _time.monotonic() < self._save_grant_grace_until:
-                # ATS autosaves the pre-quickload state to save/autosave/ right
-                # after F9 fires.  That autosave has the old XP and a newer mtime
-                # than slot 1, so the scanner picks it up.  Ignore this during the
-                # grace window — the game will overwrite the autosave with the
-                # loaded (patched) XP once the player is in-world.
-                logger.debug(
-                    f"[ATS] XP mismatch ({save['experience_points']:,} < "
-                    f"{self._save_applied_xp:,}) within grant grace period — "
-                    "skipping reset (stale pre-quickload autosave)"
-                )
-            else:
-                logger.warning(
-                    f"[ATS] Save XP ({save['experience_points']:,}) < applied grants "
-                    f"({self._save_applied_xp:,}) — save was likely replaced. "
-                    "Resetting grant tracking so grants are re-applied."
-                )
-                self._save_applied_xp = 0
-                self._save_applied_money = 0
-                _persist_save_grants(0, 0)
+        # Detect a genuine save replacement (new profile / deleted save / manual
+        # swap).  XP never decreases in ATS, so if the save XP is far below what
+        # we've seen before, the file was replaced.
+        #
+        # We compare against _save_base_xp (the player's natural XP before any
+        # grants), NOT against _save_applied_xp.  This prevents false resets when
+        # ATS autosaves the pre-quickload state (which has the old, un-granted XP)
+        # immediately after F9 fires — that autosave has the player's *natural* XP,
+        # which equals base_xp, so the check correctly returns False.
+        _save_xp = save["experience_points"]
+        _reset_needed = False
+        if self._save_base_xp > 0:
+            # Reliable path: base_xp known → reset only if XP went below it.
+            _reset_needed = _save_xp < self._save_base_xp
+        elif self._save_applied_xp > 0:
+            # base_xp unknown (old grants.json format) → only reset if XP is
+            # dramatically below the cumulative grants (genuine fresh-profile swap).
+            _reset_needed = _save_xp < self._save_applied_xp // 2
+
+        if _reset_needed:
+            logger.warning(
+                f"[ATS] Save XP ({_save_xp:,}) dropped below base XP "
+                f"({self._save_base_xp:,}) — save was likely replaced. "
+                "Resetting grant tracking so grants are re-applied."
+            )
+            self._save_applied_xp = 0
+            self._save_applied_money = 0
+            self._save_base_xp = 0
+            _persist_save_grants(0, 0, 0)
 
         # One-time fresh-save check. Only warn when the server has no checked
         # locations yet — if it does, the player is resuming a legitimate run.
@@ -1502,19 +1526,21 @@ class ATSContext(CommonContext):
                 logger.warning(f"[ATS] Could not write quicksave: {e}")
 
             if wrote_quicksave:
-                # Start grace period: ATS autosaves the pre-quickload state
-                # immediately after F9 fires, giving the old autosave a newer
-                # mtime than slot 1.  The grace window prevents the "save replaced"
-                # detector from resetting grants when it reads that stale autosave.
-                import time as _time
-                self._save_grant_grace_until = _time.monotonic() + 45.0
+                # Record the player's natural (pre-grant) XP the first time we
+                # write grants.  This anchors the "save replaced" detector so it
+                # only fires when XP genuinely drops below what the player had
+                # before any grants — not when ATS autosaves the pre-quickload
+                # state (which has the same natural XP as base_xp).
+                if self._save_base_xp == 0 and xp_delta > 0:
+                    self._save_base_xp = self.current_xp  # XP before this grant
 
                 # Only increment reload_counter when quicksave succeeded —
                 # F9 loads the quicksave slot, so firing it without a valid
                 # quicksave would reload the un-patched save.
                 self._save_applied_xp    += xp_delta
                 self._save_applied_money += money_delta
-                _persist_save_grants(self._save_applied_xp, self._save_applied_money)
+                _persist_save_grants(self._save_applied_xp, self._save_applied_money,
+                                     self._save_base_xp)
 
                 self.current_xp    = new_xp
                 self.current_money = new_money
