@@ -1365,6 +1365,12 @@ class ATSContext(CommonContext):
                         f'experience_points: {new_xp}',
                         _after, count=1,
                     )
+                    # Log context around XP so we can identify the skill-points field name
+                    _diag_m = re.search(r'\bexperience_points\s*:\s*\d+', _after)
+                    if _diag_m:
+                        _c0 = max(0, _diag_m.start() - 150)
+                        _c1 = min(len(_after), _diag_m.end() + 400)
+                        logger.info(f"[ATS] XP diag context:\n{_after[_c0:_c1]}")
                     modified = _before + _after
                     logger.debug(f"[ATS] Patched {_econ_patch.group(0)[:40].strip()} XP -> {new_xp:,}")
                 else:
@@ -1431,6 +1437,15 @@ class ATSContext(CommonContext):
                                     "[ATS] VERIFY: no economy/player block found. "
                                     f"Save starts with: {_snippet!r}"
                                 )
+                            # Verify money_account anywhere in the full save text
+                            _vmoney = re.search(r'\bmoney_account\s*:\s*(-?\d+)', _vtext)
+                            if _vmoney:
+                                logger.info(
+                                    f"[ATS] VERIFY quicksave money = ${int(_vmoney.group(1)):,} "
+                                    f"(expected ${new_money:,})"
+                                )
+                            else:
+                                logger.warning("[ATS] VERIFY quicksave: money_account not found in save")
                     except Exception as _ve:
                         logger.warning(f"[ATS] VERIFY quicksave read-back failed: {_ve}")
             except Exception as e:
