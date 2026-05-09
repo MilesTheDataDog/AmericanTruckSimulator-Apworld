@@ -901,6 +901,13 @@ class ATSContext(CommonContext):
         # and fires F9 (quick-load) when it changes.
         self._reload_counter: int = 0
 
+        # Grace period: skip "save was replaced" detection for N seconds after
+        # writing a quicksave.  ATS autosaves the pre-quickload state to
+        # save/autosave/ immediately after F9 fires, giving that file a newer
+        # mtime than slot 1.  Without this guard the client reads the old
+        # autosave, sees XP below the applied total, and re-applies all grants.
+        self._save_grant_grace_until: float = 0.0
+
     # ── Archipelago callbacks ──────────────────────────────────────────────────
 
     async def server_auth(self, password_requested: bool = False) -> None:
@@ -1313,14 +1320,27 @@ class ATSContext(CommonContext):
         # save was replaced (new profile, deleted profile, manual save swap, etc.).
         # XP never decreases in ATS, so this reliably detects a stale grants.json.
         if save["experience_points"] < self._save_applied_xp:
-            logger.warning(
-                f"[ATS] Save XP ({save['experience_points']:,}) < applied grants "
-                f"({self._save_applied_xp:,}) — save was likely replaced. "
-                "Resetting grant tracking so grants are re-applied."
-            )
-            self._save_applied_xp = 0
-            self._save_applied_money = 0
-            _persist_save_grants(0, 0)
+            import time as _time
+            if _time.monotonic() < self._save_grant_grace_until:
+                # ATS autosaves the pre-quickload state to save/autosave/ right
+                # after F9 fires.  That autosave has the old XP and a newer mtime
+                # than slot 1, so the scanner picks it up.  Ignore this during the
+                # grace window — the game will overwrite the autosave with the
+                # loaded (patched) XP once the player is in-world.
+                logger.debug(
+                    f"[ATS] XP mismatch ({save['experience_points']:,} < "
+                    f"{self._save_applied_xp:,}) within grant grace period — "
+                    "skipping reset (stale pre-quickload autosave)"
+                )
+            else:
+                logger.warning(
+                    f"[ATS] Save XP ({save['experience_points']:,}) < applied grants "
+                    f"({self._save_applied_xp:,}) — save was likely replaced. "
+                    "Resetting grant tracking so grants are re-applied."
+                )
+                self._save_applied_xp = 0
+                self._save_applied_money = 0
+                _persist_save_grants(0, 0)
 
         # One-time fresh-save check. Only warn when the server has no checked
         # locations yet — if it does, the player is resuming a legitimate run.
@@ -1380,6 +1400,30 @@ class ATSContext(CommonContext):
                         f'experience_points: {new_xp}',
                         modified, count=1,
                     )
+            if xp_delta > 0:
+                # Grant one unspent skill point per level gained.
+                # upgrade_points lives in the player block (not economy block).
+                _old_level = _xp_to_level(self.current_xp)
+                _new_level = _xp_to_level(new_xp)
+                _level_delta = _new_level - _old_level
+                if _level_delta > 0:
+                    _up_m = re.search(r'\bupgrade_points\s*:\s*(\d+)', modified)
+                    if _up_m:
+                        _old_up = int(_up_m.group(1))
+                        _new_up = _old_up + _level_delta
+                        modified = (modified[:_up_m.start(1)]
+                                    + str(_new_up)
+                                    + modified[_up_m.end(1):])
+                        logger.info(
+                            f"[ATS] Patched upgrade_points: {_old_up} -> {_new_up} "
+                            f"(+{_level_delta} level{'s' if _level_delta != 1 else ''})"
+                        )
+                    else:
+                        logger.warning(
+                            "[ATS] upgrade_points not found in save — "
+                            "skill points not granted. "
+                            "Check that your save uses g_save_format 2."
+                        )
             if money_delta > 0:
                 modified = re.sub(
                     r'\bmoney_account\s*:\s*-?\d+',
@@ -1446,12 +1490,25 @@ class ATSContext(CommonContext):
                                 )
                             else:
                                 logger.warning("[ATS] VERIFY quicksave: money_account not found in save")
+                            # Verify upgrade_points
+                            _vup = re.search(r'\bupgrade_points\s*:\s*(\d+)', _vtext)
+                            if _vup:
+                                logger.info(f"[ATS] VERIFY quicksave upgrade_points = {_vup.group(1)}")
+                            else:
+                                logger.info("[ATS] VERIFY quicksave: upgrade_points not found (field may not exist yet)")
                     except Exception as _ve:
                         logger.warning(f"[ATS] VERIFY quicksave read-back failed: {_ve}")
             except Exception as e:
                 logger.warning(f"[ATS] Could not write quicksave: {e}")
 
             if wrote_quicksave:
+                # Start grace period: ATS autosaves the pre-quickload state
+                # immediately after F9 fires, giving the old autosave a newer
+                # mtime than slot 1.  The grace window prevents the "save replaced"
+                # detector from resetting grants when it reads that stale autosave.
+                import time as _time
+                self._save_grant_grace_until = _time.monotonic() + 45.0
+
                 # Only increment reload_counter when quicksave succeeded —
                 # F9 loads the quicksave slot, so firing it without a valid
                 # quicksave would reload the un-patched save.
