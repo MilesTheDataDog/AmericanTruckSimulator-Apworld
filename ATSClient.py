@@ -603,7 +603,7 @@ def _write_scsc(path: Path, text: str, meta: dict) -> bool:
             + ciphertext
         )
 
-        tmp = path.with_suffix(".tmp")
+        tmp = path.with_name(path.name + ".ap_tmp")
         tmp.write_bytes(file_bytes)
         tmp.replace(path)
         return True
@@ -616,7 +616,7 @@ def _write_sii_plain(path: Path, text: str) -> bool:
     """Write plaintext SiiNunit text as a plain-text save (g_save_format 2)."""
     try:
         raw = text.encode("utf-8")
-        tmp = path.with_suffix(".tmp")
+        tmp = path.with_name(path.name + ".ap_tmp")
         tmp.write_bytes(raw)
         tmp.replace(path)
         return True
@@ -643,7 +643,7 @@ def _write_sii_encrypted(path: Path, text: str) -> bool:
         encrypted = enc.update(compressed) + enc.finalize()
 
         header = b"BSII" + struct.pack("<I", 3) + struct.pack("<I", len(raw))
-        tmp = path.with_suffix(".tmp")
+        tmp = path.with_name(path.name + ".ap_tmp")
         tmp.write_bytes(header + encrypted)
         tmp.replace(path)
         return True
@@ -1431,10 +1431,6 @@ class ATSContext(CommonContext):
             except Exception as e:
                 logger.warning(f"[ATS] Could not write quicksave: {e}")
 
-            # Also write back to the autosave slot so the next natural autosave
-            # does not stomp the grants if the player saves before F9 fires.
-            wrote_autosave = _write_save(save_path, modified)
-
             if wrote_quicksave:
                 # Only increment reload_counter when quicksave succeeded —
                 # F9 loads the quicksave slot, so firing it without a valid
@@ -1448,29 +1444,15 @@ class ATSContext(CommonContext):
                 self._reload_counter += 1
 
                 logger.info(
-                    f"[ATS] Grants written to save: "
+                    f"[ATS] Grants written to quicksave: "
                     f"+{xp_delta:,} XP (total {new_xp:,}), "
                     f"+${money_delta:,} (total ${new_money:,}) — "
-                    f"reload_counter={self._reload_counter} "
-                    f"(autosave={'ok' if wrote_autosave else 'FAIL'}, "
-                    f"quicksave=ok)"
+                    f"reload_counter={self._reload_counter}"
                 )
                 self._write_items_file()   # sends updated reload_counter to DLL
-            elif wrote_autosave:
-                logger.warning(
-                    "[ATS] Grants written to autosave only — quicksave write failed. "
-                    "Grants will appear after the next time ATS loads that save slot "
-                    "(sleep in-game or use Load Game). F9 quick-load will NOT be triggered."
-                )
-                # Still mark as applied so we don't try to re-apply on next poll.
-                self._save_applied_xp    += xp_delta
-                self._save_applied_money += money_delta
-                _persist_save_grants(self._save_applied_xp, self._save_applied_money)
-                self.current_xp    = new_xp
-                self.current_money = new_money
             else:
                 logger.error(
-                    "[ATS] Grant write FAILED for both autosave and quicksave. "
+                    "[ATS] Grant write FAILED for quicksave. "
                     f"format={_fmt_label}. "
                     "If saves are BSII v3 encrypted, install the 'cryptography' package "
                     "or set 'g_save_format 0' in config.cfg."
@@ -1666,7 +1648,7 @@ def launch():
 # ── Utility ────────────────────────────────────────────────────────────────────
 
 def _write_json(path: Path, data: Any) -> None:
-    tmp = path.with_suffix(".tmp")
+    tmp = path.with_name(path.name + ".ap_tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
     tmp.replace(path)
