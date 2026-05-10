@@ -894,6 +894,7 @@ class ATSContext(CommonContext):
         self._save_warned_unreadable: bool = False
         self._fresh_save_checked: bool = False
         self._save_path_logged: bool = False
+        self._up_repair_done: bool = False   # True after repair written; blocks re-repair while game settles
         self.current_xp: int = 0
         self._save_is_plain: bool = False  # True when save uses SiiN (g_save_format 2)
         self._save_scsc_meta: "Optional[dict]" = None  # set when save is an ScsC container
@@ -1395,6 +1396,37 @@ class ATSContext(CommonContext):
         xp_delta    = self._total_xp_granted    - self._save_applied_xp
         money_delta = self._total_money_granted - self._save_applied_money
 
+        # ── Standalone upgrade_points repair check ─────────────────────────────
+        # Catches saves patched by an older client that skipped inserting
+        # upgrade_points when the field was absent (e.g. a fresh profile).
+        # Runs on every successful save read; _up_repair_done blocks re-firing
+        # while the game is still settling after an F9 load.
+        _up_repair_needed = False
+        _up_repair_value  = 0
+        _cur_lv_r         = 0
+        if text is not None:
+            _sk_names_r = ['adr', 'long_dist', 'heavy', 'fragile', 'urgent', 'mechanical']
+            _spent_r    = 0
+            for _sk in _sk_names_r:
+                _m = re.search(rf'\b{re.escape(_sk)}\s*:\s*(\d+)', text)
+                if _m:
+                    _spent_r += int(_m.group(1))
+            _cur_lv_r   = _xp_to_level(save["experience_points"])
+            _expected_r = max(0, _cur_lv_r - 1 - _spent_r)
+            _up_m_r     = re.search(r'\bupgrade_points\s*:\s*(\d+)', text)
+            _current_r  = int(_up_m_r.group(1)) if _up_m_r else 0
+            if _expected_r > _current_r:
+                if not self._up_repair_done:
+                    _up_repair_needed = True
+                    _up_repair_value  = _expected_r
+                    logger.info(
+                        f"[ATS] upgrade_points needs repair: {_current_r} → {_expected_r} "
+                        f"(level {_cur_lv_r}, spent {_spent_r})"
+                    )
+            else:
+                # Save has correct value — clear the flag so future repairs can fire.
+                self._up_repair_done = False
+
         if (xp_delta > 0 or money_delta > 0) and text is not None:
             new_xp    = self.current_xp    + xp_delta
             new_money = self.current_money + money_delta
@@ -1592,9 +1624,69 @@ class ATSContext(CommonContext):
                     "If saves are BSII v3 encrypted, install the 'cryptography' package "
                     "or set 'g_save_format 0' in config.cfg."
                 )
+        elif _up_repair_needed and text is not None:
+            # No XP/money delta — apply a repair-only quicksave to fix
+            # upgrade_points that was missing/wrong from a save patched by an
+            # older client version.
+            _modified_rp = text
+            _up_m_rp  = re.search(r'\bupgrade_points\s*:\s*(\d+)', _modified_rp)
+            _xp_ln_rp = re.search(r'([ \t]*)experience_points\s*:\s*\d+', _modified_rp)
+            _repaired  = False
+            if _up_m_rp:
+                _modified_rp = (_modified_rp[:_up_m_rp.start(1)]
+                                + str(_up_repair_value)
+                                + _modified_rp[_up_m_rp.end(1):])
+                _repaired = True
+                logger.info(
+                    f"[ATS] Repairing upgrade_points: "
+                    f"{int(_up_m_rp.group(1))} → {_up_repair_value}"
+                )
+            elif _xp_ln_rp:
+                _indent_rp = _xp_ln_rp.group(1)
+                _ins_rp    = _xp_ln_rp.end()
+                _modified_rp = (_modified_rp[:_ins_rp]
+                                + f'\n{_indent_rp}upgrade_points: {_up_repair_value}'
+                                + _modified_rp[_ins_rp:])
+                _repaired = True
+                logger.info(
+                    f"[ATS] Inserting upgrade_points: {_up_repair_value} "
+                    f"(repair pass, level {_cur_lv_r})"
+                )
+            else:
+                logger.warning(
+                    "[ATS] upgrade_points repair: experience_points line not found"
+                )
+
+            if _repaired:
+                _plain_rp     = self._save_is_plain
+                _scsc_meta_rp = self._save_scsc_meta
+
+                def _write_save_rp(dest: Path, content: str) -> bool:
+                    if _scsc_meta_rp is not None:
+                        return _write_sii_plain(dest, content)
+                    return _write_sii_save(dest, content, plain=_plain_rp)
+
+                _qs_dir  = save_path.parent.parent / "1"
+                _qs_path = _qs_dir / "game.sii"
+                _wrote_rp = False
+                try:
+                    _qs_dir.mkdir(parents=True, exist_ok=True)
+                    _wrote_rp = _write_save_rp(_qs_path, _modified_rp)
+                except Exception as _e_rp:
+                    logger.warning(
+                        f"[ATS] Could not write repair quicksave: {_e_rp}"
+                    )
+
+                if _wrote_rp:
+                    self._up_repair_done = True
+                    self._reload_counter += 1
+                    logger.info(
+                        f"[ATS] Skill point repair written to quicksave — "
+                        f"reload_counter={self._reload_counter}"
+                    )
+                    self._write_items_file()
         else:
-            # No pending grants — still write items.json if anything else changed
-            # (handled by the caller / item-receive path; no extra write needed here)
+            # No pending grants and no repair needed.
             pass
 
         from worlds.american_truck_simulator.locations import (
