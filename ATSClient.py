@@ -895,6 +895,7 @@ class ATSContext(CommonContext):
         self._fresh_save_checked: bool = False
         self._save_path_logged: bool = False
         self._up_repair_done: bool = False   # True after repair written; blocks re-repair while game settles
+        self._up_repair_time: float = 0.0   # time.time() when repair was last written; enables retry after 30 s
         self.current_xp: int = 0
         self._save_is_plain: bool = False  # True when save uses SiiN (g_save_format 2)
         self._save_scsc_meta: "Optional[dict]" = None  # set when save is an ScsC container
@@ -1412,20 +1413,24 @@ class ATSContext(CommonContext):
                 if _m:
                     _spent_r += int(_m.group(1))
             _cur_lv_r   = _xp_to_level(save["experience_points"])
-            _expected_r = max(0, _cur_lv_r - 1 - _spent_r)
+            _expected_r = max(0, _cur_lv_r - _spent_r)
             _up_m_r     = re.search(r'\bupgrade_points\s*:\s*(\d+)', text)
             _current_r  = int(_up_m_r.group(1)) if _up_m_r else 0
             if _expected_r > _current_r:
-                if not self._up_repair_done:
+                # Allow retry if the flag is stale (>30 s): quickload may not have fired.
+                _repair_stale = self._up_repair_done and (time.time() - self._up_repair_time > 30.0)
+                if not self._up_repair_done or _repair_stale:
                     _up_repair_needed = True
                     _up_repair_value  = _expected_r
                     logger.info(
                         f"[ATS] upgrade_points needs repair: {_current_r} → {_expected_r} "
                         f"(level {_cur_lv_r}, spent {_spent_r})"
+                        + (" [retry after timeout]" if _repair_stale else "")
                     )
             else:
                 # Save has correct value — clear the flag so future repairs can fire.
                 self._up_repair_done = False
+                self._up_repair_time = 0.0
 
         if (xp_delta > 0 or money_delta > 0) and text is not None:
             new_xp    = self.current_xp    + xp_delta
@@ -1488,7 +1493,7 @@ class ATSContext(CommonContext):
                                 rf'\b{re.escape(_sk)}\s*:\s*(\d+)', modified)
                             if _sk_m:
                                 _spent += int(_sk_m.group(1))
-                        _new_up = max(0, _new_level - 1 - _spent)
+                        _new_up = max(0, _new_level - _spent)
                         if _new_up > 0:
                             _xp_line_m = re.search(
                                 r'([ \t]*)experience_points\s*:\s*\d+', modified)
@@ -1617,6 +1622,20 @@ class ATSContext(CommonContext):
                     f"reload_counter={self._reload_counter}"
                 )
                 self._write_items_file()   # sends updated reload_counter to DLL
+
+                # Also write to the source save slot so the player gets our
+                # modifications even when quickload (F9) is not bound in controls.
+                if save_path.parent != quicksave_dir:
+                    try:
+                        _write_save(save_path, modified)
+                        logger.info(
+                            f"[ATS] Also wrote grants to source slot "
+                            f"({save_path.parent.name}) for manual-reload fallback"
+                        )
+                    except Exception as _e_src:
+                        logger.debug(
+                            f"[ATS] Source-slot write skipped (file may be locked): {_e_src}"
+                        )
             else:
                 logger.error(
                     "[ATS] Grant write FAILED for quicksave. "
@@ -1679,12 +1698,26 @@ class ATSContext(CommonContext):
 
                 if _wrote_rp:
                     self._up_repair_done = True
+                    self._up_repair_time = time.time()
                     self._reload_counter += 1
                     logger.info(
                         f"[ATS] Skill point repair written to quicksave — "
                         f"reload_counter={self._reload_counter}"
                     )
                     self._write_items_file()
+
+                    # Also write to source slot for manual-reload fallback.
+                    if save_path.parent != _qs_dir:
+                        try:
+                            _write_save_rp(save_path, _modified_rp)
+                            logger.info(
+                                f"[ATS] Also wrote repair to source slot "
+                                f"({save_path.parent.name}) for manual-reload fallback"
+                            )
+                        except Exception as _e_src:
+                            logger.debug(
+                                f"[ATS] Source-slot repair write skipped: {_e_src}"
+                            )
         else:
             # No pending grants and no repair needed.
             pass
