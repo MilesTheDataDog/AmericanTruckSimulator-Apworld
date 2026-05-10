@@ -149,8 +149,9 @@ static std::string hex_addr(uintptr_t addr) {
 // quicksave slot, then increments reload_counter in items.json.  The DLL
 // sends F9 to the ATS window so the game loads the patched quicksave.
 
-static int  g_last_reload_counter  = 0;
-static bool g_reload_counter_synced = false;  // true after first items.json read
+static int  g_last_reload_counter    = 0;
+static int  g_pending_reload_counter = 0;     // counter seen while in_game=false
+static bool g_reload_counter_synced  = false; // true after first items.json read
 
 static HWND find_ats_window() {
     struct EnumData { DWORD pid; HWND hwnd; };
@@ -259,14 +260,15 @@ static void read_items_file() {
         log("reload_counter changed: " + std::to_string(g_last_reload_counter) +
             " -> " + std::to_string(reload_counter) +
             "; in_game=" + (in_game ? "true" : "false"));
+        // Always record the latest pending counter so telemetry_started can fire it.
+        g_pending_reload_counter = reload_counter;
         if (in_game) {
             g_last_reload_counter = reload_counter;
             trigger_quick_load();
         } else {
-            log("quick_load: deferred — grants written but simulation not running yet; "
-                "will trigger on next poll once player is in game");
-            // Do NOT advance g_last_reload_counter — leave it pending so the
-            // next poll (after telemetry_started sets in_game=true) fires F9.
+            // Don't advance g_last_reload_counter — telemetry_started will fire
+            // F9 as soon as the simulation resumes (player exits any menu).
+            log("quick_load: deferred — will fire F9 when simulation resumes");
         }
     }
 }
@@ -409,10 +411,18 @@ SCSAPI_VOID telemetry_paused(const scs_event_t event,
 SCSAPI_VOID telemetry_started(const scs_event_t event,
                                const void* const event_info,
                                const scs_context_t context) {
-    std::lock_guard<std::mutex> lock(g_state_mutex);
-    g_state.in_game = true;
-    // Allow a pending reload request to fire now that simulation is running.
-    // (The counter check in read_items_file handles the actual trigger.)
+    {
+        std::lock_guard<std::mutex> lock(g_state_mutex);
+        g_state.in_game = true;
+    }
+    // Fire any reload that was deferred while the player was in menus.
+    // We check outside the mutex because trigger_quick_load doesn't need it.
+    if (g_pending_reload_counter > g_last_reload_counter) {
+        log("quick_load: firing deferred F9 from telemetry_started (counter=" +
+            std::to_string(g_pending_reload_counter) + ")");
+        g_last_reload_counter = g_pending_reload_counter;
+        trigger_quick_load();
+    }
 }
 
 // ── Frame-timing state (declared here so discovery code can reference g_startup_time) ──

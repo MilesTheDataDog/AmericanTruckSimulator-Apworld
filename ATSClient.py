@@ -1446,11 +1446,40 @@ class ATSContext(CommonContext):
                             f"(+{_level_delta} level{'s' if _level_delta != 1 else ''})"
                         )
                     else:
-                        logger.warning(
-                            "[ATS] upgrade_points not found in save — "
-                            "skill points not granted. "
-                            "Check that your save uses g_save_format 2."
-                        )
+                        # upgrade_points absent — ATS omits the field when its value
+                        # is 0 (fresh profile).  Compute and INSERT it.
+                        _skill_names = ['adr', 'long_dist', 'heavy', 'fragile',
+                                        'urgent', 'mechanical']
+                        _spent = 0
+                        for _sk in _skill_names:
+                            _sk_m = re.search(
+                                rf'\b{re.escape(_sk)}\s*:\s*(\d+)', modified)
+                            if _sk_m:
+                                _spent += int(_sk_m.group(1))
+                        _new_up = max(0, _new_level - 1 - _spent)
+                        if _new_up > 0:
+                            _xp_line_m = re.search(
+                                r'([ \t]*)experience_points\s*:\s*\d+', modified)
+                            if _xp_line_m:
+                                _indent = _xp_line_m.group(1)
+                                _insert_pos = _xp_line_m.end()
+                                modified = (modified[:_insert_pos]
+                                            + f'\n{_indent}upgrade_points: {_new_up}'
+                                            + modified[_insert_pos:])
+                                logger.info(
+                                    f"[ATS] Inserted upgrade_points: {_new_up} "
+                                    f"(level {_new_level}, skills spent {_spent})"
+                                )
+                            else:
+                                logger.warning(
+                                    "[ATS] Could not find experience_points line "
+                                    "to insert upgrade_points after"
+                                )
+                        else:
+                            logger.info(
+                                f"[ATS] upgrade_points not inserted "
+                                f"(would be 0 at level {_new_level}, spent {_spent})"
+                            )
             if money_delta > 0:
                 modified = re.sub(
                     r'\bmoney_account\s*:\s*-?\d+',
