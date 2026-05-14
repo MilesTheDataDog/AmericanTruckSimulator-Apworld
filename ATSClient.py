@@ -103,13 +103,14 @@ _SCSC_AES_KEY = bytes([
 GRANTS_FILE = COMM_DIR / "grants.json"
 
 
-def _load_save_grants() -> "tuple[int, int, int, int, int]":
-    """Return (applied_xp, applied_money, base_xp, pending_money, confirmation_xp)."""
+def _load_save_grants() -> "tuple[int, int, int, int, int, int]":
+    """Return (applied_xp, applied_money, base_xp, pending_money, confirmation_xp, reload_counter)."""
     try:
         if GRANTS_FILE.exists():
             data = _read_json(GRANTS_FILE)
-            applied_xp = int(data.get("applied_xp", 0))
-            base_xp    = int(data.get("base_xp", 0))
+            applied_xp     = int(data.get("applied_xp", 0))
+            base_xp        = int(data.get("base_xp", 0))
+            reload_counter = int(data.get("reload_counter", 0))
             if "pending_money" in data:
                 return (
                     applied_xp,
@@ -117,14 +118,15 @@ def _load_save_grants() -> "tuple[int, int, int, int, int]":
                     base_xp,
                     int(data.get("pending_money", 0)),
                     int(data.get("confirmation_xp", 0)),
+                    reload_counter,
                 )
             # Old format (no pending_money key): reset money tracking so the
             # client re-applies any money that may never have been loaded by
             # the player (e.g. written to a save slot that was never loaded).
-            return applied_xp, 0, base_xp, 0, 0
+            return applied_xp, 0, base_xp, 0, 0, reload_counter
     except Exception:
         pass
-    return 0, 0, 0, 0, 0
+    return 0, 0, 0, 0, 0, 0
 
 
 def _persist_save_grants(
@@ -133,6 +135,7 @@ def _persist_save_grants(
     base_xp: int = 0,
     pending_money: int = 0,
     confirmation_xp: int = 0,
+    reload_counter: int = 0,
 ) -> None:
     try:
         _write_json(GRANTS_FILE, {
@@ -141,6 +144,7 @@ def _persist_save_grants(
             "base_xp":         base_xp,
             "pending_money":   pending_money,
             "confirmation_xp": confirmation_xp,
+            "reload_counter":  reload_counter,
         })
     except Exception as e:
         logger.error(f"[ATS] Could not write grants.json: {e}")
@@ -925,11 +929,13 @@ class ATSContext(CommonContext):
         self._save_base_xp: int
         self._save_pending_money: int
         self._save_confirmation_xp: int
+        self._reload_counter: int
         (self._save_applied_xp,
          self._save_applied_money,
          self._save_base_xp,
          self._save_pending_money,
-         self._save_confirmation_xp) = _load_save_grants()
+         self._save_confirmation_xp,
+         self._reload_counter) = _load_save_grants()
         # Counts consecutive save polls where XP is well below the expected
         # post-grant level — used to detect that the granted save was never
         # loaded (e.g. quicksave slot corrupted, F9 not bound).
@@ -942,11 +948,16 @@ class ATSContext(CommonContext):
                 f"applied_money=${self._save_applied_money:,}, "
                 f"base_xp={self._save_base_xp:,}"
                 + (f", pending_money=${self._save_pending_money:,}" if self._save_pending_money else "")
+                + f", reload_counter={self._reload_counter}"
             )
 
         # Incremented each time we write a patched save; DLL watches this value
-        # and fires F9 (quick-load) when it changes.
-        self._reload_counter: int = 0
+        # and fires F9 (quick-load) when it changes.  Persisted in grants.json
+        # so the DLL's synced baseline carries over across client restarts.
+
+        # If pending money from a previous session never got confirmed, arm the
+        # delivery trigger immediately so the grant retries on the next delivery.
+        self._delivery_grant_pending: bool = self._save_pending_money > 0
 
         # Grace period: skip "save was replaced" detection for N seconds after
         # writing a quicksave.  ATS autosaves the pre-quickload state to
@@ -1151,6 +1162,13 @@ class ATSContext(CommonContext):
                 continue  # silently skip already-processed events
             logger.debug(f"[ATS] New event: {event_id}")
             self._processed_event_ids.add(event_id)
+
+            # Any completed delivery (randomizer cargo or not) arms the grant
+            # write so we write to the save during the delivery summary pause
+            # rather than on an arbitrary poll tick.
+            if event.get("type") == "cargo_delivered":
+                self._delivery_grant_pending = True
+                logger.info("[ATS] Delivery detected — grant write armed.")
 
             try:
                 location_id = self._resolve_event_to_location_id(event)
@@ -1393,7 +1411,7 @@ class ATSContext(CommonContext):
             self._save_base_xp         = 0
             self._save_pending_money   = 0
             self._save_confirmation_xp = 0
-            _persist_save_grants(0, 0, 0)
+            _persist_save_grants(0, 0, 0, 0, 0, self._reload_counter)
 
         # Desync detection: grants were written to a quicksave that the player
         # never loaded (corrupted slot, F9 not bound, etc.).  If save XP stays
@@ -1415,7 +1433,7 @@ class ATSContext(CommonContext):
                     self._save_base_xp         = 0
                     self._save_pending_money   = 0
                     self._save_confirmation_xp = 0
-                    _persist_save_grants(0, 0, 0)
+                    _persist_save_grants(0, 0, 0, 0, 0, self._reload_counter)
             else:
                 self._grants_below_expected_count = 0
 
@@ -1454,7 +1472,7 @@ class ATSContext(CommonContext):
                 self._save_confirmation_xp  = 0
                 _persist_save_grants(
                     self._save_applied_xp, self._save_applied_money,
-                    self._save_base_xp, 0, 0,
+                    self._save_base_xp, 0, 0, self._reload_counter,
                 )
                 logger.info(
                     f"[ATS] Money grant confirmed (save XP {_save_xp:,} >= "
@@ -1468,10 +1486,10 @@ class ATSContext(CommonContext):
         # _save_pending_money = money written to slot 1 but not yet confirmed.
         # Only write money when no write is already pending (avoid F9 spam);
         # new XP always forces a write, which carries pending money along.
-        xp_delta    = self._total_xp_granted    - self._save_applied_xp
+        xp_delta    = max(0, self._total_xp_granted - self._save_applied_xp)
         money_delta = self._total_money_granted - self._save_applied_money
 
-        if (xp_delta > 0 or (money_delta > 0 and self._save_pending_money == 0)) and text is not None:
+        if self._delivery_grant_pending and (xp_delta > 0 or (money_delta > 0 and self._save_pending_money == 0)) and text is not None:
             new_xp    = self.current_xp    + xp_delta
             new_money = self.current_money + money_delta
 
@@ -1593,15 +1611,20 @@ class ATSContext(CommonContext):
                 if money_delta > 0:
                     self._save_pending_money   = money_delta
                     self._save_confirmation_xp = new_xp
+                # Increment BEFORE persisting so grants.json always holds the
+                # same counter value the DLL last saw in items.json — preventing
+                # the DLL from silently ignoring increments after a restart.
+                self._reload_counter += 1
+                self._delivery_grant_pending = False
                 _persist_save_grants(
                     self._save_applied_xp, self._save_applied_money,
                     self._save_base_xp,
                     self._save_pending_money, self._save_confirmation_xp,
+                    self._reload_counter,
                 )
 
                 self.current_xp    = new_xp
                 self.current_money = new_money
-                self._reload_counter += 1
 
                 _money_status = (
                     f"+${money_delta:,} pending confirmation"
