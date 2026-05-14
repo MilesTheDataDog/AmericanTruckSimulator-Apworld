@@ -1,32 +1,47 @@
 #!/usr/bin/env python3
-"""Quick diagnostic — prints raw header and first few entries of def.scs"""
-import struct, sys
+"""Diagnostic: try multiple header layouts to find the correct one."""
+import struct, sys, os
 from pathlib import Path
 
-path = Path(sys.argv[1]) / "def.scs" if len(sys.argv) > 1 else Path(r"D:\SteamLibrary\steamapps\common\American Truck Simulator\def.scs")
+path = Path(sys.argv[1]) / "def.scs" if len(sys.argv) > 1 else \
+       Path(r"D:\SteamLibrary\steamapps\common\American Truck Simulator\def.scs")
+
+file_size = os.path.getsize(path)
+print(f"File: {path}")
+print(f"Size: {file_size:,} bytes ({file_size / 1024 / 1024:.1f} MB)\n")
 
 with open(path, "rb") as f:
-    header = f.read(32)
-    print("Raw header (32 bytes):")
-    print(" ".join(f"{b:02x}" for b in header))
-    print()
+    raw = f.read(128)
 
-    # Try 16-byte header
-    magic   = header[0:4]
-    ver     = struct.unpack_from("<H", header, 4)[0]
-    salt    = struct.unpack_from("<H", header, 6)[0]
-    htype   = struct.unpack_from("<I", header, 8)[0]
-    ecount  = struct.unpack_from("<I", header, 12)[0]
-    print(f"magic={magic}, version={ver}, salt={salt}, hash_type={htype:#010x}, entry_count={ecount}")
-    print()
+print("First 128 bytes:")
+for i in range(0, 128, 16):
+    hex_part = " ".join(f"{b:02x}" for b in raw[i:i+16])
+    print(f"  {i:4d}: {hex_part}")
+print()
 
-    # Print first 3 entries assuming they start at byte 16
-    print("First 3 entries (assuming header=16 bytes, entry=32 bytes):")
-    for i in range(3):
-        pos = 16 + i * 32
-        raw = header[pos:pos+32] if pos+32 <= 32 else None
-        if raw is None:
-            f.seek(pos)
-            raw = f.read(32)
-        h, off, fl, crc, sz, csz = struct.unpack("<QQIIII", raw)
-        print(f"  [{i}] hash={h:#018x} offset={off:#018x} flags={fl:#010x} size={sz} comp={csz}")
+# Try header sizes 16, 20, 24 and see which gives sane entry offsets
+for hdr_size in (16, 20, 24):
+    print(f"--- Trying {hdr_size}-byte header ---")
+    if hdr_size == 16:
+        magic, ver, salt, htype, ecount = struct.unpack_from("<4sHHII", raw, 0)
+        extra = None
+    elif hdr_size == 20:
+        magic, ver, salt, htype, ecount, extra = struct.unpack_from("<4sHHIII", raw, 0)
+    else:
+        magic, ver, salt, htype, ecount, extra1, extra2 = struct.unpack_from("<4sHHIIII", raw, 0)
+        extra = extra1
+
+    print(f"  magic={magic} ver={ver} salt={salt} htype={htype:#010x} ecount={ecount} extra={extra}")
+
+    ok_count = 0
+    for i in range(min(5, ecount)):
+        pos = hdr_size + i * 32
+        if pos + 32 > len(raw):
+            break
+        h, off, fl, crc, sz, csz = struct.unpack_from("<QQIIII", raw, pos)
+        sane = (off < file_size) and (csz <= file_size) and (sz <= 100_000_000)
+        marker = "✓" if sane else "✗"
+        print(f"  [{i}] {marker} hash={h:#018x} offset={off:#012x}({off:,}) flags={fl} size={sz} comp={csz}")
+        if sane:
+            ok_count += 1
+    print(f"  → {ok_count} sane-looking entries\n")
