@@ -110,19 +110,19 @@ XP_GRANT_ITEMS: Dict[str, ATSItemData] = {
         code=ATS_BASE_ID + 3100,
         classification=ItemClassification.filler,
         category="xp_grant",
-        game_id="xp_2000",
+        game_id="xp_100",
     ),
     "Medium XP Grant": ATSItemData(
         code=ATS_BASE_ID + 3101,
         classification=ItemClassification.filler,
         category="xp_grant",
-        game_id="xp_10000",
+        game_id="xp_500",
     ),
     "Large XP Grant": ATSItemData(
         code=ATS_BASE_ID + 3102,
         classification=ItemClassification.filler,
         category="xp_grant",
-        game_id="xp_50000",
+        game_id="xp_2500",
     ),
 }
 
