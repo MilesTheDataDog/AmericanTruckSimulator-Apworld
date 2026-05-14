@@ -1541,7 +1541,6 @@ class ATSContext(CommonContext):
 
                 self._save_applied_xp    += xp_delta
                 self._save_applied_money += money_delta
-                self._reload_counter     += 1
                 _persist_save_grants(
                     self._save_applied_xp, self._save_applied_money,
                     self._save_base_xp, 0, 0, self._reload_counter,
@@ -1555,8 +1554,9 @@ class ATSContext(CommonContext):
                     f"+{xp_delta:,} XP, +${money_delta:,} money "
                     f"(totals: {new_xp:,} XP, ${new_money:,})"
                 )
-                self._write_items_file()  # DLL sees new reload_counter and fires F9 automatically
-                logger.info("[ATS] Reload triggered — game will load the quicksave automatically.")
+                logger.info(
+                    "[ATS] *** Press F9 (or Menu → Load Quicksave) to receive your grants! ***"
+                )
             else:
                 logger.error(
                     "[ATS] Grant write FAILED for quicksave. "
