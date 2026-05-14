@@ -1489,6 +1489,25 @@ class ATSContext(CommonContext):
         xp_delta    = max(0, self._total_xp_granted - self._save_applied_xp)
         money_delta = self._total_money_granted - self._save_applied_money
 
+        # Stale-grants guard: applied_xp can exceed total_xp_granted when
+        # grants.json carries values from a previous run that used larger XP
+        # amounts (e.g. before the 5% reduction).  Reset everything so grants
+        # are re-applied from the current AP-sent totals.
+        if self._save_applied_xp > self._total_xp_granted > 0:
+            logger.warning(
+                f"[ATS] Stale grants detected: applied_xp ({self._save_applied_xp:,}) "
+                f"> total_xp_granted ({self._total_xp_granted:,}). "
+                "Resetting grant state so grants are re-applied."
+            )
+            self._save_applied_xp      = 0
+            self._save_applied_money   = 0
+            self._save_base_xp         = 0
+            self._save_pending_money   = 0
+            self._save_confirmation_xp = 0
+            _persist_save_grants(0, 0, 0, 0, 0, self._reload_counter)
+            xp_delta    = self._total_xp_granted
+            money_delta = self._total_money_granted
+
         if self._delivery_grant_pending and (xp_delta > 0 or (money_delta > 0 and self._save_pending_money == 0)) and text is not None:
             new_xp    = self.current_xp    + xp_delta
             new_money = self.current_money + money_delta
