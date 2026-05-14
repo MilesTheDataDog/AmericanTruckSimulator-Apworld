@@ -263,6 +263,8 @@ def _scan_profiles_dir(profiles_dir: Path, candidates: "list[tuple[float, Path]]
         for slot in save_dir.iterdir():
             if not slot.is_dir():
                 continue
+            if slot.name == "quicksave":
+                continue  # skip — client writes here; reading it back causes stale-state loops
             game_sii = slot / "game.sii"
             if not game_sii.exists():
                 continue
@@ -318,6 +320,8 @@ def _find_ats_save_file() -> Optional[Path]:
             for slot in save_dir.iterdir():
                 if not slot.is_dir():
                     continue
+                if slot.name == "quicksave":
+                    continue  # client writes here; reading it back causes stale-state loops
                 game_sii = slot / "game.sii"
                 if not game_sii.exists():
                     continue
@@ -1537,6 +1541,7 @@ class ATSContext(CommonContext):
 
                 self._save_applied_xp    += xp_delta
                 self._save_applied_money += money_delta
+                self._reload_counter     += 1
                 _persist_save_grants(
                     self._save_applied_xp, self._save_applied_money,
                     self._save_base_xp, 0, 0, self._reload_counter,
@@ -1550,9 +1555,8 @@ class ATSContext(CommonContext):
                     f"+{xp_delta:,} XP, +${money_delta:,} money "
                     f"(totals: {new_xp:,} XP, ${new_money:,})"
                 )
-                logger.info(
-                    "[ATS] *** Press F9 (or Menu → Load Quicksave) to receive your grants! ***"
-                )
+                self._write_items_file()  # DLL sees new reload_counter and fires F9 automatically
+                logger.info("[ATS] Reload triggered — game will load the quicksave automatically.")
             else:
                 logger.error(
                     "[ATS] Grant write FAILED for quicksave. "
