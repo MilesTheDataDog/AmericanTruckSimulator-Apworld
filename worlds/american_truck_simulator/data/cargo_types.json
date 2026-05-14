@@ -7,7 +7,7 @@
   ],
   "cargo_types": [
     {
-      "id": "almond_boxes",
+      "id": "almond_box",
       "name": "Almond Boxes",
       "trailer_types": [
         "drop_deck",
@@ -22,7 +22,7 @@
       "needs_verification": false
     },
     {
-      "id": "aluminum_ingots",
+      "id": "alu_ingot",
       "name": "Aluminum Ingots",
       "trailer_types": [
         "drop_deck",
@@ -33,7 +33,7 @@
       "needs_verification": false
     },
     {
-      "id": "aluminum_profiles",
+      "id": "alu_profile",
       "name": "Aluminum Profiles",
       "trailer_types": [
         "drop_deck",
@@ -44,7 +44,7 @@
       "needs_verification": false
     },
     {
-      "id": "anhydrous_ammonia",
+      "id": "ammonia",
       "name": "Anhydrous Ammonia",
       "trailer_types": [
         "gas_tank"
@@ -54,7 +54,7 @@
       "needs_verification": false
     },
     {
-      "id": "backhoe_loader",
+      "id": "digger500",
       "name": "Backhoe Loader",
       "trailer_types": [
         "drop_deck",
@@ -62,7 +62,7 @@
       ],
       "dlc_introduced": "Launch",
       "required_dlc": null,
-      "needs_verification": false
+      "needs_verification": true
     },
     {
       "id": "beverages",
@@ -133,7 +133,7 @@
       "needs_verification": false
     },
     {
-      "id": "cables",
+      "id": "cable",
       "name": "Cables",
       "trailer_types": [
         "drop_deck",
@@ -157,7 +157,7 @@
       "needs_verification": false
     },
     {
-      "id": "car_parts",
+      "id": "carcomp",
       "name": "Car Parts",
       "trailer_types": [
         "container_carrier"
@@ -167,7 +167,7 @@
       "needs_verification": false
     },
     {
-      "id": "cars",
+      "id": "cars_big",
       "name": "Cars",
       "trailer_types": [
         "car_transporter"
@@ -187,7 +187,7 @@
       "needs_verification": false
     },
     {
-      "id": "cars_mixed",
+      "id": "cars_mix",
       "name": "Cars (mixed)",
       "trailer_types": [
         "car_transporter"
@@ -197,7 +197,7 @@
       "needs_verification": false
     },
     {
-      "id": "cars_suvs",
+      "id": "cars_suv",
       "name": "Cars (SUVs)",
       "trailer_types": [
         "van_transporter"
@@ -227,7 +227,7 @@
       "needs_verification": false
     },
     {
-      "id": "chlorine",
+      "id": "chlorine_t",
       "name": "Chlorine",
       "trailer_types": [
         "gas_tank"
@@ -263,7 +263,7 @@
       "needs_verification": false
     },
     {
-      "id": "concrete_tubes_small",
+      "id": "ctubes",
       "name": "Concrete Tubes (small)",
       "trailer_types": [
         "drop_deck",
@@ -274,7 +274,7 @@
       "needs_verification": false
     },
     {
-      "id": "concrete_tubes_large",
+      "id": "ctubes_b",
       "name": "Concrete Tubes (large)",
       "trailer_types": [
         "drop_deck",
@@ -285,7 +285,7 @@
       "needs_verification": false
     },
     {
-      "id": "construction_houses",
+      "id": "const_house",
       "name": "Construction Houses",
       "trailer_types": [
         "container_carrier"
@@ -295,7 +295,7 @@
       "needs_verification": false
     },
     {
-      "id": "crawler_carrier",
+      "id": "crawler_carr",
       "name": "Crawler Carrier",
       "trailer_types": [
         "lowboy"
@@ -328,7 +328,7 @@
       "needs_verification": false
     },
     {
-      "id": "dry_fruits",
+      "id": "dry_fruit",
       "name": "Dry Fruits",
       "trailer_types": [
         "container_carrier",
@@ -356,7 +356,7 @@
       "needs_verification": false
     },
     {
-      "id": "dump_truck",
+      "id": "truck_dump",
       "name": "Dump Truck",
       "trailer_types": [
         "lowboy"
@@ -378,7 +378,7 @@
       "needs_verification": false
     },
     {
-      "id": "electronic_components",
+      "id": "electro_comp",
       "name": "Electronic Components",
       "trailer_types": [
         "container_carrier"
@@ -388,7 +388,7 @@
       "needs_verification": false
     },
     {
-      "id": "empty_bottles",
+      "id": "bottles",
       "name": "Empty Bottles",
       "trailer_types": [
         "dry_van",
@@ -400,7 +400,7 @@
       "needs_verification": false
     },
     {
-      "id": "empty_pallets",
+      "id": "empty_palet",
       "name": "Empty Pallets",
       "trailer_types": [
         "drop_deck",
@@ -425,7 +425,7 @@
       "needs_verification": false
     },
     {
-      "id": "excavated_soil",
+      "id": "soil",
       "name": "Excavated Soil",
       "trailer_types": [
         "dumper"
@@ -460,7 +460,7 @@
       "needs_verification": false
     },
     {
-      "id": "fertilizer_tank",
+      "id": "fert_tank",
       "name": "Fertilizer Tank",
       "trailer_types": [
         "drop_deck"
@@ -517,7 +517,7 @@
       "needs_verification": false
     },
     {
-      "id": "frozen_fruits",
+      "id": "frozen_fruit",
       "name": "Frozen Fruits",
       "trailer_types": [
         "refrigerated"
@@ -527,7 +527,7 @@
       "needs_verification": false
     },
     {
-      "id": "frozen_vegetables",
+      "id": "frozen_veget",
       "name": "Frozen Vegetables",
       "trailer_types": [
         "refrigerated"
@@ -537,7 +537,7 @@
       "needs_verification": false
     },
     {
-      "id": "fruit_juice",
+      "id": "fruit_juic_t",
       "name": "Fruit Juice",
       "trailer_types": [
         "food_tank"
@@ -571,7 +571,7 @@
       "needs_verification": false
     },
     {
-      "id": "gasoline",
+      "id": "petrol",
       "name": "Gasoline",
       "trailer_types": [
         "fuel_tank"
@@ -639,7 +639,7 @@
       "needs_verification": false
     },
     {
-      "id": "heat_exchanger",
+      "id": "heat_exch2",
       "name": "Heat Exchanger",
       "trailer_types": [
         "drop_deck",
@@ -650,7 +650,7 @@
       "needs_verification": false
     },
     {
-      "id": "home_accessories",
+      "id": "home_acc",
       "name": "Home Accessories",
       "trailer_types": [
         "dry_van",
@@ -663,7 +663,7 @@
       "needs_verification": false
     },
     {
-      "id": "household_appliances",
+      "id": "househd_appl",
       "name": "Household Appliances",
       "trailer_types": [
         "dry_van",
@@ -675,7 +675,7 @@
       "needs_verification": false
     },
     {
-      "id": "hydrochloric_acid",
+      "id": "hydrochlor",
       "name": "Hydrochloric Acid",
       "trailer_types": [
         "chemical_tank"
@@ -685,7 +685,7 @@
       "needs_verification": false
     },
     {
-      "id": "ice_cream",
+      "id": "icecream",
       "name": "Ice Cream",
       "trailer_types": [
         "refrigerated"
@@ -695,7 +695,7 @@
       "needs_verification": false
     },
     {
-      "id": "industrial_pallets",
+      "id": "ind_palet",
       "name": "Industrial Pallets",
       "trailer_types": [
         "flatbed"
@@ -705,7 +705,7 @@
       "needs_verification": false
     },
     {
-      "id": "insulation_panels",
+      "id": "ins_panel",
       "name": "Insulation Panels",
       "trailer_types": [
         "drop_deck",
@@ -716,7 +716,7 @@
       "needs_verification": false
     },
     {
-      "id": "iron_pipes",
+      "id": "pipes",
       "name": "Iron Pipes",
       "trailer_types": [
         "flatbed"
@@ -726,7 +726,7 @@
       "needs_verification": false
     },
     {
-      "id": "large_tubes",
+      "id": "largetubes",
       "name": "Large Tubes",
       "trailer_types": [
         "flatbed",
@@ -757,7 +757,7 @@
       "needs_verification": false
     },
     {
-      "id": "lpg",
+      "id": "lpg_t",
       "name": "LPG",
       "trailer_types": [
         "gas_tank"
@@ -777,7 +777,7 @@
       "needs_verification": false
     },
     {
-      "id": "machine_parts",
+      "id": "machine_pts",
       "name": "Machine Parts",
       "trailer_types": [
         "container_carrier"
@@ -797,7 +797,7 @@
       "needs_verification": false
     },
     {
-      "id": "medium_truck_chassis",
+      "id": "truck_medium",
       "name": "Medium Truck Chassis",
       "trailer_types": [
         "drop_deck",
@@ -808,7 +808,7 @@
       "needs_verification": false
     },
     {
-      "id": "mercuric_chloride",
+      "id": "mercuric",
       "name": "Mercuric Chloride",
       "trailer_types": [
         "chemical_tank"
@@ -829,7 +829,7 @@
       "needs_verification": false
     },
     {
-      "id": "mix_tank",
+      "id": "mixtank",
       "name": "Mix Tank",
       "trailer_types": [
         "drop_deck",
@@ -847,7 +847,7 @@
       ],
       "dlc_introduced": "Launch",
       "required_dlc": null,
-      "needs_verification": false
+      "needs_verification": true
     },
     {
       "id": "mortar",
@@ -860,7 +860,7 @@
       "needs_verification": false
     },
     {
-      "id": "nitrocellulose",
+      "id": "nitrocel",
       "name": "Nitrocellulose",
       "trailer_types": [
         "container_carrier",
@@ -886,7 +886,7 @@
       "needs_verification": false
     },
     {
-      "id": "office_supplies",
+      "id": "office_suppl",
       "name": "Office Supplies",
       "trailer_types": [
         "dry_van",
@@ -899,7 +899,7 @@
       "needs_verification": false
     },
     {
-      "id": "packaged_food",
+      "id": "food",
       "name": "Packaged Food",
       "trailer_types": [
         "container_carrier",
@@ -913,7 +913,7 @@
       "needs_verification": false
     },
     {
-      "id": "paint",
+      "id": "colors",
       "name": "Paint",
       "trailer_types": [
         "sliding_tarp"
@@ -937,7 +937,7 @@
       "needs_verification": false
     },
     {
-      "id": "pelleted_animal_food",
+      "id": "pellet_afood",
       "name": "Pelleted Animal Food",
       "trailer_types": [
         "bulk_feed",
@@ -952,7 +952,7 @@
       "needs_verification": false
     },
     {
-      "id": "pesticides",
+      "id": "pesticide",
       "name": "Pesticides",
       "trailer_types": [
         "chemical_tank"
@@ -969,10 +969,10 @@
       ],
       "dlc_introduced": "1.46",
       "required_dlc": null,
-      "needs_verification": false
+      "needs_verification": true
     },
     {
-      "id": "pickups_passenger",
+      "id": "cars_pickup",
       "name": "Pickups (passenger)",
       "trailer_types": [
         "van_transporter"
@@ -1005,7 +1005,7 @@
       "needs_verification": false
     },
     {
-      "id": "power_generator",
+      "id": "generator_c",
       "name": "Power Generator",
       "trailer_types": [
         "container_carrier"
@@ -1015,7 +1015,7 @@
       "needs_verification": false
     },
     {
-      "id": "pressure_tank",
+      "id": "hipresstank",
       "name": "Pressure Tank",
       "trailer_types": [
         "drop_deck",
@@ -1036,7 +1036,7 @@
       "needs_verification": false
     },
     {
-      "id": "raw_milk",
+      "id": "rawmilk",
       "name": "Raw Milk",
       "trailer_types": [
         "food_tank"
@@ -1046,7 +1046,7 @@
       "needs_verification": false
     },
     {
-      "id": "reservoir_tank",
+      "id": "emptytank",
       "name": "Reservoir Tank",
       "trailer_types": [
         "drop_deck",
@@ -1054,7 +1054,7 @@
       ],
       "dlc_introduced": "Launch",
       "required_dlc": null,
-      "needs_verification": false
+      "needs_verification": true
     },
     {
       "id": "rice",
@@ -1081,7 +1081,7 @@
       "needs_verification": false
     },
     {
-      "id": "roof_shingles",
+      "id": "roof_tiles",
       "name": "Roof Shingles",
       "trailer_types": [
         "flatbed"
@@ -1138,7 +1138,7 @@
       "needs_verification": false
     },
     {
-      "id": "scrapped_cars",
+      "id": "scrap_cars",
       "name": "Scrapped Cars",
       "trailer_types": [
         "flatbed"
@@ -1148,7 +1148,7 @@
       "needs_verification": false
     },
     {
-      "id": "service_truck",
+      "id": "truck_servic",
       "name": "Service Truck",
       "trailer_types": [
         "drop_deck",
@@ -1179,7 +1179,7 @@
       "needs_verification": false
     },
     {
-      "id": "speed_motor_boat",
+      "id": "boat2",
       "name": "Speed Motor Boat",
       "trailer_types": [
         "lowboy"
@@ -1213,7 +1213,7 @@
       "needs_verification": false
     },
     {
-      "id": "sulphuric_acid",
+      "id": "sulfuric",
       "name": "Sulphuric Acid",
       "trailer_types": [
         "chemical_tank"
@@ -1235,7 +1235,7 @@
       "needs_verification": false
     },
     {
-      "id": "tires",
+      "id": "tyres",
       "name": "Tires",
       "trailer_types": [
         "dry_van",
@@ -1261,7 +1261,7 @@
       "needs_verification": false
     },
     {
-      "id": "tractor",
+      "id": "tractors",
       "name": "Tractor",
       "trailer_types": [
         "drop_deck",
@@ -1272,7 +1272,7 @@
       "needs_verification": false
     },
     {
-      "id": "transformer",
+      "id": "transform2",
       "name": "Transformer",
       "trailer_types": [
         "drop_deck",
@@ -1296,7 +1296,7 @@
       "needs_verification": false
     },
     {
-      "id": "used_packaging",
+      "id": "used_pack",
       "name": "Used Packaging",
       "trailer_types": [
         "chip_van",
@@ -1310,7 +1310,7 @@
       "needs_verification": false
     },
     {
-      "id": "vegetables",
+      "id": "vegetable",
       "name": "Vegetables",
       "trailer_types": [
         "insulated",
@@ -1321,7 +1321,7 @@
       "needs_verification": false
     },
     {
-      "id": "ventilation_shaft",
+      "id": "ventilation",
       "name": "Ventilation Shaft",
       "trailer_types": [
         "drop_deck",
@@ -1339,7 +1339,7 @@
       ],
       "dlc_introduced": "1.38",
       "required_dlc": null,
-      "needs_verification": false
+      "needs_verification": true
     },
     {
       "id": "wheel_loader",
@@ -1349,7 +1349,7 @@
       ],
       "dlc_introduced": "Launch",
       "required_dlc": null,
-      "needs_verification": false
+      "needs_verification": true
     },
     {
       "id": "yogurt",
@@ -1362,7 +1362,7 @@
       "needs_verification": false
     },
     {
-      "id": "house_prefabs",
+      "id": "house_pref",
       "name": "House Prefabs",
       "trailer_types": [
         "flatbed"
@@ -1382,7 +1382,7 @@
       "needs_verification": false
     },
     {
-      "id": "lumber_beams",
+      "id": "lumber_b",
       "name": "Lumber (beams)",
       "trailer_types": [
         "flatbed",
@@ -1393,7 +1393,7 @@
       "needs_verification": false
     },
     {
-      "id": "lumber_boards",
+      "id": "lumber_p",
       "name": "Lumber (boards)",
       "trailer_types": [
         "drop_deck",
@@ -1404,7 +1404,7 @@
       "needs_verification": false
     },
     {
-      "id": "metal_coil",
+      "id": "mtl_coil",
       "name": "Metal Coil",
       "trailer_types": [
         "drop_deck",
@@ -1415,7 +1415,7 @@
       "needs_verification": false
     },
     {
-      "id": "mooring_buoy",
+      "id": "moor_buoy",
       "name": "Mooring Buoy",
       "trailer_types": [
         "drop_deck",
@@ -1426,7 +1426,7 @@
       "needs_verification": false
     },
     {
-      "id": "sawdust_panels",
+      "id": "sawpanels",
       "name": "Sawdust Panels",
       "trailer_types": [
         "sliding_tarp"
@@ -1436,7 +1436,7 @@
       "needs_verification": false
     },
     {
-      "id": "square_tubing",
+      "id": "sq_tub",
       "name": "Square Tubing",
       "trailer_types": [
         "drop_deck",
@@ -1447,7 +1447,7 @@
       "needs_verification": false
     },
     {
-      "id": "wood_shavings",
+      "id": "wshavings",
       "name": "Wood Shavings",
       "trailer_types": [
         "chip_van",
@@ -1458,7 +1458,7 @@
       "needs_verification": false
     },
     {
-      "id": "aircraft_engine",
+      "id": "aircraft_eng",
       "name": "Aircraft Engine",
       "trailer_types": [
         "drop_deck",
@@ -1486,7 +1486,7 @@
       ],
       "dlc_introduced": "Washington",
       "required_dlc": "washington",
-      "needs_verification": false
+      "needs_verification": true
     },
     {
       "id": "aromatics",
@@ -1509,7 +1509,7 @@
       "needs_verification": false
     },
     {
-      "id": "frac_tank_cargo",
+      "id": "frac_tank",
       "name": "Frac Tank",
       "trailer_types": [
         "frac_tank"
@@ -1533,7 +1533,7 @@
       "needs_verification": false
     },
     {
-      "id": "live_cattle",
+      "id": "cattle",
       "name": "Live Cattle",
       "trailer_types": [
         "livestock"
@@ -1568,7 +1568,7 @@
       "needs_verification": false
     },
     {
-      "id": "tamping_machine",
+      "id": "tamp_machine",
       "name": "Tamping Machine",
       "trailer_types": [
         "lowboy_double",
@@ -1579,7 +1579,7 @@
       "needs_verification": false
     },
     {
-      "id": "train_axles",
+      "id": "train_part",
       "name": "Train Axles",
       "trailer_types": [
         "flatbed"
@@ -1589,7 +1589,7 @@
       "needs_verification": false
     },
     {
-      "id": "wind_turbine_nacelle",
+      "id": "windml_eng",
       "name": "Wind Turbine Nacelle",
       "trailer_types": [
         "lowboy"
@@ -1599,7 +1599,7 @@
       "needs_verification": false
     },
     {
-      "id": "wind_turbine_tower",
+      "id": "windml_tube",
       "name": "Wind Turbine Tower",
       "trailer_types": [
         "lowboy"
@@ -1609,7 +1609,7 @@
       "needs_verification": false
     },
     {
-      "id": "beet_harvester",
+      "id": "beet_harvest",
       "name": "Beet Harvester",
       "trailer_types": [
         "lowboy_double",
@@ -1630,7 +1630,7 @@
       "needs_verification": false
     },
     {
-      "id": "circuit_breakers",
+      "id": "circuit_brk",
       "name": "Circuit Breakers",
       "trailer_types": [
         "drop_deck"
@@ -1651,7 +1651,7 @@
       "needs_verification": false
     },
     {
-      "id": "garbage_truck",
+      "id": "garbage_trck",
       "name": "Garbage Truck",
       "trailer_types": [
         "lowboy"
@@ -1672,7 +1672,7 @@
       "needs_verification": false
     },
     {
-      "id": "ibc_containers",
+      "id": "ibc_cont",
       "name": "IBC Containers",
       "trailer_types": [
         "dry_van",
@@ -1706,7 +1706,7 @@
       "needs_verification": false
     },
     {
-      "id": "sugar_beet",
+      "id": "sugar_beet_b",
       "name": "Sugar Beet",
       "trailer_types": [
         "hopper"
@@ -1716,7 +1716,7 @@
       "needs_verification": false
     },
     {
-      "id": "talc_powder",
+      "id": "talc_pwdr",
       "name": "Talc Powder",
       "trailer_types": [
         "dry_van",
@@ -1740,7 +1740,7 @@
       "needs_verification": false
     },
     {
-      "id": "utility_poles",
+      "id": "util_pole",
       "name": "Utility Poles",
       "trailer_types": [
         "log"
@@ -1766,7 +1766,7 @@
       "needs_verification": false
     },
     {
-      "id": "concrete_barrier",
+      "id": "conc_barr",
       "name": "Concrete Barrier",
       "trailer_types": [
         "flatbed"
@@ -1776,7 +1776,7 @@
       "needs_verification": false
     },
     {
-      "id": "cotton_lint",
+      "id": "cott_lint",
       "name": "Cotton Lint",
       "trailer_types": [
         "flatbed"
@@ -1786,7 +1786,7 @@
       "needs_verification": false
     },
     {
-      "id": "cotton_seed",
+      "id": "cott_seed",
       "name": "Cotton Seed",
       "trailer_types": [
         "bulk_feed",
@@ -1799,7 +1799,7 @@
       "needs_verification": false
     },
     {
-      "id": "generator_set",
+      "id": "gen_set",
       "name": "Generator Set",
       "trailer_types": [
         "flatbed"
@@ -1819,7 +1819,7 @@
       "needs_verification": false
     },
     {
-      "id": "glass_racks",
+      "id": "glass_rack",
       "name": "Glass Racks",
       "trailer_types": [
         "drop_deck"
@@ -1849,7 +1849,7 @@
       "needs_verification": false
     },
     {
-      "id": "space_container",
+      "id": "space_cont",
       "name": "Space Container",
       "trailer_types": [
         "lowboy"
@@ -1859,7 +1859,7 @@
       "needs_verification": false
     },
     {
-      "id": "air_conditioning_units",
+      "id": "aircon",
       "name": "Air Conditioning Units",
       "trailer_types": [
         "drop_deck",
@@ -1870,7 +1870,7 @@
       "needs_verification": false
     },
     {
-      "id": "big_tires",
+      "id": "big_tyres",
       "name": "Big Tires",
       "trailer_types": [
         "drop_deck"
@@ -1880,7 +1880,7 @@
       "needs_verification": false
     },
     {
-      "id": "boom_lift_articulated",
+      "id": "boom_lift",
       "name": "Boom Lift (articulated)",
       "trailer_types": [
         "drop_deck",
@@ -1891,7 +1891,7 @@
       "needs_verification": false
     },
     {
-      "id": "boom_lift_telescopic",
+      "id": "boom_lift2",
       "name": "Boom Lift (telescopic)",
       "trailer_types": [
         "drop_deck"
@@ -1931,7 +1931,7 @@
       "needs_verification": false
     },
     {
-      "id": "aircraft_wing",
+      "id": "jet_wing",
       "name": "Aircraft Wing",
       "trailer_types": [
         "lowboy"
@@ -1941,7 +1941,7 @@
       "needs_verification": false
     },
     {
-      "id": "jet_engine_inlet_cowl",
+      "id": "air_eng2",
       "name": "Jet Engine Inlet Cowl",
       "trailer_types": [
         "drop_deck",
@@ -1949,10 +1949,10 @@
       ],
       "dlc_introduced": "Kansas",
       "required_dlc": "kansas",
-      "needs_verification": false
+      "needs_verification": true
     },
     {
-      "id": "corn",
+      "id": "corn_b",
       "name": "Corn",
       "trailer_types": [
         "bulk_feed",
@@ -1964,7 +1964,7 @@
       "needs_verification": false
     },
     {
-      "id": "railcar_mover",
+      "id": "railcar",
       "name": "Railcar Mover",
       "trailer_types": [
         "lowboy"
@@ -1974,7 +1974,7 @@
       "needs_verification": false
     },
     {
-      "id": "rv_motorhomes",
+      "id": "cars_rv",
       "name": "Recreational Vehicle (motorhomes)",
       "trailer_types": [
         "drop_deck",
@@ -1985,7 +1985,7 @@
       "needs_verification": false
     },
     {
-      "id": "rv_campers",
+      "id": "cars_rv2",
       "name": "Recreational Vehicle (campers)",
       "trailer_types": [
         "van_transporter"
@@ -1995,7 +1995,7 @@
       "needs_verification": false
     },
     {
-      "id": "soybean",
+      "id": "soybean_b",
       "name": "Soybean",
       "trailer_types": [
         "bulk_feed",
@@ -2007,7 +2007,7 @@
       "needs_verification": false
     },
     {
-      "id": "telescopic_handler",
+      "id": "telehandler",
       "name": "Telescopic Handler",
       "trailer_types": [
         "drop_deck",
@@ -2018,7 +2018,7 @@
       "needs_verification": false
     },
     {
-      "id": "utility_terrain_vehicles",
+      "id": "cars_utv",
       "name": "Utility Terrain Vehicles",
       "trailer_types": [
         "car_transporter"
@@ -2028,7 +2028,7 @@
       "needs_verification": false
     },
     {
-      "id": "clamshell_bucket",
+      "id": "cshell_buck",
       "name": "Clamshell Bucket",
       "trailer_types": [
         "drop_deck",
@@ -2039,7 +2039,7 @@
       "needs_verification": false
     },
     {
-      "id": "mobile_air_compressor",
+      "id": "mobile_compr",
       "name": "Mobile Air Compressor",
       "trailer_types": [
         "drop_deck",
@@ -2050,7 +2050,7 @@
       "needs_verification": false
     },
     {
-      "id": "packed_lumber",
+      "id": "lumber",
       "name": "Packed Lumber",
       "trailer_types": [
         "drop_deck",
@@ -2061,7 +2061,7 @@
       "needs_verification": false
     },
     {
-      "id": "rough_terrain_forklift",
+      "id": "ter_forklift",
       "name": "Rough Terrain Forklift",
       "trailer_types": [
         "drop_deck",
@@ -2073,7 +2073,7 @@
       "needs_verification": false
     },
     {
-      "id": "wood_chipper",
+      "id": "woodchipper",
       "name": "Wood Chipper",
       "trailer_types": [
         "drop_deck"
@@ -2083,7 +2083,7 @@
       "needs_verification": false
     },
     {
-      "id": "cattle_equipment",
+      "id": "cattle_equip",
       "name": "Cattle Equipment",
       "trailer_types": [
         "drop_deck",
@@ -2094,7 +2094,7 @@
       "needs_verification": false
     },
     {
-      "id": "moving_containers",
+      "id": "moving_cont",
       "name": "Moving Containers",
       "trailer_types": [
         "drop_deck",
@@ -2105,7 +2105,7 @@
       "needs_verification": false
     },
     {
-      "id": "pickups_crane",
+      "id": "cars_pick_cr",
       "name": "Pickups (crane)",
       "trailer_types": [
         "drop_deck",
@@ -2127,7 +2127,7 @@
       "needs_verification": false
     },
     {
-      "id": "batteries",
+      "id": "battery",
       "name": "Batteries",
       "trailer_types": [
         "container_carrier",
@@ -2140,7 +2140,7 @@
       "needs_verification": false
     },
     {
-      "id": "compact_tractor",
+      "id": "com_tractor",
       "name": "Compact Tractor",
       "trailer_types": [
         "drop_deck",
@@ -2151,7 +2151,7 @@
       "needs_verification": false
     },
     {
-      "id": "cooling_tower",
+      "id": "cool_tower",
       "name": "Cooling Tower",
       "trailer_types": [
         "lowboy"
@@ -2181,7 +2181,7 @@
       "needs_verification": false
     },
     {
-      "id": "municipal_truck",
+      "id": "truck_muni",
       "name": "Municipal Truck",
       "trailer_types": [
         "drop_deck",
@@ -2192,7 +2192,7 @@
       "needs_verification": false
     },
     {
-      "id": "wire_rod_coil",
+      "id": "wire_rod",
       "name": "Wire Rod Coil",
       "trailer_types": [
         "drop_deck",
@@ -2203,7 +2203,7 @@
       "needs_verification": false
     },
     {
-      "id": "work_truck_chassis",
+      "id": "truck_work",
       "name": "Work Truck Chassis",
       "trailer_types": [
         "drop_deck",
