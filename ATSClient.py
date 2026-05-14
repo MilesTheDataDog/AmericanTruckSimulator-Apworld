@@ -923,47 +923,24 @@ class ATSContext(CommonContext):
         # Save-grant tracking: how much XP / money has been baked into the save
         # file already (persisted across sessions in grants.json).
         # base_xp = the natural (pre-first-grant) XP the player had; used to
-        # detect genuine save replacements vs stale pre-quickload autosaves.
+        # detect genuine save replacements.
         self._save_applied_xp: int
         self._save_applied_money: int
         self._save_base_xp: int
-        self._save_pending_money: int
-        self._save_confirmation_xp: int
         self._reload_counter: int
         (self._save_applied_xp,
          self._save_applied_money,
          self._save_base_xp,
-         self._save_pending_money,
-         self._save_confirmation_xp,
+         _,
+         _,
          self._reload_counter) = _load_save_grants()
-        # Counts consecutive save polls where XP is well below the expected
-        # post-grant level — used to detect that the granted save was never
-        # loaded (e.g. quicksave slot corrupted, F9 not bound).
-        self._grants_below_expected_count: int = 0
-
-        if self._save_applied_xp or self._save_applied_money or self._save_pending_money:
+        if self._save_applied_xp or self._save_applied_money:
             logger.info(
                 f"[ATS] Loaded grant state from grants.json: "
                 f"applied_xp={self._save_applied_xp:,}, "
                 f"applied_money=${self._save_applied_money:,}, "
                 f"base_xp={self._save_base_xp:,}"
-                + (f", pending_money=${self._save_pending_money:,}" if self._save_pending_money else "")
-                + f", reload_counter={self._reload_counter}"
             )
-
-        # Incremented each time we write a patched save; DLL watches this value
-        # and fires F9 (quick-load) when it changes.  Persisted in grants.json
-        # so the DLL's synced baseline carries over across client restarts.
-
-        # If pending money from a previous session never got confirmed, arm the
-        # delivery trigger immediately so the grant retries on the next delivery.
-        self._delivery_grant_pending: bool = self._save_pending_money > 0
-
-        # After writing grants to slot 1, pin polling to that path until money
-        # is confirmed.  Without this, the next poll picks autosave (which ATS
-        # just wrote with old XP after F9 fired) and either false-confirms or
-        # triggers a "save replaced" reset → write again → F9 spam loop.
-        self._save_grant_grace_path: Optional[Path] = None
 
     # ── Archipelago callbacks ──────────────────────────────────────────────────
 
@@ -1162,13 +1139,6 @@ class ATSContext(CommonContext):
             logger.debug(f"[ATS] New event: {event_id}")
             self._processed_event_ids.add(event_id)
 
-            # Any completed delivery (randomizer cargo or not) arms the grant
-            # write so we write to the save during the delivery summary pause
-            # rather than on an arbitrary poll tick.
-            if event.get("type") == "cargo_delivered":
-                self._delivery_grant_pending = True
-                logger.info("[ATS] Delivery detected — grant write armed.")
-
             try:
                 location_id = self._resolve_event_to_location_id(event)
             except Exception:
@@ -1264,10 +1234,7 @@ class ATSContext(CommonContext):
         if not self.auth:
             return  # not connected yet
 
-        if self._save_grant_grace_path and self._save_grant_grace_path.exists():
-            save_path: Optional[Path] = self._save_grant_grace_path
-        else:
-            save_path = _find_ats_save_file()
+        save_path = _find_ats_save_file()
         if not save_path:
             if not self._save_not_found_warned:
                 self._save_not_found_warned = True
@@ -1408,36 +1375,10 @@ class ATSContext(CommonContext):
                 f"({self._save_base_xp:,}) — save was likely replaced. "
                 "Resetting grant tracking so grants are re-applied."
             )
-            self._save_applied_xp      = 0
-            self._save_applied_money   = 0
-            self._save_base_xp         = 0
-            self._save_pending_money   = 0
-            self._save_confirmation_xp = 0
+            self._save_applied_xp   = 0
+            self._save_applied_money = 0
+            self._save_base_xp      = 0
             _persist_save_grants(0, 0, 0, 0, 0, self._reload_counter)
-
-        # Desync detection: grants were written to a quicksave that the player
-        # never loaded (corrupted slot, F9 not bound, etc.).  If save XP stays
-        # well below base_xp + applied_xp for 5 consecutive polls (~10 s) the
-        # player is running from an un-granted save; reset so grants re-apply.
-        if not _reset_needed and self._save_applied_xp > 0 and self._save_base_xp > 0:
-            _post_grant_xp = self._save_base_xp + self._save_applied_xp
-            if _save_xp < self._save_base_xp + self._save_applied_xp // 2:
-                self._grants_below_expected_count += 1
-                if self._grants_below_expected_count >= 5:
-                    logger.warning(
-                        f"[ATS] Grant desync: save XP ({_save_xp:,}) has been well "
-                        f"below expected post-grant XP ({_post_grant_xp:,}) for 5 "
-                        "consecutive polls — resetting grants to re-apply."
-                    )
-                    self._grants_below_expected_count = 0
-                    self._save_applied_xp      = 0
-                    self._save_applied_money   = 0
-                    self._save_base_xp         = 0
-                    self._save_pending_money   = 0
-                    self._save_confirmation_xp = 0
-                    _persist_save_grants(0, 0, 0, 0, 0, self._reload_counter)
-            else:
-                self._grants_below_expected_count = 0
 
         # One-time fresh-save check. Only warn when the server has no checked
         # locations yet — if it does, the player is resuming a legitimate run.
@@ -1461,64 +1402,30 @@ class ATSContext(CommonContext):
         self.current_money  = save["money"]
         self.current_xp     = max(self.current_xp, save["experience_points"])
 
-        # ── Confirm pending money once the player loads the granted save ────────
-        # Money is written to the quicksave slot together with XP.  We only
-        # mark it as "applied" after the save's XP proves slot 1 was loaded,
-        # because recording it as applied before the player loads would cause
-        # it to be silently skipped if the slot was corrupted or never loaded.
-        if self._save_pending_money > 0 and self._save_confirmation_xp > 0:
-            if _save_xp >= self._save_confirmation_xp:
-                _confirmed_threshold       = self._save_confirmation_xp
-                self._save_applied_money   += self._save_pending_money
-                self._save_pending_money    = 0
-                self._save_confirmation_xp  = 0
-                _persist_save_grants(
-                    self._save_applied_xp, self._save_applied_money,
-                    self._save_base_xp, 0, 0, self._reload_counter,
-                )
-                logger.info(
-                    f"[ATS] Money grant confirmed (save XP {_save_xp:,} >= "
-                    f"threshold {_confirmed_threshold:,}): "
-                    f"applied_money now ${self._save_applied_money:,}"
-                )
-                # Money confirmed — safe to stop pinning slot 1; resume normal
-                # save discovery so future polls track wherever the player is.
-                self._save_grant_grace_path = None
-
-        # If no money is pending (XP-only grants, or money already confirmed)
-        # there is nothing left to confirm, so unpin the save path now.
-        if self._save_pending_money == 0 and self._save_confirmation_xp == 0:
-            self._save_grant_grace_path = None
-
         # ── Apply pending XP / money grants to the save file ──────────────────
         # total_*_granted = cumulative amount AP has sent this session.
-        # _save_applied_*  = confirmed amount the player has received.
-        # _save_pending_money = money written to slot 1 but not yet confirmed.
-        # Only write money when no write is already pending (avoid F9 spam);
-        # new XP always forces a write, which carries pending money along.
+        # _save_applied_* = what has been written to quicksave this run.
+        # Player receives the grants by pressing F9 to load the quicksave.
         xp_delta    = max(0, self._total_xp_granted - self._save_applied_xp)
         money_delta = self._total_money_granted - self._save_applied_money
 
         # Stale-grants guard: applied_xp can exceed total_xp_granted when
         # grants.json carries values from a previous run that used larger XP
-        # amounts (e.g. before the 5% reduction).  Reset everything so grants
-        # are re-applied from the current AP-sent totals.
+        # amounts (e.g. before the 5% reduction).  Reset so grants re-apply.
         if self._save_applied_xp > self._total_xp_granted > 0:
             logger.warning(
                 f"[ATS] Stale grants detected: applied_xp ({self._save_applied_xp:,}) "
                 f"> total_xp_granted ({self._total_xp_granted:,}). "
                 "Resetting grant state so grants are re-applied."
             )
-            self._save_applied_xp      = 0
-            self._save_applied_money   = 0
-            self._save_base_xp         = 0
-            self._save_pending_money   = 0
-            self._save_confirmation_xp = 0
+            self._save_applied_xp   = 0
+            self._save_applied_money = 0
+            self._save_base_xp      = 0
             _persist_save_grants(0, 0, 0, 0, 0, self._reload_counter)
             xp_delta    = self._total_xp_granted
             money_delta = self._total_money_granted
 
-        if self._delivery_grant_pending and (xp_delta > 0 or (money_delta > 0 and self._save_pending_money == 0)) and text is not None:
+        if (xp_delta > 0 or money_delta > 0) and text is not None:
             new_xp    = self.current_xp    + xp_delta
             new_money = self.current_money + money_delta
 
@@ -1624,56 +1531,27 @@ class ATSContext(CommonContext):
                 logger.warning(f"[ATS] Could not write quicksave: {e}")
 
             if wrote_quicksave:
-                # Record the player's natural (pre-grant) XP the first time we
-                # write grants.  This anchors the "save replaced" detector so it
-                # only fires when XP genuinely drops below what the player had
-                # before any grants — not when ATS autosaves the pre-quickload
-                # state (which has the same natural XP as base_xp).
                 if self._save_base_xp == 0 and xp_delta > 0:
-                    self._save_base_xp = self.current_xp  # XP before this grant
+                    self._save_base_xp = self.current_xp
 
-                # Only increment reload_counter when quicksave succeeded —
-                # F9 loads the quicksave slot, so firing it without a valid
-                # quicksave would reload the un-patched save.
-                self._save_applied_xp += xp_delta
-                # Money is confirmed only after the player loads the save (XP
-                # confirmation).  Store as pending until then so a corrupt or
-                # unloaded slot doesn't cause the grant to be silently skipped.
-                if money_delta > 0:
-                    self._save_pending_money   = money_delta
-                    self._save_confirmation_xp = new_xp
-                # Increment BEFORE persisting so grants.json always holds the
-                # same counter value the DLL last saw in items.json — preventing
-                # the DLL from silently ignoring increments after a restart.
-                self._reload_counter += 1
-                self._delivery_grant_pending = False
+                self._save_applied_xp    += xp_delta
+                self._save_applied_money += money_delta
                 _persist_save_grants(
                     self._save_applied_xp, self._save_applied_money,
-                    self._save_base_xp,
-                    self._save_pending_money, self._save_confirmation_xp,
-                    self._reload_counter,
+                    self._save_base_xp, 0, 0, self._reload_counter,
                 )
 
                 self.current_xp    = new_xp
                 self.current_money = new_money
 
-                _money_status = (
-                    f"+${money_delta:,} pending confirmation"
-                    if money_delta > 0 else "$0"
-                )
                 logger.info(
                     f"[ATS] Grants written to quicksave: "
-                    f"+{xp_delta:,} XP (total {new_xp:,}), "
-                    f"{_money_status} — "
-                    f"reload_counter={self._reload_counter}"
+                    f"+{xp_delta:,} XP, +${money_delta:,} money "
+                    f"(totals: {new_xp:,} XP, ${new_money:,})"
                 )
-                self._write_items_file()   # sends updated reload_counter to DLL
-
-                # Pin polling to slot 1 until money is confirmed.  Writing to
-                # any other slot (especially autosave) would make that file the
-                # newest, causing the next poll to read back old XP and either
-                # false-confirm money or trigger a "save replaced" reset loop.
-                self._save_grant_grace_path = quicksave_path
+                logger.info(
+                    "[ATS] *** Press F9 (or Menu → Load Quicksave) to receive your grants! ***"
+                )
             else:
                 logger.error(
                     "[ATS] Grant write FAILED for quicksave. "
