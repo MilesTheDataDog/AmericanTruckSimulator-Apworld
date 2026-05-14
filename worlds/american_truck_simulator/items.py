@@ -93,13 +93,13 @@ MONEY_GRANT_ITEMS: Dict[str, ATSItemData] = {
         code=ATS_BASE_ID + 3001,
         classification=ItemClassification.filler,
         category="money_grant",
-        game_id="money_50000",
+        game_id="money_25000",
     ),
     "Large Money Grant": ATSItemData(
         code=ATS_BASE_ID + 3002,
         classification=ItemClassification.filler,
         category="money_grant",
-        game_id="money_150000",
+        game_id="money_50000",
     ),
 }
 

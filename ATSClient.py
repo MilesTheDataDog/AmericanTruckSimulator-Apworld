@@ -915,6 +915,7 @@ class ATSContext(CommonContext):
         self._save_warned_unreadable: bool = False
         self._fresh_save_checked: bool = False
         self._save_path_logged: bool = False
+        self._save_first_city_log: bool = False  # True after first city-count log
         self.current_xp: int = 0
         self._save_is_plain: bool = False  # True when save uses SiiN (g_save_format 2)
         self._save_scsc_meta: "Optional[dict]" = None  # set when save is an ScsC container
@@ -1576,6 +1577,12 @@ class ATSContext(CommonContext):
                     new_checks.append(loc_data.code)
 
         # City first arrival checks + state first visit checks
+        if not self._save_first_city_log:
+            self._save_first_city_log = True
+            logger.info(
+                f"[ATS] Save poll (first read): {len(save['visited_cities'])} total cities in save: "
+                f"{sorted(save['visited_cities'])}"
+            )
         new_cities = save["visited_cities"] - self._save_known_cities
         if new_cities:
             logger.info(f"[ATS] Save poll: {len(new_cities)} new city/cities detected: {sorted(new_cities)}")
@@ -1601,7 +1608,7 @@ class ATSContext(CommonContext):
                         logger.debug(f"[ATS] City {city_id} already checked — skipping")
                     break
             if not matched:
-                logger.debug(f"[ATS] City '{city_id}' from save has no matching location (not in enabled DLC or base states)")
+                logger.info(f"[ATS] City '{city_id}' from save: no matching location (not in randomizer pool for this seed)")
 
         # Garage upgrade checks (status == 2 means player-owned)
         new_garages = save["owned_garages"] - self._save_known_garages
