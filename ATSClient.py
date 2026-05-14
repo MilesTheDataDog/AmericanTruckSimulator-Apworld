@@ -1577,9 +1577,11 @@ class ATSContext(CommonContext):
                     return _write_sii_plain(dest, content)
                 return _write_sii_save(dest, content, plain=plain)
 
-            # Write to the quicksave slot first — F9 loads quicksave (slot 1), not autosave.
-            # ATS stores the F5/F9 quicksave at save/1/game.sii, NOT save/quicksave/.
-            quicksave_dir  = save_path.parent.parent / "1"
+            # Write to save/quicksave/game.sii — this is what F9 and the in-game
+            # "Load quicksave" menu option both load (confirmed by game log showing
+            # "load_game 6 0, path: quicksave/game.sii").  Slot 1 (save/1/) is a
+            # numbered manual save slot that is NOT what F9 loads.
+            quicksave_dir  = save_path.parent.parent / "quicksave"
             quicksave_path = quicksave_dir / "game.sii"
             wrote_quicksave = False
             try:
