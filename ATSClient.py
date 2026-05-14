@@ -1430,6 +1430,26 @@ class ATSContext(CommonContext):
             xp_delta    = self._total_xp_granted
             money_delta = self._total_money_granted
 
+        # Unloaded-quicksave guard: if grants were written to quicksave in a
+        # previous session but the player never loaded it (never pressed F9),
+        # the save XP will still equal base_xp (no grants baked in).  Detect
+        # this by comparing save XP against the expected post-grant value and
+        # reset so the grants get re-written and the player is prompted again.
+        if (self._save_applied_xp > 0
+                and self._save_base_xp > 0
+                and _save_xp < self._save_base_xp + self._save_applied_xp):
+            logger.warning(
+                f"[ATS] Save XP ({_save_xp:,}) is below expected post-grant value "
+                f"({self._save_base_xp:,} base + {self._save_applied_xp:,} applied = "
+                f"{self._save_base_xp + self._save_applied_xp:,}). "
+                "Quicksave grants were never loaded — re-applying."
+            )
+            self._save_applied_xp   = 0
+            self._save_applied_money = 0
+            _persist_save_grants(0, 0, self._save_base_xp, 0, 0, self._reload_counter)
+            xp_delta    = self._total_xp_granted
+            money_delta = self._total_money_granted
+
         if (xp_delta > 0 or money_delta > 0) and text is not None:
             new_xp    = self.current_xp    + xp_delta
             new_money = self.current_money + money_delta
@@ -1565,7 +1585,12 @@ class ATSContext(CommonContext):
                     "or set 'g_save_format 0' in config.cfg."
                 )
         else:
-            pass
+            if self._total_money_granted > 0 or self._total_xp_granted > 0:
+                logger.debug(
+                    f"[ATS] No pending grants: "
+                    f"total_xp={self._total_xp_granted:,} applied_xp={self._save_applied_xp:,} | "
+                    f"total_money=${self._total_money_granted:,} applied_money=${self._save_applied_money:,}"
+                )
 
         from worlds.american_truck_simulator.locations import (
             ALL_LOCATIONS, CITY_ARRIVAL_LOCATIONS, GARAGE_UPGRADE_LOCATIONS,
