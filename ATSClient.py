@@ -959,12 +959,11 @@ class ATSContext(CommonContext):
         # delivery trigger immediately so the grant retries on the next delivery.
         self._delivery_grant_pending: bool = self._save_pending_money > 0
 
-        # Grace period: skip "save was replaced" detection for N seconds after
-        # writing a quicksave.  ATS autosaves the pre-quickload state to
-        # save/autosave/ immediately after F9 fires, giving that file a newer
-        # mtime than slot 1.  Without this guard the client reads the old
-        # autosave, sees XP below the applied total, and re-applies all grants.
-        self._save_grant_grace_until: float = 0.0
+        # After writing grants to slot 1, pin polling to that path until money
+        # is confirmed.  Without this, the next poll picks autosave (which ATS
+        # just wrote with old XP after F9 fired) and either false-confirms or
+        # triggers a "save replaced" reset → write again → F9 spam loop.
+        self._save_grant_grace_path: Optional[Path] = None
 
     # ── Archipelago callbacks ──────────────────────────────────────────────────
 
@@ -1265,7 +1264,10 @@ class ATSContext(CommonContext):
         if not self.auth:
             return  # not connected yet
 
-        save_path = _find_ats_save_file()
+        if self._save_grant_grace_path and self._save_grant_grace_path.exists():
+            save_path: Optional[Path] = self._save_grant_grace_path
+        else:
+            save_path = _find_ats_save_file()
         if not save_path:
             if not self._save_not_found_warned:
                 self._save_not_found_warned = True
@@ -1479,6 +1481,14 @@ class ATSContext(CommonContext):
                     f"threshold {_confirmed_threshold:,}): "
                     f"applied_money now ${self._save_applied_money:,}"
                 )
+                # Money confirmed — safe to stop pinning slot 1; resume normal
+                # save discovery so future polls track wherever the player is.
+                self._save_grant_grace_path = None
+
+        # If no money is pending (XP-only grants, or money already confirmed)
+        # there is nothing left to confirm, so unpin the save path now.
+        if self._save_pending_money == 0 and self._save_confirmation_xp == 0:
+            self._save_grant_grace_path = None
 
         # ── Apply pending XP / money grants to the save file ──────────────────
         # total_*_granted = cumulative amount AP has sent this session.
@@ -1657,19 +1667,11 @@ class ATSContext(CommonContext):
                 )
                 self._write_items_file()   # sends updated reload_counter to DLL
 
-                # Also write to the source save slot so the player gets our
-                # modifications even when quickload (F9) is not bound in controls.
-                if save_path.parent != quicksave_dir:
-                    try:
-                        _write_save(save_path, modified)
-                        logger.info(
-                            f"[ATS] Also wrote grants to source slot "
-                            f"({save_path.parent.name}) for manual-reload fallback"
-                        )
-                    except Exception as _e_src:
-                        logger.debug(
-                            f"[ATS] Source-slot write skipped (file may be locked): {_e_src}"
-                        )
+                # Pin polling to slot 1 until money is confirmed.  Writing to
+                # any other slot (especially autosave) would make that file the
+                # newest, causing the next poll to read back old XP and either
+                # false-confirm money or trigger a "save replaced" reset loop.
+                self._save_grant_grace_path = quicksave_path
             else:
                 logger.error(
                     "[ATS] Grant write FAILED for quicksave. "
