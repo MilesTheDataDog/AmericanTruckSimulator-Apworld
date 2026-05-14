@@ -909,6 +909,11 @@ class ATSContext(CommonContext):
         (self._save_applied_xp,
          self._save_applied_money,
          self._save_base_xp) = _load_save_grants()
+        # Counts consecutive save polls where XP is well below the expected
+        # post-grant level — used to detect that the granted save was never
+        # loaded (e.g. quicksave slot corrupted, F9 not bound).
+        self._grants_below_expected_count: int = 0
+
         if self._save_applied_xp or self._save_applied_money:
             logger.info(
                 f"[ATS] Loaded grant state from grants.json: "
@@ -1365,6 +1370,28 @@ class ATSContext(CommonContext):
             self._save_applied_money = 0
             self._save_base_xp = 0
             _persist_save_grants(0, 0, 0)
+
+        # Desync detection: grants were written to a quicksave that the player
+        # never loaded (corrupted slot, F9 not bound, etc.).  If save XP stays
+        # well below base_xp + applied_xp for 5 consecutive polls (~10 s) the
+        # player is running from an un-granted save; reset so grants re-apply.
+        if not _reset_needed and self._save_applied_xp > 0 and self._save_base_xp > 0:
+            _post_grant_xp = self._save_base_xp + self._save_applied_xp
+            if _save_xp < self._save_base_xp + self._save_applied_xp // 2:
+                self._grants_below_expected_count += 1
+                if self._grants_below_expected_count >= 5:
+                    logger.warning(
+                        f"[ATS] Grant desync: save XP ({_save_xp:,}) has been well "
+                        f"below expected post-grant XP ({_post_grant_xp:,}) for 5 "
+                        "consecutive polls — resetting grants to re-apply."
+                    )
+                    self._grants_below_expected_count = 0
+                    self._save_applied_xp    = 0
+                    self._save_applied_money = 0
+                    self._save_base_xp       = 0
+                    _persist_save_grants(0, 0, 0)
+            else:
+                self._grants_below_expected_count = 0
 
         # One-time fresh-save check. Only warn when the server has no checked
         # locations yet — if it does, the player is resuming a legitimate run.
