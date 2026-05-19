@@ -1409,8 +1409,8 @@ class ATSContext(CommonContext):
 
         # ── Apply pending XP / money grants to the save file ──────────────────
         # total_*_granted = cumulative amount AP has sent this session.
-        # _save_applied_* = what has been written to quicksave this run.
-        # Player receives the grants by pressing F9 to load the quicksave.
+        # _save_applied_* = cumulative grants written to disk last time.
+        # Player receives grants by saving and reloading (or pressing F9).
         xp_delta    = max(0, self._total_xp_granted - self._save_applied_xp)
         money_delta = self._total_money_granted - self._save_applied_money
 
@@ -1430,8 +1430,30 @@ class ATSContext(CommonContext):
             xp_delta    = self._total_xp_granted
             money_delta = self._total_money_granted
 
+        # Re-apply guard: if the save on disk has LESS XP than the last value
+        # we wrote (base + applied), the player made a new save from un-granted
+        # in-game state (e.g. saved at the pause menu before loading the
+        # patched file).  Reset so we re-apply all grants to this new save.
+        if (self._save_applied_xp > 0
+                and self._save_base_xp > 0
+                and _save_xp < self._save_base_xp + self._save_applied_xp):
+            logger.info(
+                f"[ATS] Save XP ({_save_xp:,}) < last-written "
+                f"({self._save_base_xp + self._save_applied_xp:,} = "
+                f"base {self._save_base_xp:,} + grants {self._save_applied_xp:,}). "
+                "Player saved before loading grants — re-applying to current save."
+            )
+            self._save_applied_xp   = 0
+            self._save_applied_money = 0
+            self._save_base_xp      = 0
+            _persist_save_grants(0, 0, 0, 0, 0, self._reload_counter)
+            xp_delta    = self._total_xp_granted
+            money_delta = self._total_money_granted
+
         if (xp_delta > 0 or money_delta > 0) and text is not None:
-            new_xp    = self.current_xp    + xp_delta
+            # Use the save file's actual XP, not self.current_xp, which may be
+            # inflated by a previous grant write the player hasn't loaded yet.
+            new_xp    = _save_xp           + xp_delta
             new_money = self.current_money + money_delta
 
             # Patch the decrypted text, pinned to the economy/player block so we
@@ -1558,7 +1580,7 @@ class ATSContext(CommonContext):
                     logger.warning(f"[ATS] Could not write grants to source save: {_se}")
 
                 if self._save_base_xp == 0 and xp_delta > 0:
-                    self._save_base_xp = self.current_xp
+                    self._save_base_xp = _save_xp  # player's real XP before grants
 
                 self._save_applied_xp    += xp_delta
                 self._save_applied_money += money_delta
@@ -1571,13 +1593,13 @@ class ATSContext(CommonContext):
                 self.current_money = new_money
 
                 logger.info(
-                    f"[ATS] Grants written to quicksave: "
+                    f"[ATS] Grants written: "
                     f"+{xp_delta:,} XP, +${money_delta:,} money "
                     f"(totals: {new_xp:,} XP, ${new_money:,})"
                 )
                 logger.info(
-                    "[ATS] *** Grants written to BOTH quicksave and autosave — "
-                    "press F9 in-game to load them now, or they will be there on next session load! ***"
+                    f"[ATS] *** Grants applied to {save_path.parent.name} and quicksave — "
+                    "Save (Esc → Save) then reload to receive them, or press F9 right now! ***"
                 )
             else:
                 logger.error(
