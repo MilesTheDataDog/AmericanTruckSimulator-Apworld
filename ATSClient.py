@@ -1536,6 +1536,27 @@ class ATSContext(CommonContext):
                 logger.warning(f"[ATS] Could not write quicksave: {e}")
 
             if wrote_quicksave:
+                # Also patch the source save (autosave or manual slot) in-place so
+                # grants survive regardless of which save the player loads next.
+                # ATS never copies quicksave state back into autosave automatically,
+                # so without this the player sees pre-grant values on next session.
+                wrote_source = False
+                try:
+                    wrote_source = _write_save(save_path, modified)
+                    if wrote_source:
+                        logger.info(
+                            f"[ATS] Grants also written to source save "
+                            f"({save_path.parent.name}/game.sii) — "
+                            "grants persist whether you load autosave or quicksave."
+                        )
+                    else:
+                        logger.warning(
+                            f"[ATS] Could not write grants to source save "
+                            f"({save_path.parent.name}/game.sii)."
+                        )
+                except Exception as _se:
+                    logger.warning(f"[ATS] Could not write grants to source save: {_se}")
+
                 if self._save_base_xp == 0 and xp_delta > 0:
                     self._save_base_xp = self.current_xp
 
@@ -1555,7 +1576,8 @@ class ATSContext(CommonContext):
                     f"(totals: {new_xp:,} XP, ${new_money:,})"
                 )
                 logger.info(
-                    "[ATS] *** Press F9 (or Menu → Load Quicksave) to receive your grants! ***"
+                    "[ATS] *** Grants written to BOTH quicksave and autosave — "
+                    "press F9 in-game to load them now, or they will be there on next session load! ***"
                 )
             else:
                 logger.error(
