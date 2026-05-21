@@ -104,47 +104,54 @@ GRANTS_FILE = COMM_DIR / "grants.json"
 
 
 def _load_save_grants() -> "tuple[int, int, int, int, int, int]":
-    """Return (applied_xp, applied_money, base_xp, pending_money, confirmation_xp, reload_counter)."""
+    """Return (last_written_xp, last_written_money, write_total_xp, write_total_money, base_xp, reload_counter)."""
     try:
         if GRANTS_FILE.exists():
             data = _read_json(GRANTS_FILE)
-            applied_xp     = int(data.get("applied_xp", 0))
-            base_xp        = int(data.get("base_xp", 0))
             reload_counter = int(data.get("reload_counter", 0))
-            if "pending_money" in data:
+            base_xp        = int(data.get("base_xp", 0))
+            # New format: tracks exact values written to disk.
+            if "last_written_xp" in data:
                 return (
-                    applied_xp,
-                    int(data.get("applied_money", 0)),
+                    int(data.get("last_written_xp",    0)),
+                    int(data.get("last_written_money",  0)),
+                    int(data.get("write_total_xp",      0)),
+                    int(data.get("write_total_money",   0)),
                     base_xp,
-                    int(data.get("pending_money", 0)),
-                    int(data.get("confirmation_xp", 0)),
                     reload_counter,
                 )
-            # Old format (no pending_money key): reset money tracking so the
-            # client re-applies any money that may never have been loaded by
-            # the player (e.g. written to a save slot that was never loaded).
-            return applied_xp, 0, base_xp, 0, 0, reload_counter
+            # Old format migration: applied_xp/applied_money → write_total_*.
+            # last_written_* defaults to 0, which forces a safe re-apply of all
+            # grants to the current save on the next poll.
+            return (
+                0,
+                0,
+                int(data.get("applied_xp",    0)),
+                int(data.get("applied_money",  0)),
+                base_xp,
+                reload_counter,
+            )
     except Exception:
         pass
     return 0, 0, 0, 0, 0, 0
 
 
 def _persist_save_grants(
-    applied_xp: int,
-    applied_money: int,
+    last_written_xp: int,
+    last_written_money: int,
+    write_total_xp: int,
+    write_total_money: int,
     base_xp: int = 0,
-    pending_money: int = 0,
-    confirmation_xp: int = 0,
     reload_counter: int = 0,
 ) -> None:
     try:
         _write_json(GRANTS_FILE, {
-            "applied_xp":      applied_xp,
-            "applied_money":   applied_money,
-            "base_xp":         base_xp,
-            "pending_money":   pending_money,
-            "confirmation_xp": confirmation_xp,
-            "reload_counter":  reload_counter,
+            "last_written_xp":   last_written_xp,
+            "last_written_money": last_written_money,
+            "write_total_xp":    write_total_xp,
+            "write_total_money": write_total_money,
+            "base_xp":           base_xp,
+            "reload_counter":    reload_counter,
         })
     except Exception as e:
         logger.error(f"[ATS] Could not write grants.json: {e}")
@@ -925,25 +932,28 @@ class ATSContext(CommonContext):
         self._save_scsc_meta: "Optional[dict]" = None  # set when save is an ScsC container
         self._save_not_found_warned: bool = False
 
-        # Save-grant tracking: how much XP / money has been baked into the save
-        # file already (persisted across sessions in grants.json).
-        # base_xp = the natural (pre-first-grant) XP the player had; used to
-        # detect genuine save replacements.
-        self._save_applied_xp: int
-        self._save_applied_money: int
+        # Save-grant tracking (persisted across sessions in grants.json).
+        # last_written_xp/money = the exact values in the last patched save.
+        # write_total_xp/money  = total AP grants at the time of that write.
+        # base_xp               = player's natural XP before any grants (fresh-profile detection).
+        self._last_written_xp: int
+        self._last_written_money: int
+        self._last_write_total_xp: int
+        self._last_write_total_money: int
         self._save_base_xp: int
         self._reload_counter: int
-        (self._save_applied_xp,
-         self._save_applied_money,
+        (self._last_written_xp,
+         self._last_written_money,
+         self._last_write_total_xp,
+         self._last_write_total_money,
          self._save_base_xp,
-         _,
-         _,
          self._reload_counter) = _load_save_grants()
-        if self._save_applied_xp or self._save_applied_money:
+        if self._last_written_xp or self._last_written_money:
             logger.info(
                 f"[ATS] Loaded grant state from grants.json: "
-                f"applied_xp={self._save_applied_xp:,}, "
-                f"applied_money=${self._save_applied_money:,}, "
+                f"last_written_xp={self._last_written_xp:,}, "
+                f"last_written_money=${self._last_written_money:,}, "
+                f"write_total_xp={self._last_write_total_xp:,}, "
                 f"base_xp={self._save_base_xp:,}"
             )
 
@@ -1271,10 +1281,11 @@ class ATSContext(CommonContext):
         except OSError:
             return
 
-        # If there are pending grants we need to apply, bypass the mtime guard
-        # so we don't wait for the next game autosave to bake them in.
-        pending_xp    = self._total_xp_granted    - self._save_applied_xp
-        pending_money = self._total_money_granted - self._save_applied_money
+        # Bypass the mtime guard if new grants have arrived since the last write.
+        # Re-apply cases (save_xp < last_written_xp) are caught after reading;
+        # here we only need to know if there is genuinely new AP grant money.
+        pending_xp    = self._total_xp_granted    - self._last_write_total_xp
+        pending_money = self._total_money_granted - self._last_write_total_money
         has_pending   = pending_xp > 0 or pending_money > 0
 
         # Skip if: no pending grants AND file unchanged; OR file was already
@@ -1360,7 +1371,7 @@ class ATSContext(CommonContext):
         # we've seen before, the file was replaced.
         #
         # We compare against _save_base_xp (the player's natural XP before any
-        # grants), NOT against _save_applied_xp.  This prevents false resets when
+        # grants), NOT against last_write_total_xp.  This prevents false resets when
         # ATS autosaves the pre-quickload state (which has the old, un-granted XP)
         # immediately after F9 fires — that autosave has the player's *natural* XP,
         # which equals base_xp, so the check correctly returns False.
@@ -1369,10 +1380,10 @@ class ATSContext(CommonContext):
         if self._save_base_xp > 0:
             # Reliable path: base_xp known → reset only if XP went below it.
             _reset_needed = _save_xp < self._save_base_xp
-        elif self._save_applied_xp > 0:
-            # base_xp unknown (old grants.json format) → only reset if XP is
-            # dramatically below the cumulative grants (genuine fresh-profile swap).
-            _reset_needed = _save_xp < self._save_applied_xp // 2
+        elif self._last_write_total_xp > 0:
+            # base_xp unknown (old grants.json migration) → reset only if XP is
+            # dramatically below cumulative grants (genuine fresh-profile swap).
+            _reset_needed = _save_xp < self._last_write_total_xp // 2
 
         if _reset_needed:
             logger.warning(
@@ -1380,9 +1391,11 @@ class ATSContext(CommonContext):
                 f"({self._save_base_xp:,}) — save was likely replaced. "
                 "Resetting grant tracking so grants are re-applied."
             )
-            self._save_applied_xp   = 0
-            self._save_applied_money = 0
-            self._save_base_xp      = 0
+            self._last_written_xp        = 0
+            self._last_written_money      = 0
+            self._last_write_total_xp     = 0
+            self._last_write_total_money  = 0
+            self._save_base_xp            = 0
             _persist_save_grants(0, 0, 0, 0, 0, self._reload_counter)
 
         # One-time fresh-save check. Only warn when the server has no checked
@@ -1408,47 +1421,54 @@ class ATSContext(CommonContext):
         self.current_xp     = max(self.current_xp, save["experience_points"])
 
         # ── Apply pending XP / money grants to the save file ──────────────────
-        # total_*_granted = cumulative amount AP has sent this session.
-        # _save_applied_* = cumulative grants written to disk last time.
-        # Player receives grants by saving and reloading (or pressing F9).
-        xp_delta    = max(0, self._total_xp_granted - self._save_applied_xp)
-        money_delta = self._total_money_granted - self._save_applied_money
+        # total_*_granted      = cumulative AP grants this session.
+        # last_written_*       = exact values written to the last patched save.
+        # last_write_total_*   = total AP grants at the time of that write.
+        #
+        # Two cases:
+        #  (A) save_xp >= last_written_xp  →  grants were loaded; add new delta only.
+        #  (B) save_xp <  last_written_xp  →  player saved before loading our patch;
+        #                                      bring save back up to last_written +
+        #                                      any new grants received since then.
 
-        # Stale-grants guard: applied_xp can exceed total_xp_granted when
-        # grants.json carries values from a previous run that used larger XP
-        # amounts (e.g. before the 5% reduction).  Reset so grants re-apply.
-        if self._save_applied_xp > self._total_xp_granted > 0:
+        # Stale-grants guard: write_total_xp can exceed total_xp_granted when
+        # grants.json carries values from a previous AP run.  Reset so grants
+        # re-apply to the current run.
+        if self._last_write_total_xp > self._total_xp_granted > 0:
             logger.warning(
-                f"[ATS] Stale grants detected: applied_xp ({self._save_applied_xp:,}) "
+                f"[ATS] Stale grants detected: write_total_xp ({self._last_write_total_xp:,}) "
                 f"> total_xp_granted ({self._total_xp_granted:,}). "
-                "Resetting grant state so grants are re-applied."
+                "Resetting grant state so grants re-apply for this run."
             )
-            self._save_applied_xp   = 0
-            self._save_applied_money = 0
-            self._save_base_xp      = 0
+            self._last_written_xp        = 0
+            self._last_written_money      = 0
+            self._last_write_total_xp     = 0
+            self._last_write_total_money  = 0
+            self._save_base_xp            = 0
             _persist_save_grants(0, 0, 0, 0, 0, self._reload_counter)
-            xp_delta    = self._total_xp_granted
-            money_delta = self._total_money_granted
 
-        # Re-apply guard: if the save on disk has LESS XP than the last value
-        # we wrote (base + applied), the player made a new save from un-granted
-        # in-game state (e.g. saved at the pause menu before loading the
-        # patched file).  Reset so we re-apply all grants to this new save.
-        if (self._save_applied_xp > 0
-                and self._save_base_xp > 0
-                and _save_xp < self._save_base_xp + self._save_applied_xp):
-            logger.info(
-                f"[ATS] Save XP ({_save_xp:,}) < last-written "
-                f"({self._save_base_xp + self._save_applied_xp:,} = "
-                f"base {self._save_base_xp:,} + grants {self._save_applied_xp:,}). "
-                "Player saved before loading grants — re-applying to current save."
-            )
-            self._save_applied_xp   = 0
-            self._save_applied_money = 0
-            self._save_base_xp      = 0
-            _persist_save_grants(0, 0, 0, 0, 0, self._reload_counter)
-            xp_delta    = self._total_xp_granted
-            money_delta = self._total_money_granted
+        new_grants_xp    = max(0, self._total_xp_granted    - self._last_write_total_xp)
+        new_grants_money = max(0, self._total_money_granted - self._last_write_total_money)
+
+        if self._last_written_xp > 0 and _save_xp < self._last_written_xp:
+            # Case (B): save was written from un-granted in-game state.
+            # Bring XP back up to what we last wrote, then layer new grants on top.
+            xp_delta    = (self._last_written_xp - _save_xp) + new_grants_xp
+            # Money: if save_money is also below last_written (un-granted), restore it
+            # too; otherwise only add new money grants.
+            missing_money = max(0, self._last_written_money - save["money"])
+            money_delta   = missing_money + new_grants_money
+            if xp_delta > 0 or money_delta > 0:
+                logger.info(
+                    f"[ATS] Re-apply: save XP ({_save_xp:,}) < last-written "
+                    f"({self._last_written_xp:,}); adding {xp_delta:,} XP, "
+                    f"${money_delta:,} money."
+                )
+        else:
+            # Case (A): grants are in this save (or no previous write).
+            # Only apply genuinely new grants received since the last write.
+            xp_delta    = new_grants_xp
+            money_delta = new_grants_money
 
         if (xp_delta > 0 or money_delta > 0) and text is not None:
             # Use the save file's actual XP, not self.current_xp, which may be
@@ -1580,13 +1600,16 @@ class ATSContext(CommonContext):
                     logger.warning(f"[ATS] Could not write grants to source save: {_se}")
 
                 if self._save_base_xp == 0 and xp_delta > 0:
-                    self._save_base_xp = _save_xp  # player's real XP before grants
+                    self._save_base_xp = _save_xp  # player's natural XP before any grants
 
-                self._save_applied_xp    += xp_delta
-                self._save_applied_money += money_delta
+                self._last_written_xp        = new_xp
+                self._last_written_money      = new_money
+                self._last_write_total_xp     = self._total_xp_granted
+                self._last_write_total_money  = self._total_money_granted
                 _persist_save_grants(
-                    self._save_applied_xp, self._save_applied_money,
-                    self._save_base_xp, 0, 0, self._reload_counter,
+                    self._last_written_xp,   self._last_written_money,
+                    self._last_write_total_xp, self._last_write_total_money,
+                    self._save_base_xp, self._reload_counter,
                 )
 
                 self.current_xp    = new_xp
@@ -1612,8 +1635,9 @@ class ATSContext(CommonContext):
             if self._total_money_granted > 0 or self._total_xp_granted > 0:
                 logger.debug(
                     f"[ATS] No pending grants: "
-                    f"total_xp={self._total_xp_granted:,} applied_xp={self._save_applied_xp:,} | "
-                    f"total_money=${self._total_money_granted:,} applied_money=${self._save_applied_money:,}"
+                    f"total_xp={self._total_xp_granted:,} write_total_xp={self._last_write_total_xp:,} "
+                    f"last_written_xp={self._last_written_xp:,} save_xp={_save_xp:,} | "
+                    f"total_money=${self._total_money_granted:,} write_total_money=${self._last_write_total_money:,}"
                 )
 
         from worlds.american_truck_simulator.locations import (
