@@ -860,6 +860,23 @@ class ATSCommandProcessor(ClientCommandProcessor):
         logger.info(f"[ATS] Checks sent:      {len(ctx.checked_locations)}")
         logger.info(f"[ATS] Goal satisfied:   {ctx.goal_complete}")
 
+    def _cmd_checked(self):
+        """List every location check the server has confirmed for this run."""
+        ctx: ATSContext = self.ctx
+        from worlds.american_truck_simulator.locations import ALL_LOCATIONS
+        id_to_name = {data.code: name for name, data in ALL_LOCATIONS.items()
+                      if data.code is not None}
+        if not ctx.checked_locations:
+            logger.info("[ATS] No locations checked yet.")
+            return
+        checked_names = sorted(
+            id_to_name.get(loc_id, f"Unknown location {loc_id}")
+            for loc_id in ctx.checked_locations
+        )
+        logger.info(f"[ATS] Checked locations ({len(checked_names)}):")
+        for name in checked_names:
+            logger.info(f"[ATS]   {name}")
+
     def _cmd_resync(self):
         """Re-read the events file and resend any unchecked locations."""
         ctx: ATSContext = self.ctx
@@ -984,9 +1001,18 @@ class ATSContext(CommonContext):
     def _on_connected(self) -> None:
         logger.info(f"[ATS] Connected to Archipelago server as {self.username}")
         logger.info(f"[ATS] Win condition: {self._win_condition_description()}")
-        # Write slot data so the plugin/mod can read player options
         _write_json(SLOT_DATA_FILE, self.slot_data)
         self._write_items_file()
+        # Scout level milestone locations so item names are available when checks fire.
+        # create_as_hint=0 means no permanent hints are created — purely informational.
+        from worlds.american_truck_simulator.locations import LEVEL_MILESTONE_LOCATIONS
+        milestone_ids = [d.code for d in LEVEL_MILESTONE_LOCATIONS.values() if d.code is not None]
+        if milestone_ids:
+            asyncio.create_task(self.send_msgs([{
+                "cmd": "LocationScouts",
+                "locations": milestone_ids,
+                "create_as_hint": 0,
+            }]))
 
     def _on_items_received(self, start_index: int, items) -> None:
         applied_any = False
@@ -1633,11 +1659,35 @@ class ATSContext(CommonContext):
         new_checks: List[int] = []
 
         # Level milestone checks (re-evaluate all milestones each poll)
+        _locations_info = getattr(self, "locations_info", {})
         for loc_name, loc_data in ALL_LOCATIONS.items():
             if loc_data.category == "level":
                 milestone = int(loc_data.game_id.split("_")[1])
-                if level >= milestone and loc_data.code not in self.checked_locations:
-                    new_checks.append(loc_data.code)
+                if level >= milestone:
+                    if loc_data.code in self.checked_locations:
+                        logger.debug(f"[ATS] Level {milestone} milestone already checked — skipping")
+                    else:
+                        new_checks.append(loc_data.code)
+                        item_info = _locations_info.get(loc_data.code)
+                        if item_info:
+                            try:
+                                item_name = self.item_names.lookup_in_game(item_info.item)
+                            except Exception:
+                                item_name = f"item#{item_info.item}"
+                            recv_name = self.player_names.get(
+                                item_info.player, f"Player {item_info.player}"
+                            )
+                            item_str = (item_name if item_info.player == self.slot
+                                        else f"{item_name} → {recv_name}")
+                            logger.info(
+                                f"[ATS] Level milestone: Reached Level {milestone} — "
+                                f"sending check (you receive: {item_str})"
+                            )
+                        else:
+                            logger.info(
+                                f"[ATS] Level milestone: Reached Level {milestone} — "
+                                "sending check (item info not yet available)"
+                            )
 
         # City first arrival checks + state first visit checks
         if not self._save_first_city_log:
