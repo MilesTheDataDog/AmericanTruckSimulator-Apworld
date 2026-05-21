@@ -1281,16 +1281,16 @@ class ATSContext(CommonContext):
         except OSError:
             return
 
-        # Bypass the mtime guard if new grants have arrived since the last write.
-        # Re-apply cases (save_xp < last_written_xp) are caught after reading;
-        # here we only need to know if there is genuinely new AP grant money.
+        # Only read when the player has actually saved (mtime changed).
+        # Do NOT bypass on has_pending — proactive reads use the stale pre-save
+        # XP as the grant base, which loses the player's natural delivery XP.
+        # Grants accumulate in memory and are applied in one correct write the
+        # moment the player saves.
         pending_xp    = self._total_xp_granted    - self._last_write_total_xp
         pending_money = self._total_money_granted - self._last_write_total_money
         has_pending   = pending_xp > 0 or pending_money > 0
 
-        # Skip if: no pending grants AND file unchanged; OR file was already
-        # confirmed unreadable (no point retrying until the file actually changes).
-        if mtime <= self._save_last_mtime and (not has_pending or self._save_warned_unreadable):
+        if mtime <= self._save_last_mtime:
             return
         self._save_last_mtime = mtime
 
