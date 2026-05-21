@@ -270,8 +270,8 @@ def _scan_profiles_dir(profiles_dir: Path, candidates: "list[tuple[float, Path]]
         for slot in save_dir.iterdir():
             if not slot.is_dir():
                 continue
-            if slot.name == "quicksave":
-                continue  # skip — client writes here; reading it back causes stale-state loops
+            if not slot.name.isdigit():
+                continue  # only numbered manual slots; skip autosave/quicksave
             game_sii = slot / "game.sii"
             if not game_sii.exists():
                 continue
@@ -327,8 +327,8 @@ def _find_ats_save_file() -> Optional[Path]:
             for slot in save_dir.iterdir():
                 if not slot.is_dir():
                     continue
-                if slot.name == "quicksave":
-                    continue  # client writes here; reading it back causes stale-state loops
+                if not slot.name.isdigit():
+                    continue  # only numbered manual slots; skip autosave/quicksave
                 game_sii = slot / "game.sii"
                 if not game_sii.exists():
                     continue
@@ -1398,6 +1398,24 @@ class ATSContext(CommonContext):
             self._save_base_xp            = 0
             _persist_save_grants(0, 0, 0, 0, 0, self._reload_counter)
 
+        # Grant-confirm check: if the save on disk already contains the XP we
+        # last wrote (player loaded the patched save and has since saved again),
+        # clear last_written so we don't keep re-applying the same grants.
+        # We do NOT confirm from our own write-back (handled by _save_last_mtime).
+        if self._last_written_xp > 0 and _save_xp >= self._last_written_xp:
+            logger.info(
+                f"[ATS] Grants confirmed in save: "
+                f"save_xp ({_save_xp:,}) >= last_written ({self._last_written_xp:,}). "
+                "Tracking cleared — ready for next grant."
+            )
+            self._last_written_xp   = 0
+            self._last_written_money = 0
+            _persist_save_grants(
+                0, 0,
+                self._last_write_total_xp, self._last_write_total_money,
+                self._save_base_xp, self._reload_counter,
+            )
+
         # One-time fresh-save check. Only warn when the server has no checked
         # locations yet — if it does, the player is resuming a legitimate run.
         if not self._fresh_save_checked:
@@ -1531,74 +1549,39 @@ class ATSContext(CommonContext):
                     return _write_sii_plain(dest, content)
                 return _write_sii_save(dest, content, plain=plain)
 
-            # Write to save/quicksave/game.sii — this is what F9 and the in-game
-            # "Load quicksave" menu option both load (confirmed by game log showing
-            # "load_game 6 0, path: quicksave/game.sii").  Slot 1 (save/1/) is a
-            # numbered manual save slot that is NOT what F9 loads.
-            quicksave_dir  = save_path.parent.parent / "quicksave"
-            quicksave_path = quicksave_dir / "game.sii"
-            wrote_quicksave = False
+            # Write grants directly into the manual save slot that was read.
+            # No quicksave involved — player just saves and reloads this slot.
+            wrote_save = False
             try:
-                quicksave_dir.mkdir(parents=True, exist_ok=True)
-                wrote_quicksave = _write_save(quicksave_path, modified)
-                # Verify: read the file back and confirm economy XP landed correctly.
-                if wrote_quicksave:
+                wrote_save = _write_save(save_path, modified)
+                if wrote_save:
+                    # Verify: read back and confirm the XP landed correctly.
                     try:
-                        _vtext, _vfmt, _ = _read_sii_text(quicksave_path)
+                        _vtext, _vfmt, _ = _read_sii_text(save_path)
                         if _vtext:
                             _vecon = _find_xp_block(_vtext)
                             if _vecon:
                                 _vregion = _vtext[_vecon.end():_vecon.end() + 100_000]
                                 _vxp = re.search(r'\bexperience_points\s*:\s*(\d+)', _vregion)
                                 logger.info(
-                                    f"[ATS] VERIFY quicksave XP = "
+                                    f"[ATS] VERIFY slot {save_path.parent.name} XP = "
                                     f"{int(_vxp.group(1)):,} (expected {new_xp:,})"
                                     if _vxp else
-                                    "[ATS] VERIFY quicksave: experience_points not found in block"
+                                    f"[ATS] VERIFY slot {save_path.parent.name}: "
+                                    "experience_points not found in block"
                                 )
-                            else:
-                                # Log first 600 chars to diagnose the actual block structure
-                                _snippet = _vtext[:600].replace('\n', '\\n')
-                                logger.warning(
-                                    "[ATS] VERIFY: no economy/player block found. "
-                                    f"Save starts with: {_snippet!r}"
-                                )
-                            # Verify money_account anywhere in the full save text
                             _vmoney = re.search(r'\bmoney_account\s*:\s*(-?\d+)', _vtext)
                             if _vmoney:
                                 logger.info(
-                                    f"[ATS] VERIFY quicksave money = ${int(_vmoney.group(1)):,} "
-                                    f"(expected ${new_money:,})"
+                                    f"[ATS] VERIFY slot {save_path.parent.name} money = "
+                                    f"${int(_vmoney.group(1)):,} (expected ${new_money:,})"
                                 )
-                            else:
-                                logger.warning("[ATS] VERIFY quicksave: money_account not found in save")
                     except Exception as _ve:
-                        logger.warning(f"[ATS] VERIFY quicksave read-back failed: {_ve}")
+                        logger.warning(f"[ATS] VERIFY read-back failed: {_ve}")
             except Exception as e:
-                logger.warning(f"[ATS] Could not write quicksave: {e}")
+                logger.warning(f"[ATS] Could not write save slot {save_path.parent.name}: {e}")
 
-            if wrote_quicksave:
-                # Also patch the source save (autosave or manual slot) in-place so
-                # grants survive regardless of which save the player loads next.
-                # ATS never copies quicksave state back into autosave automatically,
-                # so without this the player sees pre-grant values on next session.
-                wrote_source = False
-                try:
-                    wrote_source = _write_save(save_path, modified)
-                    if wrote_source:
-                        logger.info(
-                            f"[ATS] Grants also written to source save "
-                            f"({save_path.parent.name}/game.sii) — "
-                            "grants persist whether you load autosave or quicksave."
-                        )
-                    else:
-                        logger.warning(
-                            f"[ATS] Could not write grants to source save "
-                            f"({save_path.parent.name}/game.sii)."
-                        )
-                except Exception as _se:
-                    logger.warning(f"[ATS] Could not write grants to source save: {_se}")
-
+            if wrote_save:
                 if self._save_base_xp == 0 and xp_delta > 0:
                     self._save_base_xp = _save_xp  # player's natural XP before any grants
 
@@ -1606,6 +1589,11 @@ class ATSContext(CommonContext):
                 self._last_written_money      = new_money
                 self._last_write_total_xp     = self._total_xp_granted
                 self._last_write_total_money  = self._total_money_granted
+                # Update mtime so the next poll doesn't re-read our own write.
+                try:
+                    self._save_last_mtime = save_path.stat().st_mtime
+                except OSError:
+                    pass
                 _persist_save_grants(
                     self._last_written_xp,   self._last_written_money,
                     self._last_write_total_xp, self._last_write_total_money,
@@ -1616,17 +1604,17 @@ class ATSContext(CommonContext):
                 self.current_money = new_money
 
                 logger.info(
-                    f"[ATS] Grants written: "
+                    f"[ATS] Grants written to save slot {save_path.parent.name}: "
                     f"+{xp_delta:,} XP, +${money_delta:,} money "
                     f"(totals: {new_xp:,} XP, ${new_money:,})"
                 )
                 logger.info(
-                    f"[ATS] *** Grants applied to {save_path.parent.name} and quicksave — "
-                    "Save (Esc → Save) then reload to receive them, or press F9 right now! ***"
+                    f"[ATS] *** Reload save slot {save_path.parent.name} "
+                    "(Esc → Load → select your save) to receive grants! ***"
                 )
             else:
                 logger.error(
-                    "[ATS] Grant write FAILED for quicksave. "
+                    f"[ATS] Grant write FAILED for slot {save_path.parent.name}. "
                     f"format={_fmt_label}. "
                     "If saves are BSII v3 encrypted, install the 'cryptography' package "
                     "or set 'g_save_format 0' in config.cfg."
@@ -1752,7 +1740,8 @@ async def game_watcher(ctx: ATSContext) -> None:
 
     logger.info("[ATS] Waiting for ATS plugin to connect...")
 
-    _SAVE_POLL_INTERVAL = 5.0  # seconds between save file reads
+    _SAVE_POLL_INTERVAL_NORMAL  = 5.0   # seconds — idle, no grants in flight
+    _SAVE_POLL_INTERVAL_PENDING = 0.5   # seconds — grants written but not yet confirmed
     _last_save_poll = 0.0
 
     while not ctx.exit_event.is_set():
@@ -1770,15 +1759,25 @@ async def game_watcher(ctx: ATSContext) -> None:
                          f"(have {len(received)}, applied {ctx._applied_item_count})")
             ctx._on_items_received(ctx._applied_item_count, received[ctx._applied_item_count:])
 
+        # Use a fast poll interval whenever grants are in flight (written but
+        # not yet confirmed loaded) so we can patch the save quickly after the
+        # player saves — well within the time it takes to navigate the menus.
+        grants_in_flight = (
+            ctx._total_xp_granted    > ctx._last_write_total_xp  or
+            ctx._total_money_granted > ctx._last_write_total_money or
+            ctx._last_written_xp     > 0
+        )
+        interval = _SAVE_POLL_INTERVAL_PENDING if grants_in_flight else _SAVE_POLL_INTERVAL_NORMAL
+
         now = time.monotonic()
-        if now - _last_save_poll >= _SAVE_POLL_INTERVAL:
+        if now - _last_save_poll >= interval:
             _last_save_poll = now
             try:
                 ctx._poll_save_file()
             except Exception:
                 logger.error(f"[ATS] Error polling save file:\n{traceback.format_exc()}")
 
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(0.25)
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
