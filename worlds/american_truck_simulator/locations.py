@@ -10,7 +10,6 @@ from .items import ATS_BASE_ID
 # City first arrivals:    ATS_BASE_ID + 11000   (slots 11000–11999)
 # Level milestones:       ATS_BASE_ID + 12000   (slots 12000–12009)
 # Garage upgrades:        ATS_BASE_ID + 13000   (slots 13000–13499)
-# Recruitment office find:ATS_BASE_ID + 14000   (slots 14000–14499)
 # State first visit:      ATS_BASE_ID + 15000   (slots 15000–15049)
 # Goal location:          ATS_BASE_ID + 19999
 
@@ -67,11 +66,9 @@ for _i, _cargo in enumerate(_cargo_data["cargo_types"]):
 # These are built per-state so they live in the correct region.
 CITY_ARRIVAL_LOCATIONS: Dict[str, ATSLocationData] = {}
 GARAGE_UPGRADE_LOCATIONS: Dict[str, ATSLocationData] = {}
-RECRUITMENT_OFFICE_LOCATIONS: Dict[str, ATSLocationData] = {}
 
 _city_index = 0
 _garage_loc_index = 0
-_office_loc_index = 0
 
 for _state in _cities_data["states"]:
     _state_name = _state["name"]
@@ -98,18 +95,6 @@ for _state in _cities_data["states"]:
                 game_id=_city["id"],
             )
             _garage_loc_index += 1
-
-        # Recruitment office discoveries
-        for _slot in range(_city.get("recruitment_office_count", 0)):
-            _suffix = f" #{_slot + 1}" if _city["recruitment_office_count"] > 1 else ""
-            _office_name = f"Found Office - {_city['name']}{_suffix}, {_state_name}"
-            RECRUITMENT_OFFICE_LOCATIONS[_office_name] = ATSLocationData(
-                code=ATS_BASE_ID + 14000 + _office_loc_index,
-                region=_region_name,
-                category="office",
-                game_id=f"{_city['id']}_office_{_slot + 1}",
-            )
-            _office_loc_index += 1
 
 # ── State first visit locations ────────────────────────────────────────────────
 # One location per DLC state (California and Nevada excluded — always accessible).
@@ -142,7 +127,6 @@ ALL_LOCATIONS: Dict[str, ATSLocationData] = {
     **CARGO_DELIVERY_LOCATIONS,
     **CITY_ARRIVAL_LOCATIONS,
     **GARAGE_UPGRADE_LOCATIONS,
-    **RECRUITMENT_OFFICE_LOCATIONS,
     **STATE_ARRIVAL_LOCATIONS,
     GOAL_LOCATION_NAME: GOAL_LOCATION,
 }
@@ -173,11 +157,6 @@ def get_locations_for_options(options) -> List[str]:
 
     if options.garage_upgrade_checks:
         for name, data in GARAGE_UPGRADE_LOCATIONS.items():
-            if data.region in _active_regions:
-                locations.append(name)
-
-    if options.recruitment_office_checks:
-        for name, data in RECRUITMENT_OFFICE_LOCATIONS.items():
             if data.region in _active_regions:
                 locations.append(name)
 

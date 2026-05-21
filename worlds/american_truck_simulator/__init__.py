@@ -186,7 +186,6 @@ class ATSWorld(World):
             "cargo_delivery_checks": bool(self.options.cargo_delivery_checks),
             "city_arrival_checks": bool(self.options.city_arrival_checks),
             "garage_upgrade_checks": bool(self.options.garage_upgrade_checks),
-            "recruitment_office_checks": bool(self.options.recruitment_office_checks),
             "state_arrival_checks": bool(self.options.state_arrival_checks),
             "death_link": bool(self.options.death_link),
         }

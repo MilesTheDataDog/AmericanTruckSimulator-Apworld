@@ -140,7 +140,7 @@
           "needs_verification": false
         },
         {
-          "id": "san_francisc",
+          "id": "san_francisco",
           "name": "San Francisco",
           "has_garage": true,
           "recruitment_office_count": 1,
@@ -782,7 +782,7 @@
           "needs_verification": false
         },
         {
-          "id": "salt_lake_city",
+          "id": "salt_lake",
           "name": "Salt Lake City",
           "has_garage": true,
           "recruitment_office_count": 1,

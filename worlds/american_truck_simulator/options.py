@@ -44,8 +44,8 @@ class GoalMoney(Range):
 class EnabledDLC(OptionSet):
     """
     Which DLC map packs you own and want included in the randomizer.
-    Only cities, garages, and recruitment offices from enabled DLC states are included
-    as location checks. California and Nevada (base game) are always included.
+    Only cities and garages from enabled DLC states are included as location checks.
+    California and Nevada (base game) are always included.
     Arizona is a free DLC and is safe to include for all players.
     """
     display_name = "Enabled DLC States"
@@ -127,15 +127,6 @@ class GarageUpgradeChecks(Toggle):
     default = 1
 
 
-class RecruitmentOfficeChecks(Toggle):
-    """
-    If enabled, discovering a recruitment office (driving past it for the first time)
-    is a location check. Only offices in enabled DLC states are included.
-    """
-    display_name = "Recruitment Office Discovery Checks"
-    default = 1
-
-
 class StateArrivalChecks(Toggle):
     """
     If enabled, entering a DLC state for the first time is a location check.
@@ -158,6 +149,5 @@ class ATSOptions(PerGameCommonOptions):
     cargo_delivery_checks: CargoDeliveryChecks
     city_arrival_checks: CityArrivalChecks
     garage_upgrade_checks: GarageUpgradeChecks
-    recruitment_office_checks: RecruitmentOfficeChecks
     state_arrival_checks: StateArrivalChecks
     death_link: DeathLink

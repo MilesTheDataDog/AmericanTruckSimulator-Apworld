@@ -826,8 +826,8 @@ def _parse_sii_save(text: str) -> Dict[str, Any]:
     if money_m:
         result["money"] = int(money_m.group(1))
 
-    # visited_city[N]: city.<city_id>
-    for m in re.finditer(r"\bvisited_city\[\d+\]\s*:\s*city\.(\w+)", text):
+    # visited_cities[N]: <city_id>
+    for m in re.finditer(r"\bvisited_cities\[\d+\]\s*:\s*(\w+)", text):
         result["visited_cities"].add(m.group(1))
 
     # garage : garage.<city_id> { ... status: 2 ... }
@@ -1210,8 +1210,6 @@ class ATSContext(CommonContext):
             loc_name = f"Reached Level {event.get('level', 0)}"
         elif etype == "garage_upgraded":
             loc_name = f"Garage Upgraded - {event.get('city_display', '')}"
-        elif etype == "office_found":
-            loc_name = f"Found Office - {event.get('office_display', '')}"
         else:
             return None
 
