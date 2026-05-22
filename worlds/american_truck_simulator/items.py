@@ -32,7 +32,6 @@ class ATSItemData(NamedTuple):
 # ── Build item tables from JSON data ──────────────────────────────────────────
 
 _cities_data = _load("cities.json")
-_trucks_data = _load("trucks.json")
 
 # DLC name → state id mapping (matches cities.json dlc field).
 # Used to map the EnabledDLC option values to state IDs for location filtering.
@@ -55,29 +54,6 @@ _DLC_KEY_MAP: Dict[str, str] = {
     "Iowa":         "iowa",
     "Louisiana":    "louisiana",
 }
-
-# ── Truck model unlock items ───────────────────────────────────────────────────
-TRUCK_UNLOCK_ITEMS: Dict[str, ATSItemData] = {}
-for _i, _truck in enumerate(_trucks_data["shuffle_trucks"]):
-    _name = f"Unlock {_truck['manufacturer']} {_truck['model']}"
-    if _truck.get("year"):
-        _name = f"Unlock {_truck['manufacturer']} {_truck['model']} ({_truck['year']})"
-    TRUCK_UNLOCK_ITEMS[_name] = ATSItemData(
-        code=ATS_BASE_ID + 100 + _i,
-        classification=ItemClassification.useful,
-        category="truck_unlock",
-        game_id=_truck["id"],
-    )
-
-# ── Truck upgrade pack items ───────────────────────────────────────────────────
-TRUCK_UPGRADE_ITEMS: Dict[str, ATSItemData] = {}
-for _i, _pack in enumerate(_trucks_data["upgrade_packs"]):
-    TRUCK_UPGRADE_ITEMS[_pack["name"]] = ATSItemData(
-        code=ATS_BASE_ID + 200 + _i,
-        classification=ItemClassification.useful,
-        category="truck_upgrade",
-        game_id=_pack["id"],
-    )
 
 # ── Money grant items ──────────────────────────────────────────────────────────
 # Received as Archipelago items; client writes total to items.json and the DLL
@@ -149,8 +125,6 @@ VICTORY_ITEM = ATSItemData(
 
 # ── Combined lookup tables ─────────────────────────────────────────────────────
 ALL_ITEMS: Dict[str, ATSItemData] = {
-    **TRUCK_UNLOCK_ITEMS,
-    **TRUCK_UPGRADE_ITEMS,
     **MONEY_GRANT_ITEMS,
     **XP_GRANT_ITEMS,
     **FILLER_ITEMS,
@@ -162,17 +136,7 @@ ITEM_NAME_TO_ID: Dict[str, int] = {name: data.code for name, data in ALL_ITEMS.i
 
 def get_items_for_options(options) -> List[str]:
     """Return the list of item names to place into the pool given player options."""
-    items: List[str] = []
-
-    # Truck unlocks
-    if options.shuffle_trucks:
-        items.extend(TRUCK_UNLOCK_ITEMS.keys())
-
-    # Truck upgrade packs
-    if options.shuffle_truck_upgrades:
-        items.extend(TRUCK_UPGRADE_ITEMS.keys())
-
-    return items
+    return []
 
 
 def _get_enabled_state_ids(options) -> set:

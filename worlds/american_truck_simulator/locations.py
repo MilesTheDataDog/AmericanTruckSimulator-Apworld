@@ -9,7 +9,6 @@ from .items import ATS_BASE_ID
 # Cargo deliveries:       ATS_BASE_ID + 10000   (slots 10000–10499)
 # City first arrivals:    ATS_BASE_ID + 11000   (slots 11000–11999)
 # Level milestones:       ATS_BASE_ID + 12000   (slots 12000–12009)
-# Garage upgrades:        ATS_BASE_ID + 13000   (slots 13000–13499)
 # State first visit:      ATS_BASE_ID + 15000   (slots 15000–15049)
 # Goal location:          ATS_BASE_ID + 19999
 
@@ -62,13 +61,11 @@ for _i, _cargo in enumerate(_cargo_data["cargo_types"]):
         game_id=_cargo["id"],
     )
 
-# ── City first arrival, garage upgrade, and recruitment office locations ────────
+# ── City first arrival locations ───────────────────────────────────────────────
 # These are built per-state so they live in the correct region.
 CITY_ARRIVAL_LOCATIONS: Dict[str, ATSLocationData] = {}
-GARAGE_UPGRADE_LOCATIONS: Dict[str, ATSLocationData] = {}
 
 _city_index = 0
-_garage_loc_index = 0
 
 for _state in _cities_data["states"]:
     _state_name = _state["name"]
@@ -77,7 +74,6 @@ for _state in _cities_data["states"]:
     for _city in _state["cities"]:
         _city_display = f"{_city['name']}, {_state_name}"
 
-        # City first arrival
         CITY_ARRIVAL_LOCATIONS[f"First Arrival - {_city_display}"] = ATSLocationData(
             code=ATS_BASE_ID + 11000 + _city_index,
             region=_region_name,
@@ -85,16 +81,6 @@ for _state in _cities_data["states"]:
             game_id=_city["id"],
         )
         _city_index += 1
-
-        # Garage upgrade (fully upgraded = 5 slots)
-        if _city.get("has_garage"):
-            GARAGE_UPGRADE_LOCATIONS[f"Garage Upgraded - {_city_display}"] = ATSLocationData(
-                code=ATS_BASE_ID + 13000 + _garage_loc_index,
-                region=_region_name,
-                category="garage",
-                game_id=_city["id"],
-            )
-            _garage_loc_index += 1
 
 # ── State first visit locations ────────────────────────────────────────────────
 # One location per DLC state (California and Nevada excluded — always accessible).
@@ -126,7 +112,6 @@ ALL_LOCATIONS: Dict[str, ATSLocationData] = {
     **LEVEL_MILESTONE_LOCATIONS,
     **CARGO_DELIVERY_LOCATIONS,
     **CITY_ARRIVAL_LOCATIONS,
-    **GARAGE_UPGRADE_LOCATIONS,
     **STATE_ARRIVAL_LOCATIONS,
     GOAL_LOCATION_NAME: GOAL_LOCATION,
 }
@@ -152,11 +137,6 @@ def get_locations_for_options(options) -> List[str]:
 
     if options.city_arrival_checks:
         for name, data in CITY_ARRIVAL_LOCATIONS.items():
-            if data.region in _active_regions:
-                locations.append(name)
-
-    if options.garage_upgrade_checks:
-        for name, data in GARAGE_UPGRADE_LOCATIONS.items():
             if data.region in _active_regions:
                 locations.append(name)
 

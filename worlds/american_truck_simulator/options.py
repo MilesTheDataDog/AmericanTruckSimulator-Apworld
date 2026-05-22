@@ -71,26 +71,6 @@ class EnabledDLC(OptionSet):
     default = {"Arizona"}
 
 
-class ShuffleTrucks(Toggle):
-    """
-    If enabled, truck models (other than the two base-game starting trucks) must be
-    received as Archipelago items before they can be purchased at dealerships.
-    The C++ plugin enforces this by hiding locked trucks in dealer menus.
-    """
-    display_name = "Shuffle Truck Models"
-    default = 1
-
-
-class ShuffleTruckUpgrades(Toggle):
-    """
-    If enabled, truck upgrade tiers (engine, transmission, cab, chassis, accessories)
-    are shuffled into the item pool. Players start with only Tier 1 options available
-    and must receive upgrade items to access better hardware.
-    """
-    display_name = "Shuffle Truck Upgrades"
-    default = 0
-
-
 class LevelMilestoneChecks(Toggle):
     """
     If enabled, reaching driver levels 5, 10, 15, 20, 25, and 30 each count as
@@ -118,15 +98,6 @@ class CityArrivalChecks(Toggle):
     default = 1
 
 
-class GarageUpgradeChecks(Toggle):
-    """
-    If enabled, fully upgrading a garage to 5 truck slots is a location check.
-    Only garages in enabled DLC states are included.
-    """
-    display_name = "Garage Upgrade Checks"
-    default = 1
-
-
 class StateArrivalChecks(Toggle):
     """
     If enabled, entering a DLC state for the first time is a location check.
@@ -143,11 +114,8 @@ class ATSOptions(PerGameCommonOptions):
     goal_level: GoalLevel
     goal_money: GoalMoney
     enabled_dlc: EnabledDLC
-    shuffle_trucks: ShuffleTrucks
-    shuffle_truck_upgrades: ShuffleTruckUpgrades
     level_milestone_checks: LevelMilestoneChecks
     cargo_delivery_checks: CargoDeliveryChecks
     city_arrival_checks: CityArrivalChecks
-    garage_upgrade_checks: GarageUpgradeChecks
     state_arrival_checks: StateArrivalChecks
     death_link: DeathLink

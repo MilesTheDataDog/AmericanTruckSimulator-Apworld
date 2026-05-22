@@ -3,8 +3,7 @@
 # ══════════════════════════════════════════════════════════════════════════════
 #
 #  Drive across the American West, delivering cargo and discovering cities.
-#  Trucks and upgrades are shuffled into the multiworld item pool; money and
-#  XP grants fill the remaining slots so every check rewards something useful.
+#  Money and XP grants fill the item pool so every check rewards something useful.
 #
 #  Instructions:
 #   1. Set your player name below.
@@ -44,8 +43,8 @@ American Truck Simulator:
   # California and Nevada are always active (base game) — do not list them here.
   # Arizona is FREE DLC for all players and is enabled by default.
   #
-  # Only enabled states will contribute city arrivals, garages, recruitment offices,
-  # and state first-visit checks. All enabled states are accessible from the start —
+  # Only enabled states will contribute city arrivals and state first-visit checks.
+  # All enabled states are accessible from the start —
   # no unlock items are required to enter them.
   #
   # Full list of available DLC states:
@@ -71,17 +70,6 @@ American Truck Simulator:
   #   - Iowa
   #   - Louisiana
 
-  # ── Item Shuffles ─────────────────────────────────────────────────────────────
-  # Shuffle truck models into the multiworld item pool.
-  # Locked trucks are hidden in dealer menus until you receive the unlock item.
-  # The two base starting trucks (Kenworth T680, Peterbilt 579) are never shuffled.
-  shuffle_trucks: true
-
-  # Shuffle truck upgrade tiers into the pool.
-  # Engine (Tiers 2–5), Transmission (Tiers 2–4), Chassis, Cab, and Accessories.
-  # You start with Tier 1 options only; higher tiers unlock as items are received.
-  shuffle_truck_upgrades: false
-
   # ── Location Checks ───────────────────────────────────────────────────────────
   # Reaching driver levels 5, 10, 15, 20, 25, and 30 each count as a check.
   level_milestone_checks: true
@@ -94,14 +82,6 @@ American Truck Simulator:
   # Arriving in a city for the first time counts as a check.
   # Only cities in California, Nevada, and your enabled DLC states are included.
   city_arrival_checks: true
-
-  # Fully upgrading a garage to 5 truck slots counts as a check.
-  # Only garages in California, Nevada, and your enabled DLC states are included.
-  garage_upgrade_checks: true
-
-  # Discovering a recruitment office for the first time counts as a check.
-  # Only offices in California, Nevada, and your enabled DLC states are included.
-  recruitment_office_checks: true
 
   # Entering a DLC state for the first time counts as a check.
   # Fires when you arrive in the first city in that state. California and Nevada

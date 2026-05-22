@@ -44,7 +44,6 @@ except Exception:
     pass
 
 from .items import (
-    ATS_BASE_ID,
     ALL_ITEMS,
     ATSItemData,
     ITEM_NAME_TO_ID,
@@ -104,18 +103,10 @@ class ATSWorld(World):
         if code is not None
     }
 
-    # Expose item and location groups for hint purposes
+    # Expose item groups for hint purposes
     item_name_groups = {
-        "Trucks": {name for name in ALL_ITEMS if name.startswith("Unlock ")},
         "Money Grants": {name for name in ALL_ITEMS if name.endswith("Money Grant")},
         "XP Grants": {name for name in ALL_ITEMS if name.endswith("XP Grant")},
-        "Truck Upgrades": {name for name in ALL_ITEMS if any(
-            name == pack for pack in [
-                "Engine Tier 2", "Engine Tier 3", "Engine Tier 4", "Engine Tier 5",
-                "Transmission Tier 2", "Transmission Tier 3", "Transmission Tier 4",
-                "Chassis Upgrade Pack", "Cab Upgrade Pack", "Accessories Pack",
-            ]
-        )},
     }
 
     def create_item(self, name: str) -> ATSItem:
@@ -181,12 +172,9 @@ class ATSWorld(World):
             "win_condition": self.options.win_condition.value,
             "goal_level": self.options.goal_level.value,
             "goal_money": self.options.goal_money.value,  # in thousands
-            "shuffle_trucks": bool(self.options.shuffle_trucks),
-            "shuffle_truck_upgrades": bool(self.options.shuffle_truck_upgrades),
             "level_milestone_checks": bool(self.options.level_milestone_checks),
             "cargo_delivery_checks": bool(self.options.cargo_delivery_checks),
             "city_arrival_checks": bool(self.options.city_arrival_checks),
-            "garage_upgrade_checks": bool(self.options.garage_upgrade_checks),
             "state_arrival_checks": bool(self.options.state_arrival_checks),
             "death_link": bool(self.options.death_link),
         }

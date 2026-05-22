@@ -807,13 +807,11 @@ def _parse_sii_save(text: str) -> Dict[str, Any]:
         experience_points (int)
         money            (int)
         visited_cities   (set[str])  — city IDs e.g. {"bakersfield", "fresno"}
-        owned_garages    (set[str])  — city IDs whose garage has status 2
     """
     result: Dict[str, Any] = {
         "experience_points": 0,
         "money": 0,
         "visited_cities": set(),
-        "owned_garages": set(),
     }
 
     _econ_m = _find_xp_block(text)
@@ -829,16 +827,6 @@ def _parse_sii_save(text: str) -> Dict[str, Any]:
     # visited_cities[N]: <city_id>
     for m in re.finditer(r"\bvisited_cities\[\d+\]\s*:\s*(\w+)", text):
         result["visited_cities"].add(m.group(1))
-
-    # garage : garage.<city_id> { ... status: 2 ... }
-    for block_m in re.finditer(
-        r"garage\s*:\s*garage\.(\w+)\s*\{([^}]*)\}", text, re.DOTALL
-    ):
-        city_id = block_m.group(1)
-        body = block_m.group(2)
-        status_m = re.search(r"\bstatus\s*:\s*(\d+)", body)
-        if status_m and int(status_m.group(1)) == 2:
-            result["owned_garages"].add(city_id)
 
     return result
 
@@ -923,8 +911,6 @@ class ATSContext(CommonContext):
         self.goal_complete: bool = False
 
         # Items received from server (sent to plugin)
-        self._unlocked_trucks: Set[str] = set()
-        self._unlocked_upgrade_tiers: Dict[str, int] = {}
         self._total_money_granted: int = 0
         self._total_xp_granted: int = 0
 
@@ -938,7 +924,6 @@ class ATSContext(CommonContext):
         # Save file polling state
         self._save_last_mtime: float = 0.0
         self._save_known_cities: Set[str] = set()
-        self._save_known_garages: Set[str] = set()
         self._save_known_states: Set[str] = set()
         self._save_warned_unreadable: bool = False
         self._fresh_save_checked: bool = False
@@ -1054,37 +1039,7 @@ class ATSContext(CommonContext):
             self._write_items_file()
 
     def _apply_item(self, item_name: str) -> None:
-        if item_name.startswith("Unlock "):
-            # Truck model unlock — store game_id (e.g. "kenworth_w900") not display name
-            from worlds.american_truck_simulator.items import ALL_ITEMS
-            item_data = ALL_ITEMS.get(item_name)
-            truck_game_id = item_data.game_id if item_data else item_name
-            self._unlocked_trucks.add(truck_game_id)
-            logger.info(f"[ATS] Unlocked truck: {item_name} ({truck_game_id})")
-
-        elif item_name in ("Engine Tier 2", "Engine Tier 3", "Engine Tier 4", "Engine Tier 5"):
-            tier = int(item_name.split()[-1])
-            self._unlocked_upgrade_tiers["engine"] = max(
-                self._unlocked_upgrade_tiers.get("engine", 1), tier
-            )
-            logger.info(f"[ATS] Engine unlocked to tier {tier}")
-
-        elif item_name in ("Transmission Tier 2", "Transmission Tier 3", "Transmission Tier 4"):
-            tier = int(item_name.split()[-1])
-            self._unlocked_upgrade_tiers["transmission"] = max(
-                self._unlocked_upgrade_tiers.get("transmission", 1), tier
-            )
-
-        elif item_name == "Chassis Upgrade Pack":
-            self._unlocked_upgrade_tiers["chassis"] = 2
-
-        elif item_name == "Cab Upgrade Pack":
-            self._unlocked_upgrade_tiers["cab"] = 2
-
-        elif item_name == "Accessories Pack":
-            self._unlocked_upgrade_tiers["accessories"] = 2
-
-        elif item_name.endswith("Money Grant"):
+        if item_name.endswith("Money Grant"):
             from worlds.american_truck_simulator.items import ALL_ITEMS
             item_data = ALL_ITEMS.get(item_name)
             if item_data:
@@ -1110,15 +1065,11 @@ class ATSContext(CommonContext):
         payload = {
             "version": 1,
             "timestamp": time.time(),
-            "unlocked_trucks": sorted(self._unlocked_trucks),
-            "upgrade_tiers": self._unlocked_upgrade_tiers,
             "total_money_granted": self._total_money_granted,
             "total_xp_granted": self._total_xp_granted,
             "win_condition": self.slot_data.get("win_condition", 0),
             "goal_level": self.slot_data.get("goal_level", 35),
             "goal_money_thousands": self.slot_data.get("goal_money", 1000),
-            "shuffle_trucks": self.slot_data.get("shuffle_trucks", True),
-            "shuffle_truck_upgrades": self.slot_data.get("shuffle_truck_upgrades", False),
             "item_notifications": self._notifications,
             # Incremented each time we patch the save; DLL fires F9 on change.
             "reload_counter": self._reload_counter,
@@ -1238,8 +1189,6 @@ class ATSContext(CommonContext):
             loc_name = f"First Arrival - {event.get('city_display', '')}"
         elif etype == "level_reached":
             loc_name = f"Reached Level {event.get('level', 0)}"
-        elif etype == "garage_upgraded":
-            loc_name = f"Garage Upgraded - {event.get('city_display', '')}"
         else:
             return None
 
@@ -1657,8 +1606,7 @@ class ATSContext(CommonContext):
                 )
 
         from worlds.american_truck_simulator.locations import (
-            ALL_LOCATIONS, CITY_ARRIVAL_LOCATIONS, GARAGE_UPGRADE_LOCATIONS,
-            STATE_ARRIVAL_LOCATIONS,
+            ALL_LOCATIONS, CITY_ARRIVAL_LOCATIONS, STATE_ARRIVAL_LOCATIONS,
         )
         new_checks: List[int] = []
 
@@ -1726,15 +1674,6 @@ class ATSContext(CommonContext):
                     break
             if not matched:
                 logger.info(f"[ATS] City '{city_id}' from save: no matching location (not in randomizer pool for this seed)")
-
-        # Garage upgrade checks (status == 2 means player-owned)
-        new_garages = save["owned_garages"] - self._save_known_garages
-        for city_id in new_garages:
-            self._save_known_garages.add(city_id)
-            for loc_data in GARAGE_UPGRADE_LOCATIONS.values():
-                if loc_data.game_id == city_id and loc_data.code not in self.checked_locations:
-                    new_checks.append(loc_data.code)
-                    break
 
         if new_checks:
             logger.info(f"[ATS] Save poll: {len(new_checks)} new location check(s) from save file.")

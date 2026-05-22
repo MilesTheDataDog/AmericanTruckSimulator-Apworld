@@ -92,10 +92,6 @@ static GameState g_state;
 
 // ── Item state (read from items.json) ─────────────────────────────────────────
 struct ItemState {
-    std::set<std::string> unlocked_trucks;
-    std::map<std::string, int> upgrade_tiers;
-    bool shuffle_trucks = false;
-    bool shuffle_truck_upgrades = false;
     int win_condition = 0;
     int goal_level = 35;
     long long goal_money = 1000000;
@@ -213,25 +209,10 @@ static void read_items_file() {
             std::ifstream f(g_items_file);
             json j = json::parse(f);
 
-            g_items.unlocked_trucks.clear();
-            for (auto& t : j.value("unlocked_trucks", json::array())) {
-                g_items.unlocked_trucks.insert(t.get<std::string>());
-            }
-
-            g_items.shuffle_trucks         = j.value("shuffle_trucks",         false);
-            g_items.shuffle_truck_upgrades = j.value("shuffle_truck_upgrades", false);
-            g_items.win_condition          = j.value("win_condition",           0);
-            g_items.goal_level             = j.value("goal_level",              35);
-            g_items.goal_money             =
+            g_items.win_condition = j.value("win_condition", 0);
+            g_items.goal_level    = j.value("goal_level",    35);
+            g_items.goal_money    =
                 (long long)(j.value("goal_money_thousands", 1000)) * 1000;
-
-            g_items.upgrade_tiers.clear();
-            if (j.contains("upgrade_tiers") && j["upgrade_tiers"].is_object()) {
-                for (auto& [k, v] : j["upgrade_tiers"].items()) {
-                    if (v.is_number_integer())
-                        g_items.upgrade_tiers[k] = v.get<int>();
-                }
-            }
 
             // (Lua mod reads item_notifications directly; no need to log here)
 
