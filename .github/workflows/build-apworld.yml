@@ -13,6 +13,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout ATS Apworld
@@ -57,3 +59,13 @@ jobs:
           name: american_truck_simulator-apworld
           path: archipelago/build/apworlds/american_truck_simulator.apworld
           if-no-files-found: error
+
+      - name: Update release/american_truck_simulator.apworld
+        run: |
+          cp archipelago/build/apworlds/american_truck_simulator.apworld ats-apworld/release/american_truck_simulator.apworld
+          cd ats-apworld
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add release/american_truck_simulator.apworld
+          git diff --cached --quiet || git commit -m "ci: update release/american_truck_simulator.apworld [skip ci]"
+          git push
