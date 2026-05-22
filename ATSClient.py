@@ -1168,8 +1168,12 @@ class ATSContext(CommonContext):
             return
 
         self.plugin_connected = data.get("plugin_alive", False)
-        self.current_level = data.get("current_level", self.current_level)
-        self.current_money = data.get("current_money", self.current_money)
+        _evt_level = data.get("current_level", 0)
+        _evt_money = data.get("current_money", 0)
+        if _evt_level > 0:
+            self.current_level = _evt_level
+        if _evt_money > 0:
+            self.current_money = _evt_money
 
         new_checks: List[int] = []
 

@@ -95,6 +95,7 @@ class ATSWorld(World):
     options_dataclass = ATSOptions
     options: ATSOptions
     web = ATSWebWorld()
+    release_mode = "auto"
 
     item_name_to_id = ITEM_NAME_TO_ID
     location_name_to_id = {
