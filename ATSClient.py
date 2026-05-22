@@ -848,6 +848,23 @@ class ATSCommandProcessor(ClientCommandProcessor):
         logger.info(f"[ATS] Checks sent:      {len(ctx.checked_locations)}")
         logger.info(f"[ATS] Goal satisfied:   {ctx.goal_complete}")
 
+        # Win condition diagnostics
+        wc  = ctx.slot_data.get("win_condition", WIN_LEVEL_AND_MONEY)
+        lvl = ctx.slot_data.get("goal_level", 35)
+        money_k = ctx.slot_data.get("goal_money", 1000)
+        goal_money = money_k * 1000
+        wc_names = {
+            WIN_LEVEL_AND_MONEY: "level_and_money",
+            WIN_LEVEL_ONLY:      "level_only",
+            WIN_MONEY_ONLY:      "money_only",
+            WIN_LEVEL_OR_MONEY:  "level_or_money",
+        }
+        logger.info(f"[ATS] Win condition:    {wc_names.get(wc, wc)} (slot_data value={wc})")
+        level_ok = ctx.current_level >= lvl
+        money_ok = ctx.current_money >= goal_money
+        logger.info(f"[ATS]   Level check:    {ctx.current_level} >= {lvl} → {level_ok}")
+        logger.info(f"[ATS]   Money check:    ${ctx.current_money:,} >= ${goal_money:,} → {money_ok}")
+
     def _cmd_checked(self):
         """List every location check the server has confirmed for this run."""
         ctx: ATSContext = self.ctx
