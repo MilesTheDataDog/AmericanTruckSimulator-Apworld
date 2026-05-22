@@ -1002,6 +1002,7 @@ class ATSContext(CommonContext):
 
     def _on_connected(self) -> None:
         logger.info(f"[ATS] Connected to Archipelago server as {self.username}")
+        logger.info(f"[ATS] Received slot_data: {self.slot_data}")
         logger.info(f"[ATS] Win condition: {self._win_condition_description()}")
         _write_json(SLOT_DATA_FILE, self.slot_data)
         self._write_items_file()
