@@ -7,7 +7,9 @@
 #
 #  Instructions:
 #   1. Set your player name below.
-#   2. Configure which DLC states you own under "enabled_dlc".
+#   2. Under "enabled_dlc", REMOVE any states you do NOT own.
+#      All states are listed — keep only the ones you have the DLC for.
+#      California and Nevada are always active (base game) — they are not listed.
 #   3. Adjust any other options to your preference.
 #   4. Submit this file to your Archipelago server.
 # ══════════════════════════════════════════════════════════════════════════════
@@ -28,7 +30,7 @@ American Truck Simulator:
   #   level_only      : Reach the goal level.
   #   money_only      : Reach the goal money amount.
   #   level_or_money  : Reach either the goal level OR the goal money (first wins).
-  win_condition: level_and_money
+  win_condition: level_only
 
   # Driver level target (5–35). Level 35 is the maximum and unlocks all skill upgrades.
   goal_level: 35
@@ -38,37 +40,27 @@ American Truck Simulator:
   goal_money: 1000
 
   # ── Enabled DLC States ────────────────────────────────────────────────────────
-  # Which DLC map packs you own and want active in the randomizer.
-  #
-  # California and Nevada are always active (base game) — do not list them here.
-  # Arizona is FREE DLC for all players and is enabled by default.
-  #
-  # Only enabled states will contribute city arrivals and state first-visit checks.
-  # All enabled states are accessible from the start —
-  # no unlock items are required to enter them.
-  #
-  # Full list of available DLC states:
-  #   Arizona, New Mexico, Oregon, Washington, Utah, Idaho, Colorado, Wyoming,
-  #   Montana, Texas, Oklahoma, Kansas, Nebraska, Arkansas, Missouri, Iowa, Louisiana
+  # All DLC states are listed below. REMOVE any states you do NOT own.
+  # California and Nevada (base game) are always active — do not add them here.
+  # Arizona is FREE DLC — safe to keep for all players.
   enabled_dlc:
     - Arizona
-  # Add more lines below to include additional states (must own the DLC):
-  #   - New Mexico
-  #   - Oregon
-  #   - Washington
-  #   - Utah
-  #   - Idaho
-  #   - Colorado
-  #   - Wyoming
-  #   - Montana
-  #   - Texas
-  #   - Oklahoma
-  #   - Kansas
-  #   - Nebraska
-  #   - Arkansas
-  #   - Missouri
-  #   - Iowa
-  #   - Louisiana
+    - New Mexico
+    - Oregon
+    - Washington
+    - Utah
+    - Idaho
+    - Colorado
+    - Wyoming
+    - Montana
+    - Texas
+    - Oklahoma
+    - Kansas
+    - Nebraska
+    - Arkansas
+    - Missouri
+    - Iowa
+    - Louisiana
 
   # ── Location Checks ───────────────────────────────────────────────────────────
   # Reaching driver levels 5, 10, 15, 20, 25, and 30 each count as a check.
@@ -93,3 +85,4 @@ American Truck Simulator:
   # players in the session. Receiving a death from them causes a truck breakdown
   # event in your game.
   death_link: false
+
