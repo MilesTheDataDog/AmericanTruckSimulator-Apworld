@@ -6,8 +6,6 @@ from BaseClasses import ItemClassification
 ATS_BASE_ID = 17_000_000
 
 # ── Item ID offsets ────────────────────────────────────────────────────────────
-# Truck model unlocks:    ATS_BASE_ID + 100   (slots 100–149)
-# Truck upgrade packs:    ATS_BASE_ID + 200   (slots 200–219)
 # Money grant items:      ATS_BASE_ID + 3000  (slots 3000–3002)
 # XP grant items:         ATS_BASE_ID + 3100  (slots 3100–3102)
 # Filler items:           ATS_BASE_ID + 9000  (slots 9000–9099)
