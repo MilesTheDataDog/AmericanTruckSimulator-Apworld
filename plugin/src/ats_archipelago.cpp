@@ -67,7 +67,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.0.0";
+static const char* PLUGIN_VERSION = "2.1.0";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -166,12 +166,35 @@ static int xp_to_level(int xp) {
 
 // ── Memory grant system ────────────────────────────────────────────────────────
 //
-// Stable instruction addresses (confirmed unchanged across saves and profiles).
-// The VEH captures the base-object register the first time each fires.
+// Instruction addresses are resolved at runtime from the amtrucks.exe module
+// base + a pre-computed RVA.  If the bytes at the RVA-derived address don't
+// match (different game version), XP falls back to an AOB scan.  All three
+// addresses are logged at startup so mismatches are immediately diagnosable.
+//
+// Friend's absolute addresses (confirmed stable on their machine):
+//   0x7FF65D97DA69  mov [rdi+0x10],  rcx  — money write
+//   0x7FF65D62FE66  mov [rsi+0x62C], edi  — XP write
+//   0x7FF65D62A9DF  mov [rbx+0x10],  rcx  — city-count write
+//
+// Assumed friend base: 0x7FF65D000000  → RVAs below.
 
-static const uintptr_t ADDR_MONEY_INC  = 0x7FF65D97DA69ULL; // mov [rdi+0x10],  rcx
-static const uintptr_t ADDR_XP_WRITE   = 0x7FF65D62FE66ULL; // mov [rsi+0x62C], edi
-static const uintptr_t ADDR_CITY_COUNT = 0x7FF65D62A9DFULL; // mov [rbx+0x10],  rcx
+static const uintptr_t FRIEND_BASE = 0x7FF65D000000ULL;
+static const uintptr_t MONEY_RVA   = 0x7FF65D97DA69ULL - FRIEND_BASE; // 0x97DA69
+static const uintptr_t XP_RVA      = 0x7FF65D62FE66ULL - FRIEND_BASE; // 0x62FE66
+static const uintptr_t CITY_RVA    = 0x7FF65D62A9DFULL - FRIEND_BASE; // 0x62A9DF
+
+// Expected machine-code bytes at each instruction (for verification + AOB).
+//   48 89 4F 10        mov [rdi+0x10],  rcx
+//   89 BE 2C 06 00 00  mov [rsi+0x62C], edi   ← 6 unique bytes → AOB-scannable
+//   48 89 4B 10        mov [rbx+0x10],  rcx
+static const uint8_t MONEY_PATTERN[] = {0x48, 0x89, 0x4F, 0x10};
+static const uint8_t XP_PATTERN[]    = {0x89, 0xBE, 0x2C, 0x06, 0x00, 0x00};
+static const uint8_t CITY_PATTERN[]  = {0x48, 0x89, 0x4B, 0x10};
+
+// Resolved at init — 0 means not found; breakpoint + capture disabled.
+static uintptr_t ADDR_MONEY_INC  = 0;
+static uintptr_t ADDR_XP_WRITE   = 0;
+static uintptr_t ADDR_CITY_COUNT = 0;
 
 static const ptrdiff_t MONEY_OFFSET    = 0x10;
 static const ptrdiff_t XP_OFFSET       = 0x62C;
@@ -236,22 +259,167 @@ static bool safe_write_i32(uintptr_t addr, int32_t val) {
     return true;
 }
 
-// ── Hardware breakpoint helpers ────────────────────────────────────────────────
-// DR7 layout used here:
-//   bit 0 = L0 (local enable DR0), bit 2 = L1, bit 4 = L2
-//   condition/size fields for execution breakpoints default to 0 (correct)
+// ── Address resolution helpers ────────────────────────────────────────────────
 
-static const DWORD64 DR7_EXEC_012 = (1ULL<<0) | (1ULL<<2) | (1ULL<<4);
+static std::string bytes_hex(const uint8_t* buf, size_t len) {
+    std::ostringstream oss;
+    for (size_t i = 0; i < len; ++i) {
+        if (i) oss << ' ';
+        oss << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << (int)buf[i];
+    }
+    return oss.str();
+}
+
+static bool verify_bytes_at(uintptr_t addr, const uint8_t* pattern, size_t patlen) {
+    if (!addr) return false;
+    uint8_t buf[16] = {};
+    SIZE_T n = 0;
+    if (!ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(addr),
+                           buf, patlen, &n) || n != patlen)
+        return false;
+    return memcmp(buf, pattern, patlen) == 0;
+}
+
+// Scan [base, base+imgSize) for `pattern`, reading in 64 KB chunks with overlap.
+static uintptr_t aob_scan(uintptr_t base, size_t imgSize,
+                           const uint8_t* pattern, size_t patlen) {
+    const size_t CHUNK = 65536;
+    std::vector<uint8_t> buf(CHUNK + patlen - 1);
+
+    for (size_t off = 0; off < imgSize; off += CHUNK) {
+        size_t toRead = std::min(CHUNK + patlen - 1, imgSize - off);
+        SIZE_T n = 0;
+        if (!ReadProcessMemory(GetCurrentProcess(),
+                               reinterpret_cast<LPCVOID>(base + off),
+                               buf.data(), toRead, &n) || n < patlen)
+            continue;
+        for (size_t i = 0; i + patlen <= n; ++i) {
+            if (memcmp(buf.data() + i, pattern, patlen) == 0)
+                return base + off + i;
+        }
+    }
+    return 0;
+}
+
+// Get PE SizeOfImage without psapi — read the PE header directly.
+static size_t pe_image_size(uintptr_t base) {
+    uint8_t hdr[1024] = {};
+    SIZE_T n = 0;
+    if (!ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(base),
+                           hdr, sizeof(hdr), &n) || n < sizeof(IMAGE_DOS_HEADER))
+        return 0;
+    auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(hdr);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return 0;
+    LONG lfanew = dos->e_lfanew;
+    if (lfanew < 0 || (size_t)lfanew + sizeof(IMAGE_NT_HEADERS64) > n) return 0;
+    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(hdr + lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return 0;
+    return nt->OptionalHeader.SizeOfImage;
+}
+
+// Called once at plugin init.  Fills ADDR_MONEY_INC / ADDR_XP_WRITE / ADDR_CITY_COUNT.
+static void resolve_addresses() {
+    HMODULE hMod = GetModuleHandleA("amtrucks.exe");
+    if (!hMod) {
+        log("ADDR resolve ERROR: GetModuleHandle(amtrucks.exe) returned NULL",
+            SCS_LOG_TYPE_error);
+        return;
+    }
+
+    uintptr_t base    = reinterpret_cast<uintptr_t>(hMod);
+    size_t    imgSize = pe_image_size(base);
+    log("amtrucks.exe base=" + hex_addr(base) +
+        " size=" + std::to_string(imgSize / 1024) + " KB  "
+        "(friend_base=" + hex_addr(FRIEND_BASE) + ")");
+
+    // ── Money ──────────────────────────────────────────────────────────────────
+    {
+        uintptr_t addr = base + MONEY_RVA;
+        uint8_t   found[8] = {};
+        SIZE_T    n = 0;
+        ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(addr),
+                          found, sizeof(MONEY_PATTERN), &n);
+        if (verify_bytes_at(addr, MONEY_PATTERN, sizeof(MONEY_PATTERN))) {
+            ADDR_MONEY_INC = addr;
+            log("ADDR money   OK  @ " + hex_addr(addr) +
+                "  bytes=" + bytes_hex(found, sizeof(MONEY_PATTERN)));
+        } else {
+            log("ADDR money   FAIL@ " + hex_addr(addr) +
+                "  found=" + bytes_hex(found, n) +
+                "  want=" + bytes_hex(MONEY_PATTERN, sizeof(MONEY_PATTERN)) +
+                "  (money grants disabled — update FRIEND_BASE or provide new address)",
+                SCS_LOG_TYPE_warning);
+        }
+    }
+
+    // ── XP — try RVA first, then AOB scan (6-byte pattern is fairly unique) ──
+    {
+        uintptr_t addr = base + XP_RVA;
+        uint8_t   found[8] = {};
+        SIZE_T    n = 0;
+        ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(addr),
+                          found, sizeof(XP_PATTERN), &n);
+        if (verify_bytes_at(addr, XP_PATTERN, sizeof(XP_PATTERN))) {
+            ADDR_XP_WRITE = addr;
+            log("ADDR xp      OK  @ " + hex_addr(addr) +
+                "  bytes=" + bytes_hex(found, sizeof(XP_PATTERN)));
+        } else {
+            log("ADDR xp      FAIL@ " + hex_addr(addr) +
+                "  found=" + bytes_hex(found, n) +
+                "  want=" + bytes_hex(XP_PATTERN, sizeof(XP_PATTERN)) +
+                "  — trying AOB scan...",
+                SCS_LOG_TYPE_warning);
+            if (imgSize > 0) {
+                uintptr_t hit = aob_scan(base, imgSize, XP_PATTERN, sizeof(XP_PATTERN));
+                if (hit) {
+                    ADDR_XP_WRITE = hit;
+                    log("ADDR xp      AOB @ " + hex_addr(hit) + "  (XP grants enabled)");
+                } else {
+                    log("ADDR xp      AOB found no match — XP grants disabled",
+                        SCS_LOG_TYPE_warning);
+                }
+            }
+        }
+    }
+
+    // ── City count ─────────────────────────────────────────────────────────────
+    {
+        uintptr_t addr = base + CITY_RVA;
+        uint8_t   found[8] = {};
+        SIZE_T    n = 0;
+        ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(addr),
+                          found, sizeof(CITY_PATTERN), &n);
+        if (verify_bytes_at(addr, CITY_PATTERN, sizeof(CITY_PATTERN))) {
+            ADDR_CITY_COUNT = addr;
+            log("ADDR city    OK  @ " + hex_addr(addr) +
+                "  bytes=" + bytes_hex(found, sizeof(CITY_PATTERN)));
+        } else {
+            log("ADDR city    FAIL@ " + hex_addr(addr) +
+                "  found=" + bytes_hex(found, n) +
+                "  want=" + bytes_hex(CITY_PATTERN, sizeof(CITY_PATTERN)) +
+                "  (city detection disabled — update FRIEND_BASE or provide new address)",
+                SCS_LOG_TYPE_warning);
+        }
+    }
+}
+
+// ── Hardware breakpoint helpers ────────────────────────────────────────────────
+// DR7 layout: bit 0 = L0 (enable DR0), bit 2 = L1, bit 4 = L2.
+// Condition/size fields default to 0 (execution breakpoint, correct).
 
 static void set_bp_on_thread(HANDLE thread) {
+    // Skip entirely if no addresses were resolved (avoids spurious single-steps).
+    if (!ADDR_MONEY_INC && !ADDR_XP_WRITE && !ADDR_CITY_COUNT) return;
+
     CONTEXT ctx = {};
     ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
     if (!GetThreadContext(thread, &ctx)) return;
-    ctx.Dr0  = ADDR_MONEY_INC;
-    ctx.Dr1  = ADDR_XP_WRITE;
-    ctx.Dr2  = ADDR_CITY_COUNT;
-    ctx.Dr3  = 0;
-    ctx.Dr7  = DR7_EXEC_012;
+
+    ctx.Dr7 = 0;
+    if (ADDR_MONEY_INC)  { ctx.Dr0 = ADDR_MONEY_INC;  ctx.Dr7 |= (1ULL << 0); }
+    if (ADDR_XP_WRITE)   { ctx.Dr1 = ADDR_XP_WRITE;   ctx.Dr7 |= (1ULL << 2); }
+    if (ADDR_CITY_COUNT) { ctx.Dr2 = ADDR_CITY_COUNT;  ctx.Dr7 |= (1ULL << 4); }
+    ctx.Dr3 = 0;
     SetThreadContext(thread, &ctx);
 }
 
@@ -619,6 +787,9 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
     g_items_file  = g_comm_dir / "items.json";
     if (!fs::exists(g_comm_dir)) fs::create_directories(g_comm_dir);
     log("Comm folder: " + g_comm_dir.string());
+
+    // Resolve instruction addresses from module base + RVA (with AOB fallback for XP).
+    resolve_addresses();
 
     // Register VEH before setting breakpoints.
     g_veh_handle = AddVectoredExceptionHandler(1, ats_veh);
