@@ -197,39 +197,43 @@ static bool all_ptrs_captured() {
            g_city_ptr.load(std::memory_order_relaxed)  != 0;
 }
 
-// Safe memory helpers using SEH so a stale pointer doesn't crash the DLL.
+// Safe memory helpers using ReadProcessMemory / WriteProcessMemory.
+// These are standard Win32 APIs — unlike __try/__except (MSVC SEH) they compile
+// cleanly with MinGW/GCC and return FALSE instead of crashing on bad addresses.
+static HANDLE g_self = INVALID_HANDLE_VALUE;  // set in scs_telemetry_init
+
 static int64_t safe_read_i64(uintptr_t addr) {
     int64_t v = 0;
-    __try { v = *reinterpret_cast<const int64_t*>(addr); }
-    __except(EXCEPTION_EXECUTE_HANDLER) {
-        log("safe_read_i64 AV at " + hex_addr(addr), SCS_LOG_TYPE_warning);
-    }
+    SIZE_T n = 0;
+    if (!ReadProcessMemory(g_self, reinterpret_cast<LPCVOID>(addr), &v, sizeof(v), &n) || n != sizeof(v))
+        log("safe_read_i64 failed at " + hex_addr(addr), SCS_LOG_TYPE_warning);
     return v;
 }
 
 static int32_t safe_read_i32(uintptr_t addr) {
     int32_t v = 0;
-    __try { v = *reinterpret_cast<const int32_t*>(addr); }
-    __except(EXCEPTION_EXECUTE_HANDLER) {
-        log("safe_read_i32 AV at " + hex_addr(addr), SCS_LOG_TYPE_warning);
-    }
+    SIZE_T n = 0;
+    if (!ReadProcessMemory(g_self, reinterpret_cast<LPCVOID>(addr), &v, sizeof(v), &n) || n != sizeof(v))
+        log("safe_read_i32 failed at " + hex_addr(addr), SCS_LOG_TYPE_warning);
     return v;
 }
 
 static bool safe_write_i64(uintptr_t addr, int64_t val) {
-    __try { *reinterpret_cast<int64_t*>(addr) = val; return true; }
-    __except(EXCEPTION_EXECUTE_HANDLER) {
-        log("safe_write_i64 AV at " + hex_addr(addr), SCS_LOG_TYPE_warning);
+    SIZE_T n = 0;
+    if (!WriteProcessMemory(g_self, reinterpret_cast<LPVOID>(addr), &val, sizeof(val), &n) || n != sizeof(val)) {
+        log("safe_write_i64 failed at " + hex_addr(addr), SCS_LOG_TYPE_warning);
+        return false;
     }
-    return false;
+    return true;
 }
 
 static bool safe_write_i32(uintptr_t addr, int32_t val) {
-    __try { *reinterpret_cast<int32_t*>(addr) = val; return true; }
-    __except(EXCEPTION_EXECUTE_HANDLER) {
-        log("safe_write_i32 AV at " + hex_addr(addr), SCS_LOG_TYPE_warning);
+    SIZE_T n = 0;
+    if (!WriteProcessMemory(g_self, reinterpret_cast<LPVOID>(addr), &val, sizeof(val), &n) || n != sizeof(val)) {
+        log("safe_write_i32 failed at " + hex_addr(addr), SCS_LOG_TYPE_warning);
+        return false;
     }
-    return false;
+    return true;
 }
 
 // ── Hardware breakpoint helpers ────────────────────────────────────────────────
@@ -607,6 +611,7 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
         static_cast<const scs_telemetry_init_params_v100_t*>(params);
 
     g_log = p->common.log;
+    g_self = GetCurrentProcess();
     log("Archipelago plugin v" + std::string(PLUGIN_VERSION) + " initializing");
 
     g_comm_dir    = get_documents_path() / "American Truck Simulator" / "archipelago";
