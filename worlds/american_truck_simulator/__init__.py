@@ -167,18 +167,15 @@ class ATSWorld(World):
         Data sent to the client via the Archipelago server after connection.
         The client uses this to know the player's exact win condition and options.
         """
-        # Access options via multiworld dict (works across all AP versions).
-        # self.options.X.value can return class-level defaults in some AP builds.
-        p = self.player
-        mw = self.multiworld
+        o = self.options
         return {
             "game_version": "1.0.0",
-            "win_condition": int(mw.win_condition[p]),
-            "goal_level": int(mw.goal_level[p]),
-            "goal_money": int(mw.goal_money[p]),  # in thousands
-            "level_milestone_checks": bool(mw.level_milestone_checks[p]),
-            "cargo_delivery_checks": bool(mw.cargo_delivery_checks[p]),
-            "city_arrival_checks": bool(mw.city_arrival_checks[p]),
-            "state_arrival_checks": bool(mw.state_arrival_checks[p]),
-            "death_link": bool(mw.death_link[p]),
+            "win_condition": int(o.win_condition.value),
+            "goal_level": int(o.goal_level.value),
+            "goal_money": int(o.goal_money.value),  # in thousands
+            "level_milestone_checks": bool(o.level_milestone_checks.value),
+            "cargo_delivery_checks": bool(o.cargo_delivery_checks.value),
+            "city_arrival_checks": bool(o.city_arrival_checks.value),
+            "state_arrival_checks": bool(o.state_arrival_checks.value),
+            "death_link": bool(o.death_link.value),
         }
