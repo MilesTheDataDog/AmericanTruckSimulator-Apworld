@@ -67,7 +67,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.1.1";
+static const char* PLUGIN_VERSION = "2.1.2";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -415,11 +415,17 @@ static void set_bp_on_thread(HANDLE thread) {
     ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
     if (!GetThreadContext(thread, &ctx)) return;
 
+    // Only arm DRs for pointers that haven't been captured yet (or were reset
+    // after stale detection).  This prevents re-arming already-valid pointers,
+    // and means a re-arm after stale reset only breaks on the reset addresses.
     ctx.Dr7 = 0;
-    if (ADDR_MONEY_INC)  { ctx.Dr0 = ADDR_MONEY_INC;  ctx.Dr7 |= (1ULL << 0); }
-    if (ADDR_XP_WRITE)   { ctx.Dr1 = ADDR_XP_WRITE;   ctx.Dr7 |= (1ULL << 2); }
-    if (ADDR_CITY_COUNT) { ctx.Dr2 = ADDR_CITY_COUNT;  ctx.Dr7 |= (1ULL << 4); }
-    ctx.Dr3 = 0;
+    ctx.Dr0 = ctx.Dr1 = ctx.Dr2 = ctx.Dr3 = 0;
+    if (ADDR_MONEY_INC  && g_money_ptr.load(std::memory_order_relaxed) == 0)
+        { ctx.Dr0 = ADDR_MONEY_INC;  ctx.Dr7 |= (1ULL << 0); }
+    if (ADDR_XP_WRITE   && g_xp_ptr.load(std::memory_order_relaxed)    == 0)
+        { ctx.Dr1 = ADDR_XP_WRITE;   ctx.Dr7 |= (1ULL << 2); }
+    if (ADDR_CITY_COUNT && g_city_ptr.load(std::memory_order_relaxed)   == 0)
+        { ctx.Dr2 = ADDR_CITY_COUNT;  ctx.Dr7 |= (1ULL << 4); }
     SetThreadContext(thread, &ctx);
 }
 
@@ -492,23 +498,33 @@ static LONG WINAPI ats_veh(EXCEPTION_POINTERS* ep) {
     CONTEXT*  ctx = ep->ContextRecord;
     uintptr_t ip  = ctx->Rip;
 
-    if (ip == ADDR_MONEY_INC && g_money_ptr.load(std::memory_order_relaxed) == 0) {
-        g_money_ptr.store(ctx->Rdi, std::memory_order_relaxed);
-        log("Memory: money pointer captured " + hex_addr(ctx->Rdi));
+    // IMPORTANT: always clear the DR for this thread when the breakpoint fires,
+    // regardless of whether we capture.  Without this, a thread that hits the
+    // instruction after the pointer was already captured (or re-armed on another
+    // thread first) would keep generating EXCEPTION_SINGLE_STEP every hit.
+    if (ADDR_MONEY_INC && ip == ADDR_MONEY_INC) {
+        if (g_money_ptr.load(std::memory_order_relaxed) == 0) {
+            g_money_ptr.store(ctx->Rdi, std::memory_order_relaxed);
+            log("Memory: money pointer captured " + hex_addr(ctx->Rdi));
+        }
         ctx->Dr0 = 0;
         ctx->Dr7 &= ~(1ULL << 0);
-    }
-    else if (ip == ADDR_XP_WRITE && g_xp_ptr.load(std::memory_order_relaxed) == 0) {
-        g_xp_ptr.store(ctx->Rsi, std::memory_order_relaxed);
-        log("Memory: XP pointer captured " + hex_addr(ctx->Rsi));
+    } else if (ADDR_XP_WRITE && ip == ADDR_XP_WRITE) {
+        if (g_xp_ptr.load(std::memory_order_relaxed) == 0) {
+            g_xp_ptr.store(ctx->Rsi, std::memory_order_relaxed);
+            log("Memory: XP pointer captured " + hex_addr(ctx->Rsi));
+        }
         ctx->Dr1 = 0;
         ctx->Dr7 &= ~(1ULL << 2);
-    }
-    else if (ip == ADDR_CITY_COUNT && g_city_ptr.load(std::memory_order_relaxed) == 0) {
-        g_city_ptr.store(ctx->Rbx, std::memory_order_relaxed);
-        log("Memory: city-count pointer captured " + hex_addr(ctx->Rbx));
+    } else if (ADDR_CITY_COUNT && ip == ADDR_CITY_COUNT) {
+        if (g_city_ptr.load(std::memory_order_relaxed) == 0) {
+            g_city_ptr.store(ctx->Rbx, std::memory_order_relaxed);
+            log("Memory: city-count pointer captured " + hex_addr(ctx->Rbx));
+        }
         ctx->Dr2 = 0;
         ctx->Dr7 &= ~(1ULL << 4);
+    } else {
+        return EXCEPTION_CONTINUE_SEARCH;
     }
 
     return EXCEPTION_CONTINUE_EXECUTION;
@@ -519,36 +535,62 @@ static void apply_memory_grants() {
     // Only apply while the simulation is running (objects stable).
     if (!g_state.in_game) return;
 
+    bool needs_rearm = false;
+
     // Money grant
     uintptr_t mp = g_money_ptr.load(std::memory_order_relaxed);
     if (mp && g_items.total_money_granted > g_applied_money) {
-        long long delta   = g_items.total_money_granted - g_applied_money;
         long long current = safe_read_i64(mp + MONEY_OFFSET);
-        long long newval  = current + delta;
-        if (safe_write_i64(mp + MONEY_OFFSET, newval)) {
-            g_applied_money = g_items.total_money_granted;
-            log("Grant applied: +$" + std::to_string(delta) +
-                " (balance now $" + std::to_string(newval) + ")");
-        } else {
-            log("Grant failed: money pointer stale — will recapture", SCS_LOG_TYPE_warning);
+        // Sanity check: realistic money range 0–10 billion.
+        // Values outside this range mean the pointer is stale (object moved after save load).
+        if (current < 0 || current > 10000000000LL) {
+            log("Money pointer stale (read " + std::to_string(current) +
+                ") — resetting and re-arming", SCS_LOG_TYPE_warning);
             g_money_ptr.store(0, std::memory_order_relaxed);
+            needs_rearm = true;
+        } else {
+            long long delta  = g_items.total_money_granted - g_applied_money;
+            long long newval = current + delta;
+            if (safe_write_i64(mp + MONEY_OFFSET, newval)) {
+                g_applied_money = g_items.total_money_granted;
+                log("Grant applied: +$" + std::to_string(delta) +
+                    " (balance now $" + std::to_string(newval) + ")");
+            } else {
+                log("Grant failed: money write error — resetting pointer", SCS_LOG_TYPE_warning);
+                g_money_ptr.store(0, std::memory_order_relaxed);
+                needs_rearm = true;
+            }
         }
     }
 
     // XP grant
     uintptr_t xp = g_xp_ptr.load(std::memory_order_relaxed);
     if (xp && g_items.total_xp_granted > g_applied_xp) {
-        int   delta   = g_items.total_xp_granted - g_applied_xp;
         int32_t current = safe_read_i32(xp + XP_OFFSET);
-        int32_t newval  = current + (int32_t)delta;
-        if (safe_write_i32(xp + XP_OFFSET, newval)) {
-            g_applied_xp = g_items.total_xp_granted;
-            log("Grant applied: +" + std::to_string(delta) +
-                " XP (total now " + std::to_string(newval) + ")");
-        } else {
-            log("Grant failed: XP pointer stale — will recapture", SCS_LOG_TYPE_warning);
+        // Sanity check: XP is 0–200000 (level 1 to max).
+        if (current < 0 || current > 200000) {
+            log("XP pointer stale (read " + std::to_string(current) +
+                ") — resetting and re-arming", SCS_LOG_TYPE_warning);
             g_xp_ptr.store(0, std::memory_order_relaxed);
+            needs_rearm = true;
+        } else {
+            int     delta  = g_items.total_xp_granted - g_applied_xp;
+            int32_t newval = current + (int32_t)delta;
+            if (safe_write_i32(xp + XP_OFFSET, newval)) {
+                g_applied_xp = g_items.total_xp_granted;
+                log("Grant applied: +" + std::to_string(delta) +
+                    " XP (total now " + std::to_string(newval) + ")");
+            } else {
+                log("Grant failed: XP write error — resetting pointer", SCS_LOG_TYPE_warning);
+                g_xp_ptr.store(0, std::memory_order_relaxed);
+                needs_rearm = true;
+            }
         }
+    }
+
+    if (needs_rearm) {
+        log("Re-arming breakpoints to re-capture stale pointer(s)...");
+        set_bp_all_threads();
     }
 }
 
@@ -558,6 +600,16 @@ static void poll_city_count() {
     if (!cp) return;
 
     uint64_t count = (uint64_t)safe_read_i64(cp + CITY_CNT_OFFSET);
+
+    // Sanity check: ATS has ~700 cities total; any value > 10000 is a garbage read.
+    if (count > 10000) {
+        log("City pointer stale (read " + std::to_string(count) +
+            ") — resetting and re-arming", SCS_LOG_TYPE_warning);
+        g_city_ptr.store(0, std::memory_order_relaxed);
+        g_prev_city_count = UINT64_MAX;  // reset baseline for next capture
+        set_bp_all_threads();
+        return;
+    }
 
     if (g_prev_city_count == UINT64_MAX) {
         // First read — baseline, no event.
