@@ -96,67 +96,6 @@ _SCSC_AES_KEY = bytes([
     0x9e, 0xdf, 0x6b, 0x11, 0x82, 0x5a, 0x5d, 0x0a,
 ])
 
-# ── Save-grant persistence ────────────────────────────────────────────────────
-# Tracks how much XP / money has already been written into the save file so we
-# never double-apply across sessions.  Stored in grants.json next to items.json.
-
-GRANTS_FILE = COMM_DIR / "grants.json"
-
-
-def _load_save_grants() -> "tuple[int, int, int, int, int, int]":
-    """Return (last_written_xp, last_written_money, write_total_xp, write_total_money, base_xp, reload_counter)."""
-    try:
-        if GRANTS_FILE.exists():
-            data = _read_json(GRANTS_FILE)
-            reload_counter = int(data.get("reload_counter", 0))
-            base_xp        = int(data.get("base_xp", 0))
-            # New format: tracks exact values written to disk.
-            if "last_written_xp" in data:
-                return (
-                    int(data.get("last_written_xp",    0)),
-                    int(data.get("last_written_money",  0)),
-                    int(data.get("write_total_xp",      0)),
-                    int(data.get("write_total_money",   0)),
-                    base_xp,
-                    reload_counter,
-                )
-            # Old format migration: applied_xp/applied_money → write_total_*.
-            # last_written_* defaults to 0, which forces a safe re-apply of all
-            # grants to the current save on the next poll.
-            return (
-                0,
-                0,
-                int(data.get("applied_xp",    0)),
-                int(data.get("applied_money",  0)),
-                base_xp,
-                reload_counter,
-            )
-    except Exception:
-        pass
-    return 0, 0, 0, 0, 0, 0
-
-
-def _persist_save_grants(
-    last_written_xp: int,
-    last_written_money: int,
-    write_total_xp: int,
-    write_total_money: int,
-    base_xp: int = 0,
-    reload_counter: int = 0,
-) -> None:
-    try:
-        _write_json(GRANTS_FILE, {
-            "last_written_xp":   last_written_xp,
-            "last_written_money": last_written_money,
-            "write_total_xp":    write_total_xp,
-            "write_total_money": write_total_money,
-            "base_xp":           base_xp,
-            "reload_counter":    reload_counter,
-        })
-    except Exception as e:
-        logger.error(f"[ATS] Could not write grants.json: {e}")
-
-
 # Cumulative XP required to reach each level (index = level number).
 # Needs calibration against in-game observation — verify with /status once
 # connected and playing. These match community-documented ATS XP tables.
@@ -270,8 +209,8 @@ def _scan_profiles_dir(profiles_dir: Path, candidates: "list[tuple[float, Path]]
         for slot in save_dir.iterdir():
             if not slot.is_dir():
                 continue
-            if not slot.name.isdigit():
-                continue  # only numbered manual slots; skip autosave/quicksave
+            if slot.name == "quicksave":
+                continue  # skip — client writes here; reading it back causes stale-state loops
             game_sii = slot / "game.sii"
             if not game_sii.exists():
                 continue
@@ -327,8 +266,8 @@ def _find_ats_save_file() -> Optional[Path]:
             for slot in save_dir.iterdir():
                 if not slot.is_dir():
                     continue
-                if not slot.name.isdigit():
-                    continue  # only numbered manual slots; skip autosave/quicksave
+                if slot.name == "quicksave":
+                    continue  # client writes here; reading it back causes stale-state loops
                 game_sii = slot / "game.sii"
                 if not game_sii.exists():
                     continue
@@ -807,11 +746,13 @@ def _parse_sii_save(text: str) -> Dict[str, Any]:
         experience_points (int)
         money            (int)
         visited_cities   (set[str])  — city IDs e.g. {"bakersfield", "fresno"}
+        owned_garages    (set[str])  — city IDs whose garage has status 2
     """
     result: Dict[str, Any] = {
         "experience_points": 0,
         "money": 0,
         "visited_cities": set(),
+        "owned_garages": set(),
     }
 
     _econ_m = _find_xp_block(text)
@@ -824,9 +765,19 @@ def _parse_sii_save(text: str) -> Dict[str, Any]:
     if money_m:
         result["money"] = int(money_m.group(1))
 
-    # visited_cities[N]: <city_id>
-    for m in re.finditer(r"\bvisited_cities\[\d+\]\s*:\s*(\w+)", text):
+    # visited_city[N]: city.<city_id>
+    for m in re.finditer(r"\bvisited_city\[\d+\]\s*:\s*city\.(\w+)", text):
         result["visited_cities"].add(m.group(1))
+
+    # garage : garage.<city_id> { ... status: 2 ... }
+    for block_m in re.finditer(
+        r"garage\s*:\s*garage\.(\w+)\s*\{([^}]*)\}", text, re.DOTALL
+    ):
+        city_id = block_m.group(1)
+        body = block_m.group(2)
+        status_m = re.search(r"\bstatus\s*:\s*(\d+)", body)
+        if status_m and int(status_m.group(1)) == 2:
+            result["owned_garages"].add(city_id)
 
     return result
 
@@ -842,45 +793,25 @@ class ATSCommandProcessor(ClientCommandProcessor):
     def _cmd_status(self):
         """Show current ATS game state as seen by the client."""
         ctx: ATSContext = self.ctx
-        logger.info(f"[ATS] Plugin connected: {ctx.plugin_connected}")
-        logger.info(f"[ATS] Current level:    {ctx.current_level}")
-        logger.info(f"[ATS] Current money:    ${ctx.current_money:,}")
-        logger.info(f"[ATS] Checks sent:      {len(ctx.checked_locations)}")
-        logger.info(f"[ATS] Goal satisfied:   {ctx.goal_complete}")
+        logger.info(f"[ATS] Plugin connected:    {ctx.plugin_connected}")
+        logger.info(f"[ATS] Money ptr ready:     {ctx._ptr_money_ready}")
+        logger.info(f"[ATS] XP ptr ready:        {ctx._ptr_xp_ready}")
+        logger.info(f"[ATS] City ptr ready:      {ctx._ptr_city_ready}")
+        logger.info(f"[ATS] Current level:       {ctx.current_level}")
+        logger.info(f"[ATS] Current money:       ${ctx.current_money:,}")
+        logger.info(f"[ATS] Total money granted: ${ctx._total_money_granted:,}")
+        logger.info(f"[ATS] Total XP granted:    {ctx._total_xp_granted:,}")
+        logger.info(f"[ATS] Checks sent:         {len(ctx.checked_locations)}")
+        logger.info(f"[ATS] Goal satisfied:      {ctx.goal_complete}")
 
-        # Win condition diagnostics
-        wc  = ctx.slot_data.get("win_condition", WIN_LEVEL_AND_MONEY)
-        lvl = ctx.slot_data.get("goal_level", 35)
-        money_k = ctx.slot_data.get("goal_money", 1000)
+        wc       = ctx.slot_data.get("win_condition", 0)
+        lvl      = ctx.slot_data.get("goal_level", 35)
+        money_k  = ctx.slot_data.get("goal_money", 1000)
         goal_money = money_k * 1000
-        wc_names = {
-            WIN_LEVEL_AND_MONEY: "level_and_money",
-            WIN_LEVEL_ONLY:      "level_only",
-            WIN_MONEY_ONLY:      "money_only",
-            WIN_LEVEL_OR_MONEY:  "level_or_money",
-        }
-        logger.info(f"[ATS] Win condition:    {wc_names.get(wc, wc)} (slot_data value={wc})")
-        level_ok = ctx.current_level >= lvl
-        money_ok = ctx.current_money >= goal_money
-        logger.info(f"[ATS]   Level check:    {ctx.current_level} >= {lvl} → {level_ok}")
-        logger.info(f"[ATS]   Money check:    ${ctx.current_money:,} >= ${goal_money:,} → {money_ok}")
-
-    def _cmd_checked(self):
-        """List every location check the server has confirmed for this run."""
-        ctx: ATSContext = self.ctx
-        from worlds.american_truck_simulator.locations import ALL_LOCATIONS
-        id_to_name = {data.code: name for name, data in ALL_LOCATIONS.items()
-                      if data.code is not None}
-        if not ctx.checked_locations:
-            logger.info("[ATS] No locations checked yet.")
-            return
-        checked_names = sorted(
-            id_to_name.get(loc_id, f"Unknown location {loc_id}")
-            for loc_id in ctx.checked_locations
-        )
-        logger.info(f"[ATS] Checked locations ({len(checked_names)}):")
-        for name in checked_names:
-            logger.info(f"[ATS]   {name}")
+        wc_names = {0: "level_and_money", 1: "level_only", 2: "money_only", 3: "level_or_money"}
+        logger.info(f"[ATS] Win condition:       {wc_names.get(wc, wc)} (slot_data={wc})")
+        logger.info(f"[ATS]   Level:  {ctx.current_level} >= {lvl} → {ctx.current_level >= lvl}")
+        logger.info(f"[ATS]   Money:  ${ctx.current_money:,} >= ${goal_money:,} → {ctx.current_money >= goal_money}")
 
     def _cmd_resync(self):
         """Re-read the events file and resend any unchecked locations."""
@@ -927,12 +858,18 @@ class ATSContext(CommonContext):
         self.current_money: int = 0
         self.goal_complete: bool = False
 
-        # Items received from server (sent to plugin)
+        # Memory grant tracking — DLL applies grants directly to live memory
         self._total_money_granted: int = 0
         self._total_xp_granted: int = 0
-
-        # Track how many items we have applied so we can skip them on reconnect/resync
         self._applied_item_count: int = 0
+
+        # DLL pointer status (read from events.json)
+        self._ptr_money_ready: bool = False
+        self._ptr_xp_ready: bool = False
+        self._ptr_city_ready: bool = False
+
+        # Force an immediate save poll when DLL signals city_count_changed
+        self._force_save_poll: bool = False
 
         # Notification queue for in-game popups (written to items.json)
         self._notifications: List[Dict] = []
@@ -942,39 +879,10 @@ class ATSContext(CommonContext):
         self._save_last_mtime: float = 0.0
         self._save_known_cities: Set[str] = set()
         self._save_known_states: Set[str] = set()
-        self._save_warned_unreadable: bool = False
-        self._fresh_save_checked: bool = False
         self._save_path_logged: bool = False
         self._save_first_city_log: bool = False  # True after first city-count log
         self.current_xp: int = 0
-        self._save_is_plain: bool = False  # True when save uses SiiN (g_save_format 2)
-        self._save_scsc_meta: "Optional[dict]" = None  # set when save is an ScsC container
         self._save_not_found_warned: bool = False
-
-        # Save-grant tracking (persisted across sessions in grants.json).
-        # last_written_xp/money = the exact values in the last patched save.
-        # write_total_xp/money  = total AP grants at the time of that write.
-        # base_xp               = player's natural XP before any grants (fresh-profile detection).
-        self._last_written_xp: int
-        self._last_written_money: int
-        self._last_write_total_xp: int
-        self._last_write_total_money: int
-        self._save_base_xp: int
-        self._reload_counter: int
-        (self._last_written_xp,
-         self._last_written_money,
-         self._last_write_total_xp,
-         self._last_write_total_money,
-         self._save_base_xp,
-         self._reload_counter) = _load_save_grants()
-        if self._last_written_xp or self._last_written_money:
-            logger.info(
-                f"[ATS] Loaded grant state from grants.json: "
-                f"last_written_xp={self._last_written_xp:,}, "
-                f"last_written_money=${self._last_written_money:,}, "
-                f"write_total_xp={self._last_write_total_xp:,}, "
-                f"base_xp={self._save_base_xp:,}"
-            )
 
     # ── Archipelago callbacks ──────────────────────────────────────────────────
 
@@ -1002,20 +910,10 @@ class ATSContext(CommonContext):
 
     def _on_connected(self) -> None:
         logger.info(f"[ATS] Connected to Archipelago server as {self.username}")
-        logger.info(f"[ATS] Received slot_data: {self.slot_data}")
         logger.info(f"[ATS] Win condition: {self._win_condition_description()}")
+        # Write slot data so the plugin/mod can read player options
         _write_json(SLOT_DATA_FILE, self.slot_data)
         self._write_items_file()
-        # Scout level milestone locations so item names are available when checks fire.
-        # create_as_hint=0 means no permanent hints are created — purely informational.
-        from worlds.american_truck_simulator.locations import LEVEL_MILESTONE_LOCATIONS
-        milestone_ids = [d.code for d in LEVEL_MILESTONE_LOCATIONS.values() if d.code is not None]
-        if milestone_ids:
-            asyncio.create_task(self.send_msgs([{
-                "cmd": "LocationScouts",
-                "locations": milestone_ids,
-                "create_as_hint": 0,
-            }]))
 
     def _on_items_received(self, start_index: int, items) -> None:
         applied_any = False
@@ -1061,27 +959,25 @@ class ATSContext(CommonContext):
             from worlds.american_truck_simulator.items import ALL_ITEMS
             item_data = ALL_ITEMS.get(item_name)
             if item_data:
-                # game_id is "money_10000", "money_50000", or "money_150000"
                 amount = int(item_data.game_id.split("_")[1])
                 self._total_money_granted += amount
-                logger.info(f"[ATS] Money grant: +${amount:,} (total granted: ${self._total_money_granted:,})")
+                logger.info(f"[ATS] Money grant: +${amount:,} (total: ${self._total_money_granted:,})")
 
         elif item_name.endswith("XP Grant"):
             from worlds.american_truck_simulator.items import ALL_ITEMS
             item_data = ALL_ITEMS.get(item_name)
             if item_data:
-                # game_id is "xp_2000", "xp_10000", or "xp_50000"
                 amount = int(item_data.game_id.split("_")[1])
                 self._total_xp_granted += amount
-                logger.info(f"[ATS] XP grant: +{amount:,} XP (total granted: {self._total_xp_granted:,})")
+                logger.info(f"[ATS] XP grant: +{amount:,} XP (total: {self._total_xp_granted:,})")
 
 
     # ── Items file (client → plugin) ───────────────────────────────────────────
 
     def _write_items_file(self) -> None:
-        """Write the current unlocked-items state for the plugin/mod to read."""
+        """Write cumulative grant totals and win-condition config for the DLL."""
         payload = {
-            "version": 1,
+            "version": 2,
             "timestamp": time.time(),
             "total_money_granted": self._total_money_granted,
             "total_xp_granted": self._total_xp_granted,
@@ -1089,8 +985,6 @@ class ATSContext(CommonContext):
             "goal_level": self.slot_data.get("goal_level", 35),
             "goal_money_thousands": self.slot_data.get("goal_money", 1000),
             "item_notifications": self._notifications,
-            # Incremented each time we patch the save; DLL fires F9 on change.
-            "reload_counter": self._reload_counter,
         }
         _write_json(ITEMS_FILE, payload)
 
@@ -1137,12 +1031,34 @@ class ATSContext(CommonContext):
             return
 
         self.plugin_connected = data.get("plugin_alive", False)
+
+        # Read live values from DLL memory pointers (non-zero when pointer captured)
         _evt_level = data.get("current_level", 0)
         _evt_money = data.get("current_money", 0)
+        _evt_xp    = data.get("current_xp", 0)
         if _evt_level > 0:
             self.current_level = _evt_level
         if _evt_money > 0:
             self.current_money = _evt_money
+        if _evt_xp > 0:
+            self.current_xp = _evt_xp
+            self.current_level = _xp_to_level(_evt_xp)
+
+        # DLL pointer status
+        self._ptr_money_ready = data.get("ptr_money_ready", False)
+        self._ptr_xp_ready    = data.get("ptr_xp_ready", False)
+        self._ptr_city_ready  = data.get("ptr_city_ready", False)
+
+        # Log when DLL confirms grants applied
+        _applied_money = data.get("applied_money_total", 0)
+        _applied_xp    = data.get("applied_xp_total", 0)
+        if _applied_money > 0 or _applied_xp > 0:
+            logger.debug(f"[ATS] DLL applied grants: money=${_applied_money:,} xp={_applied_xp:,}")
+
+        # When DLL detects a new city, trigger an immediate save read
+        if data.get("city_count_changed", False):
+            self._force_save_poll = True
+            logger.info("[ATS] DLL signals new city visited — forcing save poll")
 
         new_checks: List[int] = []
 
@@ -1236,478 +1152,109 @@ class ATSContext(CommonContext):
 
     def _poll_save_file(self) -> None:
         """
-        Read the most recent ATS game.sii, extract level/money/cities/garages,
-        update client state, and queue any newly satisfied location checks.
-
-        Only runs when connected to an AP server (needs checked_locations).
+        Read the most recent ATS game.sii to detect new city/state visits and
+        update level/money as a fallback when DLL memory pointers are not yet
+        captured.  No save-file patching occurs here — grants are applied
+        directly to live memory by the DLL.
         """
         if not self.auth:
-            return  # not connected yet
+            return
 
         save_path = _find_ats_save_file()
         if not save_path:
             if not self._save_not_found_warned:
                 self._save_not_found_warned = True
-                _docs = Path(os.environ.get("USERPROFILE", Path.home())) / "Documents" / "American Truck Simulator"
-                _steam_roots = _steam_userdata_roots()
-                _searched = [
-                    f"  {_docs / 'profiles'}",
-                    f"  {_docs / 'steam' / 'profiles'}",
-                ]
-                for _r in _steam_roots:
-                    _searched.append(f"  {_r / 'steam' / 'profiles'} (Steam Cloud)")
-                if not _steam_roots:
-                    _searched.append("  (Steam install not found in registry)")
                 logger.warning(
-                    "[ATS] No ATS save file (game.sii) found. Searched:\n"
-                    + "\n".join(_searched) + "\n"
-                    "XP/money grants cannot be applied until a save file is found. "
+                    "[ATS] No ATS save file (game.sii) found. "
+                    "City/state checks will not fire until a save is found. "
                     "Make sure ATS has been saved at least once."
                 )
             return
+
         if not self._save_path_logged:
-            self._save_not_found_warned = False  # reset in case it recovers
+            self._save_not_found_warned = False
             self._save_path_logged = True
             logger.info(f"[ATS] Found save file: {save_path}")
-        logger.debug(f"[ATS] Watching save file: {save_path}")
 
         try:
             mtime = save_path.stat().st_mtime
         except OSError:
             return
 
-        # Only read when the player has actually saved (mtime changed).
-        # Do NOT bypass on has_pending — proactive reads use the stale pre-save
-        # XP as the grant base, which loses the player's natural delivery XP.
-        # Grants accumulate in memory and are applied in one correct write the
-        # moment the player saves.
-        pending_xp    = self._total_xp_granted    - self._last_write_total_xp
-        pending_money = self._total_money_granted - self._last_write_total_money
-        has_pending   = pending_xp > 0 or pending_money > 0
-
-        if mtime <= self._save_last_mtime:
+        # Skip if file unchanged, unless forced by city_count_changed signal.
+        if not self._force_save_poll and mtime <= self._save_last_mtime:
             return
+        self._force_save_poll = False
         self._save_last_mtime = mtime
 
-        text, fmt, scsc_meta = _read_sii_text(save_path)
-        self._save_is_plain  = fmt in ("plain", "scsc_plain")
-        self._save_scsc_meta = scsc_meta
-
+        text, fmt, _ = _read_sii_text(save_path)
         if text is None:
-            if not self._save_warned_unreadable:
-                self._save_warned_unreadable = True
-                # Build config.cfg path hints for the user message.
-                _cfg_paths = []
-                for _remote in _steam_userdata_roots():
-                    try:
-                        save_path.relative_to(_remote)
-                        _cfg_paths.append(str(_remote / "config.cfg"))
-                        break
-                    except ValueError:
-                        pass
-                _docs_cfg = (
-                    Path(os.environ.get("USERPROFILE", Path.home()))
-                    / "Documents" / "American Truck Simulator" / "config.cfg"
-                )
-                _cfg_paths.append(str(_docs_cfg))
-                _cfg_hint = "\n       ".join(_cfg_paths)
-
-                if fmt == "scsc_unreadable":
-                    logger.warning(
-                        "[ATS] Save file is in SCS HashFS (ScsC) container format but "
-                        "the inner content could not be extracted.\n"
-                        "This is unexpected for ATS 1.59 — please report this error "
-                        "along with the hex bytes logged above."
-                    )
-                elif fmt == "no_crypto":
-                    # The startup executor should have installed cryptography already.
-                    # If we still get here it means the install failed — tell the user.
-                    logger.warning(
-                        "[ATS] Save is BSII v3 encrypted and 'cryptography' could not be "
-                        "auto-installed in this Python environment.\n"
-                        "Switch ATS to plain-text saves instead:\n"
-                        f"  1. Open config.cfg:\n"
-                        f"       {_cfg_hint}\n"
-                        "  2. Add this line:  uset g_save_format \"2\"\n"
-                        "  3. In ATS: complete any delivery (autosave) OR use pause → Save\n"
-                        "     NOTE: 'Current profile saved' in the game log does NOT update\n"
-                        "     the autosave file — you must actually save via the game menu.\n"
-                        "  4. Restart the client."
-                    )
-                elif fmt in ("bsii_v3", "scsc_bsii_v3"):
-                    logger.warning(
-                        "[ATS] Save is BSII v3 encrypted but decryption failed.\n"
-                        "Most likely cause: the autosave on disk is from BEFORE you added\n"
-                        "'g_save_format 2' to config.cfg.  To create a fresh plain-text save:\n"
-                        f"  1. Config.cfg location:\n"
-                        f"       {_cfg_hint}\n"
-                        "  2. Confirm this line is present:  uset g_save_format \"2\"\n"
-                        "  3. In ATS: complete any delivery (autosave) OR pause → Save\n"
-                        "     NOTE: 'Current profile saved' in the game log is profile metadata,\n"
-                        "     NOT the autosave file — you must trigger a real save.\n"
-                        "  4. Restart the client."
-                    )
-                else:
-                    logger.warning(
-                        f"[ATS] Could not read save file (format tag: {fmt}).\n"
-                        "This is unexpected — please report this error."
-                    )
+            logger.debug(f"[ATS] Save file unreadable (format: {fmt}) — skipping poll")
             return
-        self._save_warned_unreadable = False
 
         save = _parse_sii_save(text)
-        log_fn = logger.info if has_pending else logger.debug
-        log_fn(f"[ATS] Save parsed: xp={save['experience_points']:,}, "
-               f"money=${save['money']:,}, cities={len(save['visited_cities'])}"
-               + (f" — pending grants: +{pending_xp:,} XP, +${pending_money:,}" if has_pending else ""))
 
-        # Detect a genuine save replacement (new profile / deleted save / manual
-        # swap).  XP never decreases in ATS, so if the save XP is far below what
-        # we've seen before, the file was replaced.
-        #
-        # We compare against _save_base_xp (the player's natural XP before any
-        # grants), NOT against last_write_total_xp.  This prevents false resets when
-        # ATS autosaves the pre-quickload state (which has the old, un-granted XP)
-        # immediately after F9 fires — that autosave has the player's *natural* XP,
-        # which equals base_xp, so the check correctly returns False.
-        _save_xp = save["experience_points"]
-        _reset_needed = False
-        if self._save_base_xp > 0:
-            # Reliable path: base_xp known → reset only if XP went below it.
-            _reset_needed = _save_xp < self._save_base_xp
-        elif self._last_write_total_xp > 0:
-            # base_xp unknown (old grants.json migration) → reset only if XP is
-            # dramatically below cumulative grants (genuine fresh-profile swap).
-            _reset_needed = _save_xp < self._last_write_total_xp // 2
-
-        if _reset_needed:
-            logger.warning(
-                f"[ATS] Save XP ({_save_xp:,}) dropped below base XP "
-                f"({self._save_base_xp:,}) — save was likely replaced. "
-                "Resetting grant tracking so grants are re-applied."
-            )
-            self._last_written_xp        = 0
-            self._last_written_money      = 0
-            self._last_write_total_xp     = 0
-            self._last_write_total_money  = 0
-            self._save_base_xp            = 0
-            _persist_save_grants(0, 0, 0, 0, 0, self._reload_counter)
-
-        # Grant-confirm check: if the save on disk already contains the XP we
-        # last wrote (player loaded the patched save and has since saved again),
-        # clear last_written so we don't keep re-applying the same grants.
-        # We do NOT confirm from our own write-back (handled by _save_last_mtime).
-        if self._last_written_xp > 0 and _save_xp >= self._last_written_xp:
-            logger.info(
-                f"[ATS] Grants confirmed in save: "
-                f"save_xp ({_save_xp:,}) >= last_written ({self._last_written_xp:,}). "
-                "Tracking cleared — ready for next grant."
-            )
-            self._last_written_xp   = 0
-            self._last_written_money = 0
-            _persist_save_grants(
-                0, 0,
-                self._last_write_total_xp, self._last_write_total_money,
-                self._save_base_xp, self._reload_counter,
-            )
-
-        # One-time fresh-save check. Only warn when the server has no checked
-        # locations yet — if it does, the player is resuming a legitimate run.
-        if not self._fresh_save_checked:
-            self._fresh_save_checked = True
-            if not self.checked_locations:
-                level_at_check = _xp_to_level(save["experience_points"])
-                if level_at_check > 1:
-                    logger.warning(
-                        "[ATS] WARNING: Your save file does not appear to be from a fresh "
-                        f"profile (current level: {level_at_check}). For a proper Archipelago "
-                        "run please start a new profile in American Truck Simulator."
-                    )
-
-        # Update live game state read by _check_win_condition.
-        # XP is strictly monotonic in ATS; use max so that reading the pre-quickload
-        # autosave (written by ATS immediately after F9 fires) never rolls back the
-        # XP we already know the player has in their loaded save.
-        level = _xp_to_level(save["experience_points"])
-        self.current_level  = level
-        self.current_money  = save["money"]
-        self.current_xp     = max(self.current_xp, save["experience_points"])
-
-        # ── Apply pending XP / money grants to the save file ──────────────────
-        # total_*_granted      = cumulative AP grants this session.
-        # last_written_*       = exact values written to the last patched save.
-        # last_write_total_*   = total AP grants at the time of that write.
-        #
-        # Two cases:
-        #  (A) save_xp >= last_written_xp  →  grants were loaded; add new delta only.
-        #  (B) save_xp <  last_written_xp  →  player saved before loading our patch;
-        #                                      bring save back up to last_written +
-        #                                      any new grants received since then.
-
-        # Stale-grants guard: write_total_xp can exceed total_xp_granted when
-        # grants.json carries values from a previous AP run.  Reset so grants
-        # re-apply to the current run.
-        if self._last_write_total_xp > self._total_xp_granted > 0:
-            logger.warning(
-                f"[ATS] Stale grants detected: write_total_xp ({self._last_write_total_xp:,}) "
-                f"> total_xp_granted ({self._total_xp_granted:,}). "
-                "Resetting grant state so grants re-apply for this run."
-            )
-            self._last_written_xp        = 0
-            self._last_written_money      = 0
-            self._last_write_total_xp     = 0
-            self._last_write_total_money  = 0
-            self._save_base_xp            = 0
-            _persist_save_grants(0, 0, 0, 0, 0, self._reload_counter)
-
-        new_grants_xp    = max(0, self._total_xp_granted    - self._last_write_total_xp)
-        new_grants_money = max(0, self._total_money_granted - self._last_write_total_money)
-
-        if self._last_written_xp > 0 and _save_xp < self._last_written_xp:
-            # Case (B): save was written from un-granted in-game state.
-            # Bring XP back up to what we last wrote, then layer new grants on top.
-            xp_delta    = (self._last_written_xp - _save_xp) + new_grants_xp
-            # Money: if save_money is also below last_written (un-granted), restore it
-            # too; otherwise only add new money grants.
-            missing_money = max(0, self._last_written_money - save["money"])
-            money_delta   = missing_money + new_grants_money
-            if xp_delta > 0 or money_delta > 0:
-                logger.info(
-                    f"[ATS] Re-apply: save XP ({_save_xp:,}) < last-written "
-                    f"({self._last_written_xp:,}); adding {xp_delta:,} XP, "
-                    f"${money_delta:,} money."
-                )
-        else:
-            # Case (A): grants are in this save (or no previous write).
-            # Only apply genuinely new grants received since the last write.
-            xp_delta    = new_grants_xp
-            money_delta = new_grants_money
-
-        if (xp_delta > 0 or money_delta > 0) and text is not None:
-            # Use the save file's actual XP, not self.current_xp, which may be
-            # inflated by a previous grant write the player hasn't loaded yet.
-            new_xp    = _save_xp           + xp_delta
-            new_money = self.current_money + money_delta
-
-            # Patch the decrypted text, pinned to the economy/player block so we
-            # never accidentally overwrite a hired driver's experience_points field.
-            modified = text
-            if xp_delta > 0:
-                _econ_patch = _find_xp_block(modified)
-                if _econ_patch:
-                    _before = modified[:_econ_patch.end()]
-                    _after  = modified[_econ_patch.end():]
-                    _after  = re.sub(
-                        r'\bexperience_points\s*:\s*\d+',
-                        f'experience_points: {new_xp}',
-                        _after, count=1,
-                    )
-                    # Log context around XP so we can identify the skill-points field name
-                    _diag_m = re.search(r'\bexperience_points\s*:\s*\d+', _after)
-                    if _diag_m:
-                        _c0 = max(0, _diag_m.start() - 150)
-                        _c1 = min(len(_after), _diag_m.end() + 400)
-                        logger.info(f"[ATS] XP diag context:\n{_after[_c0:_c1]}")
-                    modified = _before + _after
-                    logger.debug(f"[ATS] Patched {_econ_patch.group(0)[:40].strip()} XP -> {new_xp:,}")
-                else:
-                    logger.warning("[ATS] No economy/player block found; patching first occurrence of experience_points")
-                    modified = re.sub(
-                        r'\bexperience_points\s*:\s*\d+',
-                        f'experience_points: {new_xp}',
-                        modified, count=1,
-                    )
-            if money_delta > 0:
-                modified = re.sub(
-                    r'\bmoney_account\s*:\s*-?\d+',
-                    f'money_account: {new_money}',
-                    modified, count=1,
-                )
-
-            plain     = self._save_is_plain
-            scsc_meta = self._save_scsc_meta
-
-            if scsc_meta is not None:
-                # Write as plain SiiNunit even when source was ScsC-encrypted.
-                # ATS checks magic bytes on load and handles any format;
-                # re-encrypting into ScsC has caused save corruption in testing
-                # (zero-padding vs PKCS7 mismatch with the game's AES-CBC strip).
-                _fmt_label = "SiiN plain-text (downgraded from ScsC)"
-            elif plain:
-                _fmt_label = "SiiN plain-text"
-            else:
-                _fmt_label = "BSII-v3-encrypted"
-            logger.info(f"[ATS] Writing grants — format={_fmt_label}")
-
-            def _write_save(dest: Path, content: str) -> bool:
-                if scsc_meta is not None:
-                    return _write_sii_plain(dest, content)
-                return _write_sii_save(dest, content, plain=plain)
-
-            # Write grants directly into the manual save slot that was read.
-            # No quicksave involved — player just saves and reloads this slot.
-            wrote_save = False
-            try:
-                wrote_save = _write_save(save_path, modified)
-                if wrote_save:
-                    # Verify: read back and confirm the XP landed correctly.
-                    try:
-                        _vtext, _vfmt, _ = _read_sii_text(save_path)
-                        if _vtext:
-                            _vecon = _find_xp_block(_vtext)
-                            if _vecon:
-                                _vregion = _vtext[_vecon.end():_vecon.end() + 100_000]
-                                _vxp = re.search(r'\bexperience_points\s*:\s*(\d+)', _vregion)
-                                logger.info(
-                                    f"[ATS] VERIFY slot {save_path.parent.name} XP = "
-                                    f"{int(_vxp.group(1)):,} (expected {new_xp:,})"
-                                    if _vxp else
-                                    f"[ATS] VERIFY slot {save_path.parent.name}: "
-                                    "experience_points not found in block"
-                                )
-                            _vmoney = re.search(r'\bmoney_account\s*:\s*(-?\d+)', _vtext)
-                            if _vmoney:
-                                logger.info(
-                                    f"[ATS] VERIFY slot {save_path.parent.name} money = "
-                                    f"${int(_vmoney.group(1)):,} (expected ${new_money:,})"
-                                )
-                    except Exception as _ve:
-                        logger.warning(f"[ATS] VERIFY read-back failed: {_ve}")
-            except Exception as e:
-                logger.warning(f"[ATS] Could not write save slot {save_path.parent.name}: {e}")
-
-            if wrote_save:
-                if self._save_base_xp == 0 and xp_delta > 0:
-                    self._save_base_xp = _save_xp  # player's natural XP before any grants
-
-                self._last_written_xp        = new_xp
-                self._last_written_money      = new_money
-                self._last_write_total_xp     = self._total_xp_granted
-                self._last_write_total_money  = self._total_money_granted
-                # Update mtime so the next poll doesn't re-read our own write.
-                try:
-                    self._save_last_mtime = save_path.stat().st_mtime
-                except OSError:
-                    pass
-                _persist_save_grants(
-                    self._last_written_xp,   self._last_written_money,
-                    self._last_write_total_xp, self._last_write_total_money,
-                    self._save_base_xp, self._reload_counter,
-                )
-
-                self.current_xp    = new_xp
-                self.current_money = new_money
-
-                logger.info(
-                    f"[ATS] Grants written to save slot {save_path.parent.name}: "
-                    f"+{xp_delta:,} XP, +${money_delta:,} money "
-                    f"(totals: {new_xp:,} XP, ${new_money:,})"
-                )
-                logger.info(
-                    f"[ATS] *** Reload save slot {save_path.parent.name} "
-                    "(Esc → Load → select your save) to receive grants! ***"
-                )
-            else:
-                logger.error(
-                    f"[ATS] Grant write FAILED for slot {save_path.parent.name}. "
-                    f"format={_fmt_label}. "
-                    "If saves are BSII v3 encrypted, install the 'cryptography' package "
-                    "or set 'g_save_format 0' in config.cfg."
-                )
-        else:
-            if self._total_money_granted > 0 or self._total_xp_granted > 0:
-                logger.debug(
-                    f"[ATS] No pending grants: "
-                    f"total_xp={self._total_xp_granted:,} write_total_xp={self._last_write_total_xp:,} "
-                    f"last_written_xp={self._last_written_xp:,} save_xp={_save_xp:,} | "
-                    f"total_money=${self._total_money_granted:,} write_total_money=${self._last_write_total_money:,}"
-                )
+        # Update level/money from save as fallback when DLL pointers not yet captured.
+        if not self._ptr_xp_ready:
+            level = _xp_to_level(save["experience_points"])
+            self.current_level = level
+            self.current_xp    = save["experience_points"]
+        if not self._ptr_money_ready:
+            self.current_money = save["money"]
 
         from worlds.american_truck_simulator.locations import (
-            ALL_LOCATIONS, CITY_ARRIVAL_LOCATIONS, STATE_ARRIVAL_LOCATIONS,
+            CITY_ARRIVAL_LOCATIONS, STATE_ARRIVAL_LOCATIONS,
         )
         new_checks: List[int] = []
 
-        # Level milestone checks (re-evaluate all milestones each poll)
-        _locations_info = getattr(self, "locations_info", {})
-        for loc_name, loc_data in ALL_LOCATIONS.items():
+        # Level milestone checks
+        from worlds.american_truck_simulator.locations import ALL_LOCATIONS
+        for loc_data in ALL_LOCATIONS.values():
             if loc_data.category == "level":
                 milestone = int(loc_data.game_id.split("_")[1])
-                if level >= milestone:
-                    if loc_data.code in self.checked_locations:
-                        logger.debug(f"[ATS] Level {milestone} milestone already checked — skipping")
-                    else:
-                        new_checks.append(loc_data.code)
-                        item_info = _locations_info.get(loc_data.code)
-                        if item_info:
-                            try:
-                                item_name = self.item_names.lookup_in_game(item_info.item)
-                            except Exception:
-                                item_name = f"item#{item_info.item}"
-                            recv_name = self.player_names.get(
-                                item_info.player, f"Player {item_info.player}"
-                            )
-                            item_str = (item_name if item_info.player == self.slot
-                                        else f"{item_name} → {recv_name}")
-                            logger.info(
-                                f"[ATS] Level milestone: Reached Level {milestone} — "
-                                f"sending check (you receive: {item_str})"
-                            )
-                        else:
-                            logger.info(
-                                f"[ATS] Level milestone: Reached Level {milestone} — "
-                                "sending check (item info not yet available)"
-                            )
+                if self.current_level >= milestone and loc_data.code not in self.checked_locations:
+                    new_checks.append(loc_data.code)
 
-        # City first arrival checks + state first visit checks
+        # City first arrival checks
         if not self._save_first_city_log:
             self._save_first_city_log = True
             logger.info(
-                f"[ATS] Save poll (first read): {len(save['visited_cities'])} total cities in save: "
+                f"[ATS] Save poll (first read): {len(save['visited_cities'])} cities: "
                 f"{sorted(save['visited_cities'])}"
             )
         new_cities = save["visited_cities"] - self._save_known_cities
         if new_cities:
-            logger.info(f"[ATS] Save poll: {len(new_cities)} new city/cities detected: {sorted(new_cities)}")
+            logger.info(f"[ATS] New cities detected: {sorted(new_cities)}")
         for city_id in new_cities:
             self._save_known_cities.add(city_id)
-            matched = False
             for loc_data in CITY_ARRIVAL_LOCATIONS.values():
-                if loc_data.game_id == city_id:
-                    matched = True
-                    if loc_data.code not in self.checked_locations:
-                        new_checks.append(loc_data.code)
-                        logger.info(f"[ATS] City arrival check queued: {city_id} → location {loc_data.code}")
-                        # Check if this city reveals a new state
-                        state_name = loc_data.region  # region == state display name
-                        if state_name not in self._save_known_states:
-                            self._save_known_states.add(state_name)
-                            for sa_data in STATE_ARRIVAL_LOCATIONS.values():
-                                if sa_data.region == state_name and sa_data.code not in self.checked_locations:
-                                    new_checks.append(sa_data.code)
-                                    logger.info(f"[ATS] First visit to state: {state_name}")
-                                    break
-                    else:
-                        logger.debug(f"[ATS] City {city_id} already checked — skipping")
+                if loc_data.game_id == city_id and loc_data.code not in self.checked_locations:
+                    new_checks.append(loc_data.code)
+                    logger.info(f"[ATS] City arrival check: {city_id} → {loc_data.code}")
+                    state_name = loc_data.region
+                    if state_name not in self._save_known_states:
+                        self._save_known_states.add(state_name)
+                        for sa_data in STATE_ARRIVAL_LOCATIONS.values():
+                            if sa_data.region == state_name and sa_data.code not in self.checked_locations:
+                                new_checks.append(sa_data.code)
+                                logger.info(f"[ATS] State first visit: {state_name}")
+                                break
                     break
-            if not matched:
-                logger.info(f"[ATS] City '{city_id}' from save: no matching location (not in randomizer pool for this seed)")
 
         if new_checks:
-            logger.info(f"[ATS] Save poll: {len(new_checks)} new location check(s) from save file.")
+            logger.info(f"[ATS] Save poll: sending {len(new_checks)} check(s).")
             asyncio.create_task(self.send_msgs([{
                 "cmd": "LocationChecks",
                 "locations": new_checks,
             }]))
 
-        # Win condition (level/money both come from save file)
         if not self.goal_complete and self._check_win_condition():
             self.goal_complete = True
             asyncio.create_task(self.send_msgs([{
                 "cmd": "StatusUpdate",
                 "status": ClientStatus.CLIENT_GOAL,
             }]))
-            logger.info("[ATS] Goal complete! Congratulations!")
+            logger.info("[ATS] Goal complete!")
 
     def _win_condition_description(self) -> str:
         wc = self.slot_data.get("win_condition", 0)
@@ -1749,8 +1296,7 @@ async def game_watcher(ctx: ATSContext) -> None:
 
     logger.info("[ATS] Waiting for ATS plugin to connect...")
 
-    _SAVE_POLL_INTERVAL_NORMAL  = 5.0   # seconds — idle, no grants in flight
-    _SAVE_POLL_INTERVAL_PENDING = 0.5   # seconds — grants written but not yet confirmed
+    _SAVE_POLL_INTERVAL = 5.0  # seconds between save file reads
     _last_save_poll = 0.0
 
     while not ctx.exit_event.is_set():
@@ -1768,25 +1314,15 @@ async def game_watcher(ctx: ATSContext) -> None:
                          f"(have {len(received)}, applied {ctx._applied_item_count})")
             ctx._on_items_received(ctx._applied_item_count, received[ctx._applied_item_count:])
 
-        # Use a fast poll interval whenever grants are in flight (written but
-        # not yet confirmed loaded) so we can patch the save quickly after the
-        # player saves — well within the time it takes to navigate the menus.
-        grants_in_flight = (
-            ctx._total_xp_granted    > ctx._last_write_total_xp  or
-            ctx._total_money_granted > ctx._last_write_total_money or
-            ctx._last_written_xp     > 0
-        )
-        interval = _SAVE_POLL_INTERVAL_PENDING if grants_in_flight else _SAVE_POLL_INTERVAL_NORMAL
-
         now = time.monotonic()
-        if now - _last_save_poll >= interval:
+        if ctx._force_save_poll or now - _last_save_poll >= _SAVE_POLL_INTERVAL:
             _last_save_poll = now
             try:
                 ctx._poll_save_file()
             except Exception:
                 logger.error(f"[ATS] Error polling save file:\n{traceback.format_exc()}")
 
-        await asyncio.sleep(0.25)
+        await asyncio.sleep(1.0)
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────

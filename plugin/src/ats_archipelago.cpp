@@ -6,27 +6,42 @@
  * This DLL is loaded by ATS via the SCS SDK plugin system. It:
  *  1. Receives game events (job delivered, level-up, city visited, etc.)
  *  2. Writes those events to a JSON file the Python client reads.
- *  3. Reads the unlocked-items JSON file the Python client writes.
- *  4. Triggers a quick-load (F9) when the Python client signals it has
- *     patched the save file with pending XP / money grants.
+ *  3. Reads the pending-grant JSON the Python client writes.
+ *  4. Applies XP and money grants DIRECTLY to live game memory using
+ *     pointers captured via hardware debug registers (DR0-DR2) + VEH.
+ *     No save-file patching or F9 reload needed.
+ *
+ * Memory grant system
+ * -------------------
+ * Your friend identified three stable instruction addresses in amtrucks.exe:
+ *
+ *   0x7FF65D97DA69  mov [rdi+0x10], rcx   — money increase
+ *   0x7FF65D62FE66  mov [rsi+0x62C], edi  — XP write
+ *   0x7FF65D62A9DF  mov [rbx+0x10], rcx   — visited-city count write
+ *
+ * At plugin init we set hardware execution breakpoints (DR0-DR2) on those
+ * addresses across all existing threads, and in DllMain / DLL_THREAD_ATTACH
+ * for any threads created later.  A Vectored Exception Handler fires on the
+ * first hit of each instruction, captures the relevant base-object register,
+ * then disables that breakpoint.  Thereafter we read/write:
+ *
+ *   money  : *(int64_t*)(g_money_ptr + 0x10)
+ *   XP     : *(int32_t*)(g_xp_ptr   + 0x62C)
+ *   city count: *(int64_t*)(g_city_ptr + 0x10)  (polled for changes)
  *
  * Build requirements:
- *  - Windows x64 (ATS is Windows-only)
- *  - SCS SDK headers (download from https://modding.scssoft.com/wiki/SDK)
+ *  - Windows x64
+ *  - SCS SDK headers (https://modding.scssoft.com/wiki/SDK)
  *  - C++17 or later
- *  - nlohmann/json (single-header, included in /vendor/nlohmann/json.hpp)
- *
- * Install: copy ats_archipelago.dll to
- *     <Steam>\steamapps\common\American Truck Simulator\bin\win_x64\plugins\
- *
- * See plugin/INSTALL.md for full build and install instructions.
+ *  - nlohmann/json (single-header, /vendor/nlohmann/json.hpp)
  */
 
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <windows.h>
-#include <shlobj.h>    // SHGetFolderPathW
+#include <shlobj.h>
+#include <tlhelp32.h>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -34,83 +49,77 @@
 #include <set>
 #include <map>
 #include <mutex>
+#include <atomic>
 #include <chrono>
 #include <ctime>
 #include <sstream>
 #include <iomanip>
 
-// SCS SDK headers — obtain from https://modding.scssoft.com/wiki/SDK
 #include "scssdk_telemetry.h"
 #include "eurotrucks2/scssdk_eut2.h"
 #include "eurotrucks2/scssdk_telemetry_eut2.h"
 #include "amtrucks/scssdk_ats.h"
 #include "amtrucks/scssdk_telemetry_ats.h"
 
-// nlohmann/json single-header — https://github.com/nlohmann/json (MIT license)
 #include "nlohmann/json.hpp"
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "1.0.0";
+static const char* PLUGIN_VERSION = "2.0.0";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
 static fs::path g_events_file;
 static fs::path g_items_file;
 
-// ── SCS logging function ───────────────────────────────────────────────────────
+// ── SCS logging ────────────────────────────────────────────────────────────────
 static scs_log_t g_log = nullptr;
 
 inline void log(const std::string& msg, scs_log_type_t level = SCS_LOG_TYPE_message) {
-    if (g_log) {
-        g_log(level, ("[ATS-AP] " + msg).c_str());
-    }
+    if (g_log) g_log(level, ("[ATS-AP] " + msg).c_str());
 }
 
 // ── Shared game state ──────────────────────────────────────────────────────────
 static std::mutex g_state_mutex;
 
 struct GameState {
-    bool plugin_alive = true;
-    int  current_level = 0;
-    long long current_money = 0;
-    float truck_x = 0.0f;
-    float truck_y = 0.0f;
-    float truck_z = 0.0f;
-    std::string current_city_id;
+    bool      plugin_alive    = true;
+    int       current_level   = 0;
+    long long current_money   = 0;
+    float     truck_x = 0, truck_y = 0, truck_z = 0;
     std::string current_cargo_id;
     std::string current_cargo_name;
-    std::string job_source_city;
-    std::string job_dest_city;
-    bool job_active = false;
-    bool in_game = false;
+    bool      job_active = false;
+    bool      in_game    = false;
+    bool      city_count_changed = false;
 };
 
 static GameState g_state;
 
 // ── Item state (read from items.json) ─────────────────────────────────────────
 struct ItemState {
-    int win_condition = 0;
-    int goal_level = 35;
-    long long goal_money = 1000000;
-    double last_read_time = 0.0;
+    long long total_money_granted = 0;
+    int       total_xp_granted    = 0;
+    int       win_condition       = 0;
+    int       goal_level          = 35;
+    long long goal_money          = 1000000;
+    double    last_read_time      = 0.0;
 };
 
 static ItemState g_items;
 
-// ── Event queue (flushed to events.json) ──────────────────────────────────────
+// ── Event queue ────────────────────────────────────────────────────────────────
 struct GameEvent {
-    std::string id;        // unique ID to prevent duplicate processing
+    std::string id;
     std::string type;
     std::string game_id;
-    json extra;            // arbitrary extra data per event type
+    json        extra;
 };
 
 static std::vector<GameEvent> g_event_queue;
-static std::set<std::string>  g_sent_event_ids;  // prevent re-queuing
-
+static std::set<std::string>  g_sent_event_ids;
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -128,9 +137,8 @@ static std::string make_event_id(const std::string& type, const std::string& key
 
 static fs::path get_documents_path() {
     wchar_t path[MAX_PATH];
-    if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_PERSONAL, nullptr, SHGFP_TYPE_CURRENT, path))) {
+    if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_PERSONAL, nullptr, SHGFP_TYPE_CURRENT, path)))
         return fs::path(path);
-    }
     return fs::path(getenv("USERPROFILE")) / "Documents";
 }
 
@@ -140,123 +148,295 @@ static std::string hex_addr(uintptr_t addr) {
     return oss.str();
 }
 
-// ── Quick-load trigger ─────────────────────────────────────────────────────────
-// Python patches the save file with pending XP/money grants, writes the
-// quicksave slot, then increments reload_counter in items.json.  The DLL
-// sends F9 to the ATS window so the game loads the patched quicksave.
+// ── XP → level table (mirrors ATSClient.py) ───────────────────────────────────
+static const int XP_THRESHOLDS[] = {
+    0, 0, 500, 1200, 2100, 3200, 4500, 6000, 7700, 9600,
+    11700, 14000, 16500, 19200, 22100, 25200, 28500, 32000,
+    35700, 39600, 43700, 48000, 52500, 57200, 62100, 67200,
+    72500, 78000, 83700, 89600, 95700, 102000, 108500, 115200,
+    122100, 129200, 136500, 144000, 151700, 159600, 167700,
+};
+static const int XP_LEVELS = (int)(sizeof(XP_THRESHOLDS) / sizeof(XP_THRESHOLDS[0])) - 1;
 
-static int  g_last_reload_counter    = 0;
-static int  g_pending_reload_counter = 0;     // counter seen while in_game=false
-static bool g_reload_counter_synced  = false; // true after first items.json read
-
-static HWND find_ats_window() {
-    struct EnumData { DWORD pid; HWND hwnd; };
-    EnumData d = { GetCurrentProcessId(), nullptr };
-
-    EnumWindows([](HWND hwnd, LPARAM lp) -> BOOL {
-        auto* data = reinterpret_cast<EnumData*>(lp);
-        if (!IsWindowVisible(hwnd)) return TRUE;
-        DWORD pid = 0;
-        GetWindowThreadProcessId(hwnd, &pid);
-        if (pid == data->pid) {
-            data->hwnd = hwnd;
-            return FALSE;
-        }
-        return TRUE;
-    }, reinterpret_cast<LPARAM>(&d));
-
-    return d.hwnd;
+static int xp_to_level(int xp) {
+    for (int lvl = XP_LEVELS; lvl >= 1; --lvl)
+        if (xp >= XP_THRESHOLDS[lvl]) return lvl;
+    return 1;
 }
 
-static void trigger_quick_load() {
-    HWND hwnd = find_ats_window();
-    if (!hwnd) {
-        log("quick_load: could not find ATS window", SCS_LOG_TYPE_warning);
-        return;
-    }
+// ── Memory grant system ────────────────────────────────────────────────────────
+//
+// Stable instruction addresses (confirmed unchanged across saves and profiles).
+// The VEH captures the base-object register the first time each fires.
 
-    // ATS ignores WM_KEYDOWN messages posted to its queue — it reads keyboard
-    // state via DirectInput / GetAsyncKeyState, not the Win32 message pump.
-    // SendInput injects at the OS level and is visible to all input APIs.
-    // SetForegroundWindow succeeds unconditionally here because we are running
-    // inside the ATS process itself.
-    SetForegroundWindow(hwnd);
+static const uintptr_t ADDR_MONEY_INC  = 0x7FF65D97DA69ULL; // mov [rdi+0x10],  rcx
+static const uintptr_t ADDR_XP_WRITE   = 0x7FF65D62FE66ULL; // mov [rsi+0x62C], edi
+static const uintptr_t ADDR_CITY_COUNT = 0x7FF65D62A9DFULL; // mov [rbx+0x10],  rcx
 
-    INPUT keys[2] = {};
-    keys[0].type       = INPUT_KEYBOARD;
-    keys[0].ki.wVk     = VK_F9;
-    keys[0].ki.dwFlags = 0;
-    keys[1].type       = INPUT_KEYBOARD;
-    keys[1].ki.wVk     = VK_F9;
-    keys[1].ki.dwFlags = KEYEVENTF_KEYUP;
+static const ptrdiff_t MONEY_OFFSET    = 0x10;
+static const ptrdiff_t XP_OFFSET       = 0x62C;
+static const ptrdiff_t CITY_CNT_OFFSET = 0x10;
 
-    UINT sent = SendInput(2, keys, sizeof(INPUT));
-    log("quick_load: SendInput F9 sent=" + std::to_string(sent) +
-        " window=" + hex_addr(reinterpret_cast<uintptr_t>(hwnd)));
+// Base object pointers — captured once by VEH, then used for direct R/W.
+static std::atomic<uintptr_t> g_money_ptr{0};
+static std::atomic<uintptr_t> g_xp_ptr{0};
+static std::atomic<uintptr_t> g_city_ptr{0};
+
+// Cumulative grant amounts applied to live memory this session.
+static long long g_applied_money = 0;
+static int       g_applied_xp    = 0;
+
+// Previous city count — detects increases without keeping the breakpoint live.
+static uint64_t g_prev_city_count = UINT64_MAX; // UINT64_MAX = uninitialized
+
+static PVOID g_veh_handle = nullptr;
+
+static bool all_ptrs_captured() {
+    return g_money_ptr.load(std::memory_order_relaxed) != 0 &&
+           g_xp_ptr.load(std::memory_order_relaxed)   != 0 &&
+           g_city_ptr.load(std::memory_order_relaxed)  != 0;
 }
 
-// ── Read items.json (written by Python client) ─────────────────────────────────
-static void read_items_file() {
-    int  reload_counter = 0;
-    bool in_game        = false;
+// Safe memory helpers using SEH so a stale pointer doesn't crash the DLL.
+static int64_t safe_read_i64(uintptr_t addr) {
+    int64_t v = 0;
+    __try { v = *reinterpret_cast<const int64_t*>(addr); }
+    __except(EXCEPTION_EXECUTE_HANDLER) {
+        log("safe_read_i64 AV at " + hex_addr(addr), SCS_LOG_TYPE_warning);
+    }
+    return v;
+}
 
-    {
-        std::lock_guard<std::mutex> lock(g_state_mutex);
+static int32_t safe_read_i32(uintptr_t addr) {
+    int32_t v = 0;
+    __try { v = *reinterpret_cast<const int32_t*>(addr); }
+    __except(EXCEPTION_EXECUTE_HANDLER) {
+        log("safe_read_i32 AV at " + hex_addr(addr), SCS_LOG_TYPE_warning);
+    }
+    return v;
+}
 
-        if (!fs::exists(g_items_file)) return;
+static bool safe_write_i64(uintptr_t addr, int64_t val) {
+    __try { *reinterpret_cast<int64_t*>(addr) = val; return true; }
+    __except(EXCEPTION_EXECUTE_HANDLER) {
+        log("safe_write_i64 AV at " + hex_addr(addr), SCS_LOG_TYPE_warning);
+    }
+    return false;
+}
 
-        try {
-            std::ifstream f(g_items_file);
-            json j = json::parse(f);
+static bool safe_write_i32(uintptr_t addr, int32_t val) {
+    __try { *reinterpret_cast<int32_t*>(addr) = val; return true; }
+    __except(EXCEPTION_EXECUTE_HANDLER) {
+        log("safe_write_i32 AV at " + hex_addr(addr), SCS_LOG_TYPE_warning);
+    }
+    return false;
+}
 
-            g_items.win_condition = j.value("win_condition", 0);
-            g_items.goal_level    = j.value("goal_level",    35);
-            g_items.goal_money    =
-                (long long)(j.value("goal_money_thousands", 1000)) * 1000;
+// ── Hardware breakpoint helpers ────────────────────────────────────────────────
+// DR7 layout used here:
+//   bit 0 = L0 (local enable DR0), bit 2 = L1, bit 4 = L2
+//   condition/size fields for execution breakpoints default to 0 (correct)
 
-            // (Lua mod reads item_notifications directly; no need to log here)
+static const DWORD64 DR7_EXEC_012 = (1ULL<<0) | (1ULL<<2) | (1ULL<<4);
 
-            reload_counter = j.value("reload_counter", 0);
-            in_game        = g_state.in_game;
-            g_items.last_read_time = now_seconds();
+static void set_bp_on_thread(HANDLE thread) {
+    CONTEXT ctx = {};
+    ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+    if (!GetThreadContext(thread, &ctx)) return;
+    ctx.Dr0  = ADDR_MONEY_INC;
+    ctx.Dr1  = ADDR_XP_WRITE;
+    ctx.Dr2  = ADDR_CITY_COUNT;
+    ctx.Dr3  = 0;
+    ctx.Dr7  = DR7_EXEC_012;
+    SetThreadContext(thread, &ctx);
+}
 
-        } catch (const std::exception& e) {
-            log(std::string("Failed to read items.json: ") + e.what(),
-                SCS_LOG_TYPE_warning);
-            return;
-        }
+static void clear_bp_on_thread(HANDLE thread) {
+    CONTEXT ctx = {};
+    ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+    if (!GetThreadContext(thread, &ctx)) return;
+    ctx.Dr0 = ctx.Dr1 = ctx.Dr2 = ctx.Dr3 = ctx.Dr7 = 0;
+    SetThreadContext(thread, &ctx);
+}
+
+static void set_bp_all_threads() {
+    DWORD pid  = GetCurrentProcessId();
+    DWORD self = GetCurrentThreadId();
+
+    // Set on current thread directly (no open/suspend needed).
+    set_bp_on_thread(GetCurrentThread());
+
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (snap == INVALID_HANDLE_VALUE) return;
+
+    THREADENTRY32 te = { sizeof(THREADENTRY32) };
+    if (Thread32First(snap, &te)) {
+        do {
+            if (te.th32OwnerProcessID != pid || te.th32ThreadID == self) continue;
+            HANDLE th = OpenThread(
+                THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME,
+                FALSE, te.th32ThreadID);
+            if (!th) continue;
+            SuspendThread(th);
+            set_bp_on_thread(th);
+            ResumeThread(th);
+            CloseHandle(th);
+        } while (Thread32Next(snap, &te));
+    }
+    CloseHandle(snap);
+}
+
+static void clear_bp_all_threads() {
+    DWORD pid  = GetCurrentProcessId();
+    DWORD self = GetCurrentThreadId();
+
+    clear_bp_on_thread(GetCurrentThread());
+
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (snap == INVALID_HANDLE_VALUE) return;
+
+    THREADENTRY32 te = { sizeof(THREADENTRY32) };
+    if (Thread32First(snap, &te)) {
+        do {
+            if (te.th32OwnerProcessID != pid || te.th32ThreadID == self) continue;
+            HANDLE th = OpenThread(
+                THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME,
+                FALSE, te.th32ThreadID);
+            if (!th) continue;
+            SuspendThread(th);
+            clear_bp_on_thread(th);
+            ResumeThread(th);
+            CloseHandle(th);
+        } while (Thread32Next(snap, &te));
+    }
+    CloseHandle(snap);
+}
+
+// ── Vectored Exception Handler ─────────────────────────────────────────────────
+static LONG WINAPI ats_veh(EXCEPTION_POINTERS* ep) {
+    if (ep->ExceptionRecord->ExceptionCode != EXCEPTION_SINGLE_STEP)
+        return EXCEPTION_CONTINUE_SEARCH;
+
+    CONTEXT*  ctx = ep->ContextRecord;
+    uintptr_t ip  = ctx->Rip;
+
+    if (ip == ADDR_MONEY_INC && g_money_ptr.load(std::memory_order_relaxed) == 0) {
+        g_money_ptr.store(ctx->Rdi, std::memory_order_relaxed);
+        log("Memory: money pointer captured " + hex_addr(ctx->Rdi));
+        ctx->Dr0 = 0;
+        ctx->Dr7 &= ~(1ULL << 0);
+    }
+    else if (ip == ADDR_XP_WRITE && g_xp_ptr.load(std::memory_order_relaxed) == 0) {
+        g_xp_ptr.store(ctx->Rsi, std::memory_order_relaxed);
+        log("Memory: XP pointer captured " + hex_addr(ctx->Rsi));
+        ctx->Dr1 = 0;
+        ctx->Dr7 &= ~(1ULL << 2);
+    }
+    else if (ip == ADDR_CITY_COUNT && g_city_ptr.load(std::memory_order_relaxed) == 0) {
+        g_city_ptr.store(ctx->Rbx, std::memory_order_relaxed);
+        log("Memory: city-count pointer captured " + hex_addr(ctx->Rbx));
+        ctx->Dr2 = 0;
+        ctx->Dr7 &= ~(1ULL << 4);
     }
 
-    // On the first read after plugin init, sync the counter without triggering
-    // a reload — grants from previous sessions are already in the loaded save.
-    if (!g_reload_counter_synced) {
-        g_reload_counter_synced = true;
-        g_last_reload_counter   = reload_counter;
-        log("reload_counter synced to " + std::to_string(reload_counter) +
-            "; in_game=" + (in_game ? "true" : "false"));
-        return;
-    }
+    return EXCEPTION_CONTINUE_EXECUTION;
+}
 
-    if (reload_counter > g_last_reload_counter) {
-        log("reload_counter changed: " + std::to_string(g_last_reload_counter) +
-            " -> " + std::to_string(reload_counter) +
-            "; in_game=" + (in_game ? "true" : "false"));
-        // Always record the latest pending counter so telemetry_started can fire it.
-        g_pending_reload_counter = reload_counter;
-        if (in_game) {
-            g_last_reload_counter = reload_counter;
-            trigger_quick_load();
+// ── Apply pending grants directly to live memory ───────────────────────────────
+static void apply_memory_grants() {
+    // Only apply while the simulation is running (objects stable).
+    if (!g_state.in_game) return;
+
+    // Money grant
+    uintptr_t mp = g_money_ptr.load(std::memory_order_relaxed);
+    if (mp && g_items.total_money_granted > g_applied_money) {
+        long long delta   = g_items.total_money_granted - g_applied_money;
+        long long current = safe_read_i64(mp + MONEY_OFFSET);
+        long long newval  = current + delta;
+        if (safe_write_i64(mp + MONEY_OFFSET, newval)) {
+            g_applied_money = g_items.total_money_granted;
+            log("Grant applied: +$" + std::to_string(delta) +
+                " (balance now $" + std::to_string(newval) + ")");
         } else {
-            // Don't advance g_last_reload_counter — telemetry_started will fire
-            // F9 as soon as the simulation resumes (player exits any menu).
-            log("quick_load: deferred — will fire F9 when simulation resumes");
+            log("Grant failed: money pointer stale — will recapture", SCS_LOG_TYPE_warning);
+            g_money_ptr.store(0, std::memory_order_relaxed);
+        }
+    }
+
+    // XP grant
+    uintptr_t xp = g_xp_ptr.load(std::memory_order_relaxed);
+    if (xp && g_items.total_xp_granted > g_applied_xp) {
+        int   delta   = g_items.total_xp_granted - g_applied_xp;
+        int32_t current = safe_read_i32(xp + XP_OFFSET);
+        int32_t newval  = current + (int32_t)delta;
+        if (safe_write_i32(xp + XP_OFFSET, newval)) {
+            g_applied_xp = g_items.total_xp_granted;
+            log("Grant applied: +" + std::to_string(delta) +
+                " XP (total now " + std::to_string(newval) + ")");
+        } else {
+            log("Grant failed: XP pointer stale — will recapture", SCS_LOG_TYPE_warning);
+            g_xp_ptr.store(0, std::memory_order_relaxed);
         }
     }
 }
 
-// ── Write events.json (read by Python client) ──────────────────────────────────
+// ── Poll city count for changes ────────────────────────────────────────────────
+static void poll_city_count() {
+    uintptr_t cp = g_city_ptr.load(std::memory_order_relaxed);
+    if (!cp) return;
+
+    uint64_t count = (uint64_t)safe_read_i64(cp + CITY_CNT_OFFSET);
+
+    if (g_prev_city_count == UINT64_MAX) {
+        // First read — baseline, no event.
+        g_prev_city_count = count;
+        log("City count baseline: " + std::to_string(count));
+        return;
+    }
+
+    if (count > g_prev_city_count) {
+        log("City count changed: " + std::to_string(g_prev_city_count) +
+            " -> " + std::to_string(count) + " — signalling client");
+        g_prev_city_count = count;
+        std::lock_guard<std::mutex> lock(g_state_mutex);
+        g_state.city_count_changed = true;
+    }
+}
+
+// ── Read items.json (client → plugin) ─────────────────────────────────────────
+static void read_items_file() {
+    if (!fs::exists(g_items_file)) return;
+
+    std::lock_guard<std::mutex> lock(g_state_mutex);
+    try {
+        std::ifstream f(g_items_file);
+        json j = json::parse(f);
+
+        g_items.total_money_granted = (long long)j.value("total_money_granted", 0);
+        g_items.total_xp_granted    = j.value("total_xp_granted", 0);
+        g_items.win_condition       = j.value("win_condition", 0);
+        g_items.goal_level          = j.value("goal_level", 35);
+        g_items.goal_money          = (long long)(j.value("goal_money_thousands", 1000)) * 1000;
+        g_items.last_read_time      = now_seconds();
+    } catch (const std::exception& e) {
+        log(std::string("Failed to read items.json: ") + e.what(), SCS_LOG_TYPE_warning);
+    }
+}
+
+// ── Write events.json (plugin → client) ───────────────────────────────────────
 static void flush_events_file() {
     std::lock_guard<std::mutex> lock(g_state_mutex);
+
+    // Update live values from memory pointers when available.
+    uintptr_t mp = g_money_ptr.load(std::memory_order_relaxed);
+    uintptr_t xp = g_xp_ptr.load(std::memory_order_relaxed);
+
+    if (mp) g_state.current_money = safe_read_i64(mp + MONEY_OFFSET);
+    int32_t live_xp = 0;
+    if (xp) {
+        live_xp = safe_read_i32(xp + XP_OFFSET);
+        g_state.current_level = xp_to_level(live_xp);
+    }
 
     json j;
     j["plugin_alive"]   = g_state.plugin_alive;
@@ -264,8 +444,20 @@ static void flush_events_file() {
     j["timestamp"]      = now_seconds();
     j["current_level"]  = g_state.current_level;
     j["current_money"]  = g_state.current_money;
+    j["current_xp"]     = live_xp;
     j["truck_position"] = {g_state.truck_x, g_state.truck_y, g_state.truck_z};
     j["in_game"]        = g_state.in_game;
+
+    // Memory grant status
+    j["ptr_money_ready"]    = (mp != 0);
+    j["ptr_xp_ready"]       = (xp != 0);
+    j["ptr_city_ready"]     = (g_city_ptr.load(std::memory_order_relaxed) != 0);
+    j["applied_money_total"] = g_applied_money;
+    j["applied_xp_total"]   = g_applied_xp;
+
+    // City count change signal (reset after writing so client gets exactly one pulse)
+    j["city_count_changed"] = g_state.city_count_changed;
+    g_state.city_count_changed = false;
 
     json events = json::array();
     for (const auto& ev : g_event_queue) {
@@ -273,14 +465,11 @@ static void flush_events_file() {
         entry["id"]      = ev.id;
         entry["type"]    = ev.type;
         entry["game_id"] = ev.game_id;
-        for (auto& [k, v] : ev.extra.items()) {
-            entry[k] = v;
-        }
+        for (auto& [k, v] : ev.extra.items()) entry[k] = v;
         events.push_back(entry);
     }
     j["events"] = events;
 
-    // Atomic write via temp file
     fs::path tmp = g_events_file;
     tmp += ".tmp";
     try {
@@ -289,8 +478,7 @@ static void flush_events_file() {
         f.close();
         fs::rename(tmp, g_events_file);
     } catch (const std::exception& e) {
-        log(std::string("Failed to write events.json: ") + e.what(),
-            SCS_LOG_TYPE_warning);
+        log(std::string("Failed to write events.json: ") + e.what(), SCS_LOG_TYPE_warning);
     }
 }
 
@@ -316,14 +504,12 @@ SCSAPI_VOID telemetry_gameplay_event(const scs_event_t event,
 
     if (event_name == SCS_TELEMETRY_GAMEPLAY_EVENT_job_delivered) {
         std::lock_guard<std::mutex> lock(g_state_mutex);
-
         if (!g_state.current_cargo_id.empty()) {
             json extra;
             extra["cargo_name"] = g_state.current_cargo_name;
             queue_event("cargo_delivered", g_state.current_cargo_id,
                         g_state.current_cargo_id, extra);
         }
-
         flush_events_file();
     }
 
@@ -333,9 +519,7 @@ SCSAPI_VOID telemetry_gameplay_event(const scs_event_t event,
     }
 }
 
-// Channel callback — position tracking
-SCSAPI_VOID on_truck_placement(const scs_string_t name,
-                                const scs_u32_t index,
+SCSAPI_VOID on_truck_placement(const scs_string_t name, const scs_u32_t index,
                                 const scs_value_t* const value,
                                 const scs_context_t context) {
     if (!value || value->type != SCS_VALUE_TYPE_dplacement) return;
@@ -345,7 +529,6 @@ SCSAPI_VOID on_truck_placement(const scs_string_t name,
     g_state.truck_z = static_cast<float>(value->value_dplacement.position.z);
 }
 
-// ── Configuration event (fires when job starts/clears) ────────────────────────
 SCSAPI_VOID telemetry_configuration(const scs_event_t event,
                                      const void* const event_info,
                                      const scs_context_t context) {
@@ -353,7 +536,6 @@ SCSAPI_VOID telemetry_configuration(const scs_event_t event,
     const scs_telemetry_configuration_t* const cfg =
         static_cast<const scs_telemetry_configuration_t*>(event_info);
     if (!cfg->id) return;
-
     if (std::string(cfg->id) != SCS_TELEMETRY_CONFIG_job) return;
 
     std::lock_guard<std::mutex> lock(g_state_mutex);
@@ -365,229 +547,48 @@ SCSAPI_VOID telemetry_configuration(const scs_event_t event,
         const std::string attr_name(attr->name);
         if (attr_name == SCS_TELEMETRY_CONFIG_ATTRIBUTE_cargo_id) {
             if (attr->value.type == SCS_VALUE_TYPE_string && attr->value.value_string.value) {
-                g_state.current_cargo_id  = attr->value.value_string.value;
-                g_state.job_active        = true;
+                g_state.current_cargo_id = attr->value.value_string.value;
+                g_state.job_active       = true;
             }
         } else if (attr_name == SCS_TELEMETRY_CONFIG_ATTRIBUTE_cargo) {
-            if (attr->value.type == SCS_VALUE_TYPE_string && attr->value.value_string.value) {
+            if (attr->value.type == SCS_VALUE_TYPE_string && attr->value.value_string.value)
                 g_state.current_cargo_name = attr->value.value_string.value;
-            }
         }
     }
 
-    if (g_state.job_active) {
-        log("Job started: cargo=" + g_state.current_cargo_id +
-            " name=" + g_state.current_cargo_name);
-    }
+    if (g_state.job_active)
+        log("Job started: cargo=" + g_state.current_cargo_id);
 }
 
-// ── Paused / started events ───────────────────────────────────────────────────
-SCSAPI_VOID telemetry_paused(const scs_event_t event,
-                              const void* const event_info,
+SCSAPI_VOID telemetry_paused(const scs_event_t event, const void* const event_info,
                               const scs_context_t context) {
     std::lock_guard<std::mutex> lock(g_state_mutex);
     g_state.in_game = false;
 }
 
-SCSAPI_VOID telemetry_started(const scs_event_t event,
-                               const void* const event_info,
+SCSAPI_VOID telemetry_started(const scs_event_t event, const void* const event_info,
                                const scs_context_t context) {
-    {
-        std::lock_guard<std::mutex> lock(g_state_mutex);
-        g_state.in_game = true;
-    }
-    // Fire any reload that was deferred while the player was in menus.
-    // We check outside the mutex because trigger_quick_load doesn't need it.
-    if (g_pending_reload_counter > g_last_reload_counter) {
-        log("quick_load: firing deferred F9 from telemetry_started (counter=" +
-            std::to_string(g_pending_reload_counter) + ")");
-        g_last_reload_counter = g_pending_reload_counter;
-        trigger_quick_load();
-    }
+    std::lock_guard<std::mutex> lock(g_state_mutex);
+    g_state.in_game = true;
 }
 
-// ── Frame-timing state (declared here so discovery code can reference g_startup_time) ──
-static double g_last_poll_time    = 0.0;
-static double g_last_flush_time   = 0.0;
-static double g_startup_time      = 0.0;
+// ── Frame timing ───────────────────────────────────────────────────────────────
+static double g_last_poll_time  = 0.0;
+static double g_last_flush_time = 0.0;
+static double g_startup_time   = 0.0;
 static const double POLL_INTERVAL_SECONDS  = 2.0;
 static const double FLUSH_INTERVAL_SECONDS = 2.0;
-
-// ── Memory discovery ───────────────────────────────────────────────────────────
-// When "discovery_mode.txt" exists in the comm folder, the DLL scans its own
-// heap memory for garage and truck strings and logs offsets to game.log.
-// This is a developer tool for mapping object layouts for future features.
-
-static bool g_discovery_done = false;
-
-struct ScanMatch {
-    uintptr_t   address;
-    std::string target;
-    std::vector<std::pair<int, uint32_t>> nearby_vals;
-    std::string hex_context;
-};
-
-static bool safe_read32(const uint8_t* src, uint32_t& out) {
-    memcpy(&out, src, 4);
-    return true;
-}
-
-static std::vector<ScanMatch> scan_heap_for_strings(
-        const std::vector<std::string>& targets,
-        size_t   max_results = 200,
-        int      near_range  = 128,
-        uint32_t min_val     = 1,
-        uint32_t max_val     = 10,
-        bool     include_hex = false)
-{
-    std::vector<ScanMatch> results;
-    MEMORY_BASIC_INFORMATION mbi;
-    uintptr_t addr = 0x10000;
-
-    while (results.size() < max_results &&
-           VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi)) == sizeof(mbi))
-    {
-        bool scannable = (mbi.State   == MEM_COMMIT)   &&
-                         (mbi.Type    == MEM_PRIVATE)   &&
-                         (mbi.Protect == PAGE_READWRITE) &&
-                         (mbi.RegionSize > 0)             &&
-                         (mbi.RegionSize < 128 * 1024 * 1024);
-
-        if (scannable) {
-            const uint8_t* region = reinterpret_cast<const uint8_t*>(mbi.BaseAddress);
-            size_t         rsize  = mbi.RegionSize;
-
-            for (const auto& tgt : targets) {
-                if (results.size() >= max_results) break;
-                size_t tlen = tgt.size();
-
-                for (size_t i = 0; i + tlen + 1 < rsize; ++i) {
-                    if (region[i] != (uint8_t)tgt[0]) continue;
-                    if (region[i + tlen] != '\0')      continue;
-                    if (memcmp(region + i, tgt.c_str(), tlen) != 0) continue;
-
-                    ScanMatch m;
-                    m.address = reinterpret_cast<uintptr_t>(region + i);
-                    m.target  = tgt;
-
-                    for (int off = -near_range; off < near_range; off += 4) {
-                        intptr_t abs = static_cast<intptr_t>(i) + off;
-                        if (abs < 0 || abs + 4 > static_cast<intptr_t>(rsize)) continue;
-                        uint32_t v = 0;
-                        if (safe_read32(region + abs, v) && v >= min_val && v <= max_val)
-                            m.nearby_vals.push_back({off, v});
-                    }
-
-                    if (include_hex) {
-                        std::ostringstream hex;
-                        for (int h = -16; h < 32; ++h) {
-                            if (h == 0) hex << "|";
-                            intptr_t abs_h = static_cast<intptr_t>(i) + h;
-                            if (abs_h >= 0 && abs_h < static_cast<intptr_t>(rsize))
-                                hex << std::hex << std::setw(2) << std::setfill('0')
-                                    << static_cast<int>(region[abs_h]);
-                            else
-                                hex << "??";
-                        }
-                        m.hex_context = hex.str();
-                    }
-
-                    results.push_back(std::move(m));
-                    if (results.size() >= max_results) break;
-                }
-            }
-        }
-
-        if (mbi.RegionSize == 0) break;
-        addr += mbi.RegionSize;
-    }
-
-    return results;
-}
-
-static void log_match(const std::string& prefix, const ScanMatch& m) {
-    std::ostringstream oss;
-    oss << prefix << "[" << m.target << "] 0x"
-        << std::hex << std::setw(12) << std::setfill('0') << m.address
-        << std::dec;
-    for (const auto& [off, v] : m.nearby_vals)
-        oss << "  " << (off >= 0 ? "+" : "") << off << "=" << v;
-    log(oss.str());
-    if (!m.hex_context.empty())
-        log("  hex: " + m.hex_context);
-}
-
-static void run_discovery() {
-    log("=== ATS-AP DISCOVERY MODE START ===");
-    log("Scanning heap for garage/office/truck objects. Share game.log with the developer.");
-
-    std::vector<std::string> garage_targets = {
-        "garage.san_francisco",  "garage.los_angeles",
-        "garage.sacramento",     "garage.fresno",
-        "garage.bakersfield",    "garage.stockton",
-        "garage.eureka",         "garage.redding",
-        "garage.san_diego",      "garage.las_vegas",
-        "garage.reno",           "garage.elko",
-        "garage.flagstaff",      "garage.phoenix",
-        "garage.tucson",         "garage.prescott",
-    };
-    auto garage_matches = scan_heap_for_strings(garage_targets, 100, 256, 1, 10, true);
-    log("--- GARAGE RESULTS (" + std::to_string(garage_matches.size()) + " matches) ---");
-    for (const auto& m : garage_matches) log_match("G", m);
-
-    std::vector<std::string> office_targets = {
-        "recruitment_agency.san_francisco", "recruitment_agency.los_angeles",
-        "recruitment_agency.sacramento",    "recruitment_agency.fresno",
-        "recruitment_agency.bakersfield",   "recruitment_agency.stockton",
-        "recruitment_agency.eureka",        "recruitment_agency.redding",
-        "recruitment_agency.san_diego",     "recruitment_agency.las_vegas",
-        "recruitment_agency.reno",          "recruitment_agency.elko",
-        "recruitment_agency.flagstaff",     "recruitment_agency.phoenix",
-        "recruitment_agency.tucson",        "recruitment_agency.prescott",
-    };
-    auto office_matches = scan_heap_for_strings(office_targets, 100, 256, 1, 10, true);
-    log("--- OFFICE RESULTS (" + std::to_string(office_matches.size()) + " matches) ---");
-    for (const auto& m : office_matches) log_match("O", m);
-
-    std::vector<std::string> truck_targets = {
-        "kenworth_w900",    "kenworth_t800",    "kenworth_t660",  "kenworth_k100e",
-        "peterbilt_389",    "peterbilt_388",    "peterbilt_367",
-        "western_star_49x", "western_star_57x",
-        "freightliner_114sd", "freightliner_coronado",
-        "mack_anthem",      "mack_pinnacle",
-        "international_lt",
-        "vehicle.kenworth_w900",    "vehicle.peterbilt_389",
-        "vehicle.western_star_49x", "vehicle.freightliner_coronado",
-    };
-    auto truck_matches = scan_heap_for_strings(truck_targets, 100, 128, 1, 10, false);
-    log("--- TRUCK RESULTS (" + std::to_string(truck_matches.size()) + " matches) ---");
-    for (const auto& m : truck_matches) log_match("T", m);
-
-    log("=== ATS-AP DISCOVERY MODE END ===");
-    g_discovery_done = true;
-}
-
-static void maybe_run_discovery(double now) {
-    if (g_discovery_done) return;
-    if (now - g_startup_time < 15.0) return;  // wait for game to finish loading
-    fs::path flag = g_comm_dir / "discovery_mode.txt";
-    if (!fs::exists(flag)) return;
-    run_discovery();
-    try { fs::remove(flag); } catch (...) {}
-}
-
-// ── Frame callback — drives all periodic operations ───────────────────────────
 
 SCSAPI_VOID telemetry_frame_start(const scs_event_t event,
                                    const void* const event_info,
                                    const scs_context_t context) {
     double t = now_seconds();
 
-    maybe_run_discovery(t);
-
     if (t - g_last_poll_time >= POLL_INTERVAL_SECONDS) {
         g_last_poll_time = t;
         read_items_file();
+        apply_memory_grants();
+        poll_city_count();
     }
 
     if (t - g_last_flush_time >= FLUSH_INTERVAL_SECONDS) {
@@ -596,30 +597,33 @@ SCSAPI_VOID telemetry_frame_start(const scs_event_t event,
     }
 }
 
-
 // ── SCS SDK entry points ───────────────────────────────────────────────────────
 
 SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
                                   const scs_telemetry_init_params_t* const params) {
-    if (version < SCS_TELEMETRY_VERSION_1_00) {
-        return SCS_RESULT_unsupported;
-    }
+    if (version < SCS_TELEMETRY_VERSION_1_00) return SCS_RESULT_unsupported;
 
     const scs_telemetry_init_params_v100_t* const p =
         static_cast<const scs_telemetry_init_params_v100_t*>(params);
 
     g_log = p->common.log;
-    log("Archipelago plugin initializing v" + std::string(PLUGIN_VERSION));
+    log("Archipelago plugin v" + std::string(PLUGIN_VERSION) + " initializing");
 
     g_comm_dir    = get_documents_path() / "American Truck Simulator" / "archipelago";
     g_events_file = g_comm_dir / "events.json";
     g_items_file  = g_comm_dir / "items.json";
+    if (!fs::exists(g_comm_dir)) fs::create_directories(g_comm_dir);
+    log("Comm folder: " + g_comm_dir.string());
 
-    if (!fs::exists(g_comm_dir)) {
-        fs::create_directories(g_comm_dir);
-    }
+    // Register VEH before setting breakpoints.
+    g_veh_handle = AddVectoredExceptionHandler(1, ats_veh);
+    if (!g_veh_handle)
+        log("WARNING: VEH registration failed — memory grants will not work",
+            SCS_LOG_TYPE_warning);
+    else
+        log("VEH registered; setting hardware breakpoints on all threads");
 
-    log("Communication folder: " + g_comm_dir.string());
+    set_bp_all_threads();
 
     read_items_file();
 
@@ -631,22 +635,20 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
 
     p->register_for_channel(
         SCS_TELEMETRY_TRUCK_CHANNEL_world_placement,
-        SCS_U32_NIL,
-        SCS_VALUE_TYPE_dplacement,
+        SCS_U32_NIL, SCS_VALUE_TYPE_dplacement,
         SCS_TELEMETRY_CHANNEL_FLAG_none,
-        on_truck_placement,
-        nullptr
+        on_truck_placement, nullptr
     );
 
     {
         std::lock_guard<std::mutex> lock(g_state_mutex);
         g_state.plugin_alive = true;
-        g_state.in_game = false;
+        g_state.in_game      = false;
     }
     flush_events_file();
 
     g_startup_time = now_seconds();
-    log("Archipelago plugin initialized. Waiting for Python client...");
+    log("Plugin ready. Waiting for first money/XP/city event to capture pointers...");
     return SCS_RESULT_ok;
 }
 
@@ -656,11 +658,21 @@ SCSAPI_VOID scs_telemetry_shutdown() {
         g_state.plugin_alive = false;
     }
     flush_events_file();
-    log("Archipelago plugin shutdown.");
-}
 
+    if (g_veh_handle) {
+        RemoveVectoredExceptionHandler(g_veh_handle);
+        g_veh_handle = nullptr;
+    }
+    clear_bp_all_threads();
+
+    log("Plugin shutdown.");
+}
 
 // ── DLL entry point ────────────────────────────────────────────────────────────
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
+    if (ul_reason_for_call == DLL_THREAD_ATTACH && g_veh_handle && !all_ptrs_captured()) {
+        // New thread created after init — give it the breakpoints too.
+        set_bp_on_thread(GetCurrentThread());
+    }
     return TRUE;
 }
