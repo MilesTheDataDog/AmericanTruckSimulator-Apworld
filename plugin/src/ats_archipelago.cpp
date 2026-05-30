@@ -67,7 +67,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.1.0";
+static const char* PLUGIN_VERSION = "2.1.1";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -178,10 +178,10 @@ static int xp_to_level(int xp) {
 //
 // Assumed friend base: 0x7FF65D000000  → RVAs below.
 
-static const uintptr_t FRIEND_BASE = 0x7FF65D000000ULL;
-static const uintptr_t MONEY_RVA   = 0x7FF65D97DA69ULL - FRIEND_BASE; // 0x97DA69
-static const uintptr_t XP_RVA      = 0x7FF65D62FE66ULL - FRIEND_BASE; // 0x62FE66
-static const uintptr_t CITY_RVA    = 0x7FF65D62A9DFULL - FRIEND_BASE; // 0x62A9DF
+static const uintptr_t FRIEND_BASE = 0x7FF65D210000ULL;
+static const uintptr_t MONEY_RVA   = 0x7FF65D97DA69ULL - FRIEND_BASE; // 0x76DA69
+static const uintptr_t XP_RVA      = 0x7FF65D62FE66ULL - FRIEND_BASE; // 0x41FE66
+static const uintptr_t CITY_RVA    = 0x7FF65D62A9DFULL - FRIEND_BASE; // 0x41A9DF
 
 // Expected machine-code bytes at each instruction (for verification + AOB).
 //   48 89 4F 10        mov [rdi+0x10],  rcx

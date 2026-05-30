@@ -971,6 +971,12 @@ class ATSContext(CommonContext):
                 self._total_xp_granted += amount
                 logger.info(f"[ATS] XP grant: +{amount:,} XP (total: {self._total_xp_granted:,})")
 
+        elif item_name not in ("Victory", "Trucking Permit"):
+            logger.warning(
+                f"[ATS] Received unknown item {item_name!r} — no in-game effect. "
+                "This item is from an older game seed; regenerate with the current apworld."
+            )
+
 
     # ── Items file (client → plugin) ───────────────────────────────────────────
 
