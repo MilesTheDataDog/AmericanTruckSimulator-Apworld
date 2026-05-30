@@ -67,7 +67,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.1.2";
+static const char* PLUGIN_VERSION = "2.1.3";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -792,8 +792,12 @@ SCSAPI_VOID telemetry_paused(const scs_event_t event, const void* const event_in
 
 SCSAPI_VOID telemetry_started(const scs_event_t event, const void* const event_info,
                                const scs_context_t context) {
-    std::lock_guard<std::mutex> lock(g_state_mutex);
-    g_state.in_game = true;
+    {
+        std::lock_guard<std::mutex> lock(g_state_mutex);
+        g_state.in_game = true;
+    }
+    read_items_file();
+    apply_memory_grants();
 }
 
 // ── Frame timing ───────────────────────────────────────────────────────────────
