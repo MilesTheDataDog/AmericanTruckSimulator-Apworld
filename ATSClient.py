@@ -70,6 +70,11 @@ COMM_DIR: Path = _get_comm_dir()
 EVENTS_FILE = COMM_DIR / "events.json"
 ITEMS_FILE = COMM_DIR / "items.json"
 SLOT_DATA_FILE = COMM_DIR / "slot_data.json"
+# Optional local overrides for slot_data received from the AP server.
+# Keys present here replace what the server sends — useful when the multiworld
+# was generated with incorrect options and cannot be regenerated.
+# Example contents:  {"win_condition": 1, "goal_level": 5}
+SLOT_DATA_OVERRIDE_FILE = COMM_DIR / "slot_data_override.json"
 
 # ── Save file parsing ─────────────────────────────────────────────────────────
 
@@ -910,6 +915,16 @@ class ATSContext(CommonContext):
             await result
         if cmd == "Connected":
             self.slot_data = args.get("slot_data", {})
+            if SLOT_DATA_OVERRIDE_FILE.exists():
+                try:
+                    overrides = _read_json(SLOT_DATA_OVERRIDE_FILE)
+                    if isinstance(overrides, dict):
+                        self.slot_data.update(overrides)
+                        logger.info(f"[ATS] slot_data_override.json applied: {overrides}")
+                    else:
+                        logger.warning("[ATS] slot_data_override.json is not a JSON object — ignored")
+                except Exception:
+                    logger.warning(f"[ATS] Could not read slot_data_override.json:\n{traceback.format_exc()}")
             self._on_connected()
         # ReceivedItems is intentionally NOT handled here.
         # args["items"] contains raw JSON lists, not NetworkItem objects.
