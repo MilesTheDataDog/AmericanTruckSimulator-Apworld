@@ -67,12 +67,13 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.1.4";
+static const char* PLUGIN_VERSION = "2.1.5";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
 static fs::path g_events_file;
 static fs::path g_items_file;
+static fs::path g_applied_file;
 
 // ── SCS logging ────────────────────────────────────────────────────────────────
 static scs_log_t g_log = nullptr;
@@ -205,9 +206,11 @@ static std::atomic<uintptr_t> g_money_ptr{0};
 static std::atomic<uintptr_t> g_xp_ptr{0};
 static std::atomic<uintptr_t> g_city_ptr{0};
 
-// Cumulative grant amounts applied to live memory this session.
+// Cumulative grant amounts written to the player's save across all sessions.
+// Loaded from applied.json on startup so restarts don't re-apply old grants.
 static long long g_applied_money = 0;
 static int       g_applied_xp    = 0;
+static std::atomic<bool> g_applied_dirty{false};
 
 // Previous city count — detects increases without keeping the breakpoint live.
 static uint64_t g_prev_city_count = UINT64_MAX; // UINT64_MAX = uninitialized
@@ -513,6 +516,7 @@ static LONG WINAPI ats_veh(EXCEPTION_POINTERS* ep) {
             if (delta > 0) {
                 ctx->Rcx = (DWORD64)((long long)ctx->Rcx + delta);
                 g_applied_money = g_items.total_money_granted;
+                g_applied_dirty.store(true, std::memory_order_relaxed);
                 log("Grant injected at capture: +$" + std::to_string(delta));
             }
         }
@@ -530,6 +534,7 @@ static LONG WINAPI ats_veh(EXCEPTION_POINTERS* ep) {
                 int32_t new_xp = (int32_t)(ctx->Rdi & 0xFFFFFFFF) + delta;
                 ctx->Rdi = (ctx->Rdi & 0xFFFFFFFF00000000ULL) | (uint32_t)new_xp;
                 g_applied_xp = g_items.total_xp_granted;
+                g_applied_dirty.store(true, std::memory_order_relaxed);
                 log("Grant injected at capture: +" + std::to_string(delta) + " XP");
             }
         }
@@ -572,6 +577,7 @@ static void apply_memory_grants() {
             long long newval = current + delta;
             if (safe_write_i64(mp + MONEY_OFFSET, newval)) {
                 g_applied_money = g_items.total_money_granted;
+                g_applied_dirty.store(true, std::memory_order_relaxed);
                 log("Grant applied: +$" + std::to_string(delta) +
                     " (balance now $" + std::to_string(newval) + ")");
             } else {
@@ -597,6 +603,7 @@ static void apply_memory_grants() {
             int32_t newval = current + (int32_t)delta;
             if (safe_write_i32(xp + XP_OFFSET, newval)) {
                 g_applied_xp = g_items.total_xp_granted;
+                g_applied_dirty.store(true, std::memory_order_relaxed);
                 log("Grant applied: +" + std::to_string(delta) +
                     " XP (total now " + std::to_string(newval) + ")");
             } else {
@@ -664,6 +671,33 @@ static void read_items_file() {
     } catch (const std::exception& e) {
         log(std::string("Failed to read items.json: ") + e.what(), SCS_LOG_TYPE_warning);
     }
+}
+
+// ── Persist / restore applied-grant totals ─────────────────────────────────────
+static void load_applied_state() {
+    if (!fs::exists(g_applied_file)) return;
+    try {
+        std::ifstream f(g_applied_file);
+        json j = json::parse(f);
+        g_applied_money = j.value("applied_money", (long long)0);
+        g_applied_xp    = j.value("applied_xp",    0);
+        log("Applied state restored: $" + std::to_string(g_applied_money) +
+            ", " + std::to_string(g_applied_xp) + " XP");
+    } catch (...) {}
+}
+
+static void save_applied_state() {
+    try {
+        json j;
+        j["applied_money"] = g_applied_money;
+        j["applied_xp"]    = g_applied_xp;
+        fs::path tmp = g_applied_file;
+        tmp += ".tmp";
+        std::ofstream f(tmp);
+        f << j.dump(2);
+        f.close();
+        fs::rename(tmp, g_applied_file);
+    } catch (...) {}
 }
 
 // ── Write events.json (plugin → client) ───────────────────────────────────────
@@ -841,6 +875,8 @@ SCSAPI_VOID telemetry_frame_start(const scs_event_t event,
     if (t - g_last_flush_time >= FLUSH_INTERVAL_SECONDS) {
         g_last_flush_time = t;
         flush_events_file();
+        if (g_applied_dirty.exchange(false, std::memory_order_relaxed))
+            save_applied_state();
     }
 }
 
@@ -857,9 +893,10 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
     g_self = GetCurrentProcess();
     log("Archipelago plugin v" + std::string(PLUGIN_VERSION) + " initializing");
 
-    g_comm_dir    = get_documents_path() / "American Truck Simulator" / "archipelago";
-    g_events_file = g_comm_dir / "events.json";
-    g_items_file  = g_comm_dir / "items.json";
+    g_comm_dir     = get_documents_path() / "American Truck Simulator" / "archipelago";
+    g_events_file  = g_comm_dir / "events.json";
+    g_items_file   = g_comm_dir / "items.json";
+    g_applied_file = g_comm_dir / "applied.json";
     if (!fs::exists(g_comm_dir)) fs::create_directories(g_comm_dir);
     log("Comm folder: " + g_comm_dir.string());
 
@@ -876,6 +913,7 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
 
     set_bp_all_threads();
 
+    load_applied_state();
     read_items_file();
 
     p->register_for_event(SCS_TELEMETRY_EVENT_frame_start,   telemetry_frame_start,    nullptr);
