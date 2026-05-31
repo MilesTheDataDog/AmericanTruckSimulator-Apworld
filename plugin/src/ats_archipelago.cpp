@@ -559,6 +559,7 @@ static LONG WINAPI ats_veh(EXCEPTION_POINTERS* ep) {
 
 // ── Forward declarations (timer calls these before their definitions) ──────────
 static void read_items_file();
+static void save_applied_state();
 static void apply_memory_grants(bool allow_paused = false);
 
 // ── Delivery-screen grant timer ────────────────────────────────────────────────
