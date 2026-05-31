@@ -873,6 +873,9 @@ class ATSContext(CommonContext):
         self._force_save_poll: bool = False
         # Set when the DLL reports a new city; cleared when the next delivery triggers a save poll
         self._city_check_pending: bool = False
+        # City/state check codes detected during an autosave poll while a delivery is still
+        # in progress; flushed to the AP server in _poll_save_after_delivery().
+        self._save_pending_city_checks: List[int] = []
 
         # Notification queue for in-game popups (written to items.json)
         self._notifications: List[Dict] = []
@@ -1084,10 +1087,12 @@ class ATSContext(CommonContext):
             logger.debug(f"[ATS] New event: {event_id}")
             self._processed_event_ids.add(event_id)
 
-            # On any delivery, schedule a save poll to catch newly-visited cities.
-            # The game writes game.sii ~12-18s after the delivery event; we wait 20s.
-            if event.get("type") == "cargo_delivered" and self._city_check_pending:
-                self._city_check_pending = False
+            # On any delivery, schedule a post-delivery save poll.  The game writes
+            # game.sii ~12-18 s after the delivery event; we wait 20 s, then flush
+            # any deferred city/state checks and force a fresh save read.
+            if event.get("type") == "cargo_delivered":
+                if self._city_check_pending:
+                    self._city_check_pending = False
                 asyncio.create_task(self._poll_save_after_delivery())
 
             try:
@@ -1174,11 +1179,20 @@ class ATSContext(CommonContext):
     async def _poll_save_after_delivery(self) -> None:
         """
         Wait for the game to finish writing game.sii after a delivery, then
-        force a save poll to detect any cities entered during the route.
+        flush any city/state checks that were deferred during the route and
+        force a save poll to catch any remaining new cities.
         The game typically writes game.sii 12-18 s after the delivery event.
         """
         await asyncio.sleep(20.0)
-        logger.info("[ATS] Post-delivery city check: polling save file now")
+        logger.info("[ATS] Post-delivery poll: flushing deferred checks and reading save")
+        if self._save_pending_city_checks:
+            pending = self._save_pending_city_checks[:]
+            self._save_pending_city_checks = []
+            logger.info(f"[ATS] Flushing {len(pending)} deferred city/state check(s) at delivery time.")
+            await self.send_msgs([{
+                "cmd": "LocationChecks",
+                "locations": pending,
+            }])
         self._force_save_poll = True
 
     def _poll_save_file(self) -> None:
@@ -1287,15 +1301,24 @@ class ATSContext(CommonContext):
             self._save_known_cities.add(city_id)
             for loc_data in CITY_ARRIVAL_LOCATIONS.values():
                 if loc_data.game_id == city_id and loc_data.code not in self.checked_locations:
-                    new_checks.append(loc_data.code)
-                    logger.info(f"[ATS] City arrival check: {city_id} → {loc_data.code}")
+                    if self._city_check_pending:
+                        # Delivery is still in progress — defer until _poll_save_after_delivery fires
+                        self._save_pending_city_checks.append(loc_data.code)
+                        logger.info(f"[ATS] City arrival deferred (delivery in progress): {city_id} → {loc_data.code}")
+                    else:
+                        new_checks.append(loc_data.code)
+                        logger.info(f"[ATS] City arrival check: {city_id} → {loc_data.code}")
                     state_name = loc_data.region
                     if state_name not in self._save_known_states:
                         self._save_known_states.add(state_name)
                         for sa_data in STATE_ARRIVAL_LOCATIONS.values():
                             if sa_data.region == state_name and sa_data.code not in self.checked_locations:
-                                new_checks.append(sa_data.code)
-                                logger.info(f"[ATS] State first visit: {state_name}")
+                                if self._city_check_pending:
+                                    self._save_pending_city_checks.append(sa_data.code)
+                                    logger.info(f"[ATS] State first visit deferred: {state_name}")
+                                else:
+                                    new_checks.append(sa_data.code)
+                                    logger.info(f"[ATS] State first visit: {state_name}")
                                 break
                     break
 
