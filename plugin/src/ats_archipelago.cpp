@@ -566,15 +566,21 @@ static void apply_memory_grants(bool allow_paused = false);
 // Spawned by job_delivered; polls items.json during the delivery summary screen
 // so grants reach the player before they dismiss the screen, not at the next delivery.
 static DWORD WINAPI grant_timer_func(LPVOID) {
+    // Snapshot applied totals at timer start.  We exit early only when the
+    // applied totals INCREASE (i.e. a grant was actually written to memory),
+    // not when they merely equal total_granted (that just means items.json
+    // hasn't been updated by the AP server yet — the whole point of this timer).
+    long long snap_money = g_applied_money;
+    int       snap_xp    = g_applied_xp;
+
     const int MAX_POLLS = 20;  // 20 × 500 ms = 10 s maximum wait
     for (int i = 0; i < MAX_POLLS; ++i) {
         Sleep(500);
         if (!g_delivery_grant_pending.load(std::memory_order_relaxed)) break;
         read_items_file();
         apply_memory_grants(true);  // allow_paused = true
-        // Stop as soon as grants are fully applied.
-        if (g_items.total_money_granted <= g_applied_money &&
-            g_items.total_xp_granted   <= g_applied_xp)
+        // Exit once a grant was successfully applied.
+        if (g_applied_money > snap_money || g_applied_xp > snap_xp)
             break;
     }
     g_delivery_grant_pending.store(false, std::memory_order_relaxed);
