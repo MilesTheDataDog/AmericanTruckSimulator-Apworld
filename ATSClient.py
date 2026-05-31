@@ -784,8 +784,8 @@ def _parse_sii_save(text: str) -> Dict[str, Any]:
     if money_m:
         result["money"] = int(money_m.group(1))
 
-    # visited_city[N]: city.<city_id>
-    for m in re.finditer(r"\bvisited_city\[\d+\]\s*:\s*city\.(\w+)", text):
+    # ATS 1.49+ format: visited_cities[N]: <city_id>  (plural key, no "city." prefix)
+    for m in re.finditer(r"\bvisited_cities\[\d+\]\s*:\s*(\w+)", text):
         result["visited_cities"].add(m.group(1))
 
     # garage : garage.<city_id> { ... status: 2 ... }
@@ -1202,29 +1202,15 @@ class ATSContext(CommonContext):
             self._save_path_logged = True
             logger.info(f"[ATS] Found save file: {save_path}")
 
-        # Find companion profile.sii (ATS stores visited_city there, not in game.sii)
-        profile_path = _find_profile_sii(save_path)
-
         try:
             mtime = save_path.stat().st_mtime
         except OSError:
             return
-        try:
-            profile_mtime = profile_path.stat().st_mtime if profile_path else 0.0
-        except OSError:
-            profile_mtime = 0.0
 
-        game_changed    = mtime         > self._save_last_mtime
-        profile_changed = profile_mtime > self._save_profile_mtime
-
-        # Skip if neither file changed, unless forced by city_count_changed signal.
-        if not self._force_save_poll and not game_changed and not profile_changed:
+        if not self._force_save_poll and mtime <= self._save_last_mtime:
             return
         self._force_save_poll = False
-        if game_changed:
-            self._save_last_mtime = mtime
-        if profile_changed:
-            self._save_profile_mtime = profile_mtime
+        self._save_last_mtime = mtime
 
         text, fmt, _ = _read_sii_text(save_path)
         if text is None:
@@ -1232,25 +1218,6 @@ class ATSContext(CommonContext):
             return
 
         save = _parse_sii_save(text)
-
-        # Merge visited cities from profile.sii — ATS writes persistent city
-        # visit records to the profile, not to the slot-level game save.
-        if profile_path:
-            prof_text, prof_fmt, _ = _read_sii_text(profile_path)
-            if prof_text:
-                prof_data = _parse_sii_save(prof_text)
-                if not prof_data["visited_cities"] and prof_text:
-                    idx = prof_text.lower().find("visited")
-                    if idx >= 0:
-                        logger.info(f"[ATS] profile.sii 'visited' context: {prof_text[max(0,idx-20):idx+200]!r}")
-                    else:
-                        logger.info(f"[ATS] profile.sii has no 'visited' keyword. First 300 chars: {prof_text[:300]!r}")
-                if prof_data["visited_cities"]:
-                    save["visited_cities"] |= prof_data["visited_cities"]
-                    logger.info(
-                        f"[ATS] profile.sii ({prof_fmt}): "
-                        f"{len(prof_data['visited_cities'])} cities merged"
-                    )
 
         # Update level/money from save as fallback when DLL pointers not yet captured.
         if not self._ptr_xp_ready:
