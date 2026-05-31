@@ -1239,9 +1239,15 @@ class ATSContext(CommonContext):
             prof_text, prof_fmt, _ = _read_sii_text(profile_path)
             if prof_text:
                 prof_data = _parse_sii_save(prof_text)
+                if not prof_data["visited_cities"] and prof_text:
+                    idx = prof_text.lower().find("visited")
+                    if idx >= 0:
+                        logger.info(f"[ATS] profile.sii 'visited' context: {prof_text[max(0,idx-20):idx+200]!r}")
+                    else:
+                        logger.info(f"[ATS] profile.sii has no 'visited' keyword. First 300 chars: {prof_text[:300]!r}")
                 if prof_data["visited_cities"]:
                     save["visited_cities"] |= prof_data["visited_cities"]
-                    logger.debug(
+                    logger.info(
                         f"[ATS] profile.sii ({prof_fmt}): "
                         f"{len(prof_data['visited_cities'])} cities merged"
                     )
@@ -1270,11 +1276,30 @@ class ATSContext(CommonContext):
         # City first arrival checks
         if not self._save_first_city_log:
             self._save_first_city_log = True
+            # Log game.sii city count before profile merge
+            game_cities_raw = set()
+            for m in re.finditer(r"\bvisited_city\s*\[\d+\]\s*:\s*(\S+)", text):
+                game_cities_raw.add(m.group(1))
             logger.info(
                 f"[ATS] Save poll (first read, fmt={fmt}): "
-                f"{len(save['visited_cities'])} cities: "
+                f"{len(save['visited_cities'])} cities total "
+                f"(game.sii raw={len(game_cities_raw)}): "
                 f"{sorted(save['visited_cities'])}"
             )
+            if len(game_cities_raw) == 0 and text:
+                # Show sample of save text to diagnose regex mismatch
+                idx = text.lower().find("visited")
+                if idx >= 0:
+                    logger.info(f"[ATS] Save 'visited' context: {text[max(0,idx-20):idx+200]!r}")
+                else:
+                    logger.info(f"[ATS] Save file has no 'visited' keyword. First 400 chars: {text[:400]!r}")
+            if profile_path:
+                logger.info(
+                    f"[ATS] profile.sii: {profile_path} "
+                    f"(exists={profile_path.exists()})"
+                )
+            else:
+                logger.info("[ATS] profile.sii: not found at expected path")
         new_cities = save["visited_cities"] - self._save_known_cities
         if new_cities:
             logger.info(f"[ATS] New cities detected: {sorted(new_cities)}")

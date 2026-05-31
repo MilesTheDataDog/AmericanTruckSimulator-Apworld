@@ -67,7 +67,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.1.6";
+static const char* PLUGIN_VERSION = "2.2.0";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -214,6 +214,9 @@ static std::atomic<bool> g_applied_dirty{false};
 
 // Previous city count — detects increases without keeping the breakpoint live.
 static uint64_t g_prev_city_count = UINT64_MAX; // UINT64_MAX = uninitialized
+
+static std::mutex              g_apply_mutex;          // prevents timer + game thread double-applying
+static std::atomic<bool>       g_delivery_grant_pending{false};
 
 static PVOID g_veh_handle = nullptr;
 
@@ -554,10 +557,43 @@ static LONG WINAPI ats_veh(EXCEPTION_POINTERS* ep) {
     return EXCEPTION_CONTINUE_EXECUTION;
 }
 
+// ── Forward declarations (timer calls these before their definitions) ──────────
+static void read_items_file();
+static void apply_memory_grants(bool allow_paused = false);
+
+// ── Delivery-screen grant timer ────────────────────────────────────────────────
+// Spawned by job_delivered; polls items.json during the delivery summary screen
+// so grants reach the player before they dismiss the screen, not at the next delivery.
+static DWORD WINAPI grant_timer_func(LPVOID) {
+    const int MAX_POLLS = 20;  // 20 × 500 ms = 10 s maximum wait
+    for (int i = 0; i < MAX_POLLS; ++i) {
+        Sleep(500);
+        if (!g_delivery_grant_pending.load(std::memory_order_relaxed)) break;
+        read_items_file();
+        apply_memory_grants(true);  // allow_paused = true
+        // Stop as soon as grants are fully applied.
+        if (g_items.total_money_granted <= g_applied_money &&
+            g_items.total_xp_granted   <= g_applied_xp)
+            break;
+    }
+    g_delivery_grant_pending.store(false, std::memory_order_relaxed);
+    return 0;
+}
+
+static void start_grant_timer() {
+    if (g_delivery_grant_pending.load(std::memory_order_relaxed)) return;
+    g_delivery_grant_pending.store(true, std::memory_order_relaxed);
+    HANDLE th = CreateThread(nullptr, 0, grant_timer_func, nullptr, 0, nullptr);
+    if (th) CloseHandle(th);  // fire-and-forget; thread cleans itself up
+}
+
 // ── Apply pending grants directly to live memory ───────────────────────────────
-static void apply_memory_grants() {
-    // Only apply while the simulation is running (objects stable).
-    if (!g_state.in_game) return;
+static void apply_memory_grants(bool allow_paused) {
+    std::lock_guard<std::mutex> apply_lock(g_apply_mutex);
+    {
+        std::lock_guard<std::mutex> lock(g_state_mutex);
+        if (!g_state.in_game && !allow_paused) return;
+    }
 
     bool needs_rearm = false;
 
@@ -580,6 +616,7 @@ static void apply_memory_grants() {
                 g_applied_dirty.store(true, std::memory_order_relaxed);
                 log("Grant applied: +$" + std::to_string(delta) +
                     " (balance now $" + std::to_string(newval) + ")");
+                save_applied_state();
             } else {
                 log("Grant failed: money write error — resetting pointer", SCS_LOG_TYPE_warning);
                 g_money_ptr.store(0, std::memory_order_relaxed);
@@ -606,6 +643,7 @@ static void apply_memory_grants() {
                 g_applied_dirty.store(true, std::memory_order_relaxed);
                 log("Grant applied: +" + std::to_string(delta) +
                     " XP (total now " + std::to_string(newval) + ")");
+                save_applied_state();
             } else {
                 log("Grant failed: XP write error — resetting pointer", SCS_LOG_TYPE_warning);
                 g_xp_ptr.store(0, std::memory_order_relaxed);
@@ -788,6 +826,7 @@ SCSAPI_VOID telemetry_gameplay_event(const scs_event_t event,
                         g_state.current_cargo_id, extra);
         }
         flush_events_file();
+        start_grant_timer();
     }
 
     if (event_name == SCS_TELEMETRY_GAMEPLAY_EVENT_job_cancelled) {
@@ -850,6 +889,7 @@ SCSAPI_VOID telemetry_paused(const scs_event_t event, const void* const event_in
 
 SCSAPI_VOID telemetry_started(const scs_event_t event, const void* const event_info,
                                const scs_context_t context) {
+    g_delivery_grant_pending.store(false, std::memory_order_relaxed);
     {
         std::lock_guard<std::mutex> lock(g_state_mutex);
         g_state.in_game = true;
@@ -951,6 +991,8 @@ SCSAPI_VOID scs_telemetry_shutdown() {
         std::lock_guard<std::mutex> lock(g_state_mutex);
         g_state.plugin_alive = false;
     }
+    if (g_applied_dirty.exchange(false, std::memory_order_relaxed))
+        save_applied_state();
     flush_events_file();
 
     if (g_veh_handle) {
