@@ -305,6 +305,25 @@ def _find_ats_save_file() -> Optional[Path]:
     return None
 
 
+def _find_profile_sii(save_path: Path) -> Optional[Path]:
+    """Return the profile.sii alongside a game.sii path, if it exists.
+
+    Save structure: .../profiles/<id>/save/<slot>/game.sii
+    Profile file:  .../profiles/<id>/profile.sii
+
+    ATS stores visited_city data in the profile (persistent across sessions),
+    not in the slot-level game.sii save file.
+    """
+    try:
+        profile_dir = save_path.parent.parent.parent
+        p = profile_dir / "profile.sii"
+        if p.is_file():
+            return p
+    except Exception:
+        pass
+    return None
+
+
 # ── Pure-Python AES-256-CBC ───────────────────────────────────────────────────
 # No external dependencies — works in frozen PyInstaller builds and bare Python.
 
@@ -877,6 +896,7 @@ class ATSContext(CommonContext):
 
         # Save file polling state
         self._save_last_mtime: float = 0.0
+        self._save_profile_mtime: float = 0.0
         self._save_known_cities: Set[str] = set()
         self._save_known_states: Set[str] = set()
         self._save_path_logged: bool = False
@@ -1182,16 +1202,29 @@ class ATSContext(CommonContext):
             self._save_path_logged = True
             logger.info(f"[ATS] Found save file: {save_path}")
 
+        # Find companion profile.sii (ATS stores visited_city there, not in game.sii)
+        profile_path = _find_profile_sii(save_path)
+
         try:
             mtime = save_path.stat().st_mtime
         except OSError:
             return
+        try:
+            profile_mtime = profile_path.stat().st_mtime if profile_path else 0.0
+        except OSError:
+            profile_mtime = 0.0
 
-        # Skip if file unchanged, unless forced by city_count_changed signal.
-        if not self._force_save_poll and mtime <= self._save_last_mtime:
+        game_changed    = mtime         > self._save_last_mtime
+        profile_changed = profile_mtime > self._save_profile_mtime
+
+        # Skip if neither file changed, unless forced by city_count_changed signal.
+        if not self._force_save_poll and not game_changed and not profile_changed:
             return
         self._force_save_poll = False
-        self._save_last_mtime = mtime
+        if game_changed:
+            self._save_last_mtime = mtime
+        if profile_changed:
+            self._save_profile_mtime = profile_mtime
 
         text, fmt, _ = _read_sii_text(save_path)
         if text is None:
@@ -1199,6 +1232,19 @@ class ATSContext(CommonContext):
             return
 
         save = _parse_sii_save(text)
+
+        # Merge visited cities from profile.sii — ATS writes persistent city
+        # visit records to the profile, not to the slot-level game save.
+        if profile_path:
+            prof_text, prof_fmt, _ = _read_sii_text(profile_path)
+            if prof_text:
+                prof_data = _parse_sii_save(prof_text)
+                if prof_data["visited_cities"]:
+                    save["visited_cities"] |= prof_data["visited_cities"]
+                    logger.debug(
+                        f"[ATS] profile.sii ({prof_fmt}): "
+                        f"{len(prof_data['visited_cities'])} cities merged"
+                    )
 
         # Update level/money from save as fallback when DLL pointers not yet captured.
         if not self._ptr_xp_ready:
@@ -1225,7 +1271,8 @@ class ATSContext(CommonContext):
         if not self._save_first_city_log:
             self._save_first_city_log = True
             logger.info(
-                f"[ATS] Save poll (first read): {len(save['visited_cities'])} cities: "
+                f"[ATS] Save poll (first read, fmt={fmt}): "
+                f"{len(save['visited_cities'])} cities: "
                 f"{sorted(save['visited_cities'])}"
             )
         new_cities = save["visited_cities"] - self._save_known_cities
