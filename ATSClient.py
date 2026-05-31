@@ -305,24 +305,6 @@ def _find_ats_save_file() -> Optional[Path]:
     return None
 
 
-def _find_profile_sii(save_path: Path) -> Optional[Path]:
-    """Return the profile.sii alongside a game.sii path, if it exists.
-
-    Save structure: .../profiles/<id>/save/<slot>/game.sii
-    Profile file:  .../profiles/<id>/profile.sii
-
-    ATS stores visited_city data in the profile (persistent across sessions),
-    not in the slot-level game.sii save file.
-    """
-    try:
-        profile_dir = save_path.parent.parent.parent
-        p = profile_dir / "profile.sii"
-        if p.is_file():
-            return p
-    except Exception:
-        pass
-    return None
-
 
 # ── Pure-Python AES-256-CBC ───────────────────────────────────────────────────
 # No external dependencies — works in frozen PyInstaller builds and bare Python.
@@ -896,7 +878,6 @@ class ATSContext(CommonContext):
 
         # Save file polling state
         self._save_last_mtime: float = 0.0
-        self._save_profile_mtime: float = 0.0
         self._save_known_cities: Set[str] = set()
         self._save_known_states: Set[str] = set()
         self._save_path_logged: bool = False
