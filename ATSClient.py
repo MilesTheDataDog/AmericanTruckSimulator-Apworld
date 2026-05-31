@@ -911,7 +911,9 @@ class ATSContext(CommonContext):
 
     def _on_connected(self) -> None:
         logger.info(f"[ATS] Connected to Archipelago server as {self.username}")
-        logger.info(f"[ATS] Win condition: {self._win_condition_description()}")
+        gl = self.slot_data.get("goal_level", 35)
+        gm = self.slot_data.get("goal_money", 1000) * 1000
+        logger.info(f"[ATS] Win condition: {self._win_condition_description()} (goal_level={gl}, goal_money=${gm:,})")
         # Write slot data so the plugin/mod can read player options
         _write_json(SLOT_DATA_FILE, self.slot_data)
         self._write_items_file()
@@ -1215,11 +1217,27 @@ class ATSContext(CommonContext):
 
         # Level milestone checks
         from worlds.american_truck_simulator.locations import ALL_LOCATIONS
+        level_checks_sent: List[str] = []
         for loc_data in ALL_LOCATIONS.values():
             if loc_data.category == "level":
                 milestone = int(loc_data.game_id.split("_")[1])
                 if self.current_level >= milestone and loc_data.code not in self.checked_locations:
                     new_checks.append(loc_data.code)
+                    level_checks_sent.append(loc_data.name)
+
+        if level_checks_sent and not self.goal_complete:
+            wc      = self.slot_data.get("win_condition", WIN_LEVEL_AND_MONEY)
+            gl      = self.slot_data.get("goal_level", 35)
+            gm      = self.slot_data.get("goal_money", 1000) * 1000
+            wc_name = {0: "Level+Money", 1: "Level Only", 2: "Money Only", 3: "Level or Money"}.get(wc, str(wc))
+            l_ok    = self.current_level >= gl
+            m_ok    = self.current_money  >= gm
+            logger.info(
+                f"[ATS] Level milestone(s) fired: {level_checks_sent} — "
+                f"win condition ({wc_name}): "
+                f"level {self.current_level}/{gl} ({'met' if l_ok else 'NOT MET'}), "
+                f"money ${self.current_money:,}/${gm:,} ({'met' if m_ok else 'NOT MET'})"
+            )
 
         # City first arrival checks
         if not self._save_first_city_log:
@@ -1235,19 +1253,11 @@ class ATSContext(CommonContext):
                 f"{sorted(save['visited_cities'])}"
             )
             if len(game_cities_raw) == 0 and text:
-                # Show sample of save text to diagnose regex mismatch
                 idx = text.lower().find("visited")
                 if idx >= 0:
                     logger.info(f"[ATS] Save 'visited' context: {text[max(0,idx-20):idx+200]!r}")
                 else:
                     logger.info(f"[ATS] Save file has no 'visited' keyword. First 400 chars: {text[:400]!r}")
-            if profile_path:
-                logger.info(
-                    f"[ATS] profile.sii: {profile_path} "
-                    f"(exists={profile_path.exists()})"
-                )
-            else:
-                logger.info("[ATS] profile.sii: not found at expected path")
         new_cities = save["visited_cities"] - self._save_known_cities
         if new_cities:
             logger.info(f"[ATS] New cities detected: {sorted(new_cities)}")
