@@ -67,7 +67,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.1.3";
+static const char* PLUGIN_VERSION = "2.1.4";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -506,6 +506,15 @@ static LONG WINAPI ats_veh(EXCEPTION_POINTERS* ep) {
         if (g_money_ptr.load(std::memory_order_relaxed) == 0) {
             g_money_ptr.store(ctx->Rdi, std::memory_order_relaxed);
             log("Memory: money pointer captured " + hex_addr(ctx->Rdi));
+            // The instruction (MOV [RDI+0x10], RCX) hasn't executed yet; RCX holds
+            // the new balance the game is about to write.  Inject our grant delta
+            // into RCX now so the game's own instruction commits the combined value.
+            long long delta = (long long)g_items.total_money_granted - (long long)g_applied_money;
+            if (delta > 0) {
+                ctx->Rcx = (DWORD64)((long long)ctx->Rcx + delta);
+                g_applied_money = g_items.total_money_granted;
+                log("Grant injected at capture: +$" + std::to_string(delta));
+            }
         }
         ctx->Dr0 = 0;
         ctx->Dr7 &= ~(1ULL << 0);
@@ -513,6 +522,16 @@ static LONG WINAPI ats_veh(EXCEPTION_POINTERS* ep) {
         if (g_xp_ptr.load(std::memory_order_relaxed) == 0) {
             g_xp_ptr.store(ctx->Rsi, std::memory_order_relaxed);
             log("Memory: XP pointer captured " + hex_addr(ctx->Rsi));
+            // The instruction (MOV [RSI+0x62C], EDI) hasn't executed yet; EDI holds
+            // the new XP value the game is about to write.  Inject our grant delta
+            // into EDI (low 32 bits of RDI) so the game commits the combined value.
+            int delta = g_items.total_xp_granted - g_applied_xp;
+            if (delta > 0) {
+                int32_t new_xp = (int32_t)(ctx->Rdi & 0xFFFFFFFF) + delta;
+                ctx->Rdi = (ctx->Rdi & 0xFFFFFFFF00000000ULL) | (uint32_t)new_xp;
+                g_applied_xp = g_items.total_xp_granted;
+                log("Grant injected at capture: +" + std::to_string(delta) + " XP");
+            }
         }
         ctx->Dr1 = 0;
         ctx->Dr7 &= ~(1ULL << 2);
