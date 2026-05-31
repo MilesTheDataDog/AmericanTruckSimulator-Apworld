@@ -67,7 +67,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.1.5";
+static const char* PLUGIN_VERSION = "2.1.6";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -839,6 +839,11 @@ SCSAPI_VOID telemetry_configuration(const scs_event_t event,
 
 SCSAPI_VOID telemetry_paused(const scs_event_t event, const void* const event_info,
                               const scs_context_t context) {
+    // Read items.json and attempt grant application before marking in_game=false.
+    // This covers the case where the player pauses immediately after dismissing the
+    // delivery screen, before frame_start has had a chance to pick up items.json.
+    read_items_file();
+    apply_memory_grants();
     std::lock_guard<std::mutex> lock(g_state_mutex);
     g_state.in_game = false;
 }
@@ -857,7 +862,7 @@ SCSAPI_VOID telemetry_started(const scs_event_t event, const void* const event_i
 static double g_last_poll_time  = 0.0;
 static double g_last_flush_time = 0.0;
 static double g_startup_time   = 0.0;
-static const double POLL_INTERVAL_SECONDS  = 2.0;
+static const double POLL_INTERVAL_SECONDS  = 0.5;
 static const double FLUSH_INTERVAL_SECONDS = 2.0;
 
 SCSAPI_VOID telemetry_frame_start(const scs_event_t event,
