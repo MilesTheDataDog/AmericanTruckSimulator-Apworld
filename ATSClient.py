@@ -877,6 +877,9 @@ class ATSContext(CommonContext):
         # in progress; flushed to the AP server in _poll_save_after_delivery().
         self._save_pending_city_checks: List[int] = []
 
+        # Last level value for which we logged a win-condition progress line
+        self._last_logged_level: int = 0
+
         # Notification queue for in-game popups (written to items.json)
         self._notifications: List[Dict] = []
         self._notification_counter: int = 0
@@ -1058,6 +1061,18 @@ class ATSContext(CommonContext):
             self.current_xp = _evt_xp
             self.current_level = _xp_to_level(_evt_xp)
 
+        # Log once per level-up so the player can see their progress toward the goal
+        if self.current_level != self._last_logged_level and self.auth and self.slot_data:
+            self._last_logged_level = self.current_level
+            wc = self.slot_data.get("win_condition", WIN_LEVEL_AND_MONEY)
+            gl = self.slot_data.get("goal_level", 35)
+            if wc in (WIN_LEVEL_ONLY, WIN_LEVEL_AND_MONEY, WIN_LEVEL_OR_MONEY):
+                l_ok = self.current_level >= gl
+                logger.info(
+                    f"[ATS] Level up: {self.current_level} "
+                    f"(goal_level={gl} — {'GOAL MET' if l_ok else 'not yet met'})"
+                )
+
         # DLL pointer status
         self._ptr_money_ready = data.get("ptr_money_ready", False)
         self._ptr_xp_ready    = data.get("ptr_xp_ready", False)
@@ -1116,8 +1131,8 @@ class ATSContext(CommonContext):
                 "locations": new_checks,
             }]))
 
-        # Check win condition
-        if not self.goal_complete and self._check_win_condition():
+        # Check win condition — only when connected (slot_data populated from server)
+        if self.auth and not self.goal_complete and self._check_win_condition():
             self.goal_complete = True
             asyncio.create_task(self.send_msgs([{
                 "cmd": "StatusUpdate",
@@ -1159,6 +1174,8 @@ class ATSContext(CommonContext):
         return loc_data.code
 
     def _check_win_condition(self) -> bool:
+        if not self.slot_data:
+            return False  # slot_data not yet received from server; don't use defaults
         win_cond = self.slot_data.get("win_condition", WIN_LEVEL_AND_MONEY)
         goal_level = self.slot_data.get("goal_level", 35)
         goal_money = self.slot_data.get("goal_money", 1000) * 1000
