@@ -869,8 +869,10 @@ class ATSContext(CommonContext):
         self._ptr_xp_ready: bool = False
         self._ptr_city_ready: bool = False
 
-        # Force an immediate save poll when DLL signals city_count_changed
+        # Force a save poll on the next watcher cycle (used at startup and after delivery)
         self._force_save_poll: bool = False
+        # Set when the DLL reports a new city; cleared when the next delivery triggers a save poll
+        self._city_check_pending: bool = False
 
         # Notification queue for in-game popups (written to items.json)
         self._notifications: List[Dict] = []
@@ -1064,10 +1066,14 @@ class ATSContext(CommonContext):
         if _applied_money > 0 or _applied_xp > 0:
             logger.debug(f"[ATS] DLL applied grants: money=${_applied_money:,} xp={_applied_xp:,}")
 
-        # When DLL detects a new city, trigger an immediate save read
+        # When DLL detects a new city, queue a save read at the next delivery.
+        # Don't force an immediate poll here — the save file hasn't been written yet
+        # (the game only writes game.sii on delivery or autosave), so an eager read
+        # would just return stale data. The delivery handler below schedules the poll
+        # after the game has had time to save; regular mtime polling covers autosaves.
         if data.get("city_count_changed", False):
-            self._force_save_poll = True
-            logger.info("[ATS] DLL signals new city visited — forcing save poll")
+            self._city_check_pending = True
+            logger.info("[ATS] DLL signals new city visited — queued for delivery-time check")
 
         new_checks: List[int] = []
 
@@ -1077,6 +1083,12 @@ class ATSContext(CommonContext):
                 continue  # silently skip already-processed events
             logger.debug(f"[ATS] New event: {event_id}")
             self._processed_event_ids.add(event_id)
+
+            # On any delivery, schedule a save poll to catch newly-visited cities.
+            # The game writes game.sii ~12-18s after the delivery event; we wait 20s.
+            if event.get("type") == "cargo_delivered" and self._city_check_pending:
+                self._city_check_pending = False
+                asyncio.create_task(self._poll_save_after_delivery())
 
             try:
                 location_id = self._resolve_event_to_location_id(event)
@@ -1158,6 +1170,16 @@ class ATSContext(CommonContext):
         elif win_cond == WIN_LEVEL_OR_MONEY:
             return level_ok or money_ok
         return False
+
+    async def _poll_save_after_delivery(self) -> None:
+        """
+        Wait for the game to finish writing game.sii after a delivery, then
+        force a save poll to detect any cities entered during the route.
+        The game typically writes game.sii 12-18 s after the delivery event.
+        """
+        await asyncio.sleep(20.0)
+        logger.info("[ATS] Post-delivery city check: polling save file now")
+        self._force_save_poll = True
 
     def _poll_save_file(self) -> None:
         """
