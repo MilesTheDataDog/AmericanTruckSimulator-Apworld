@@ -17,6 +17,14 @@ class WinCondition(Choice):
     option_money_only = 2
     option_level_or_money = 3
     default = 0
+    # Explicit aliases ensure the string names are recognised even in AP builds
+    # where the auto-generated name_lookup from option_* attributes is unreliable.
+    aliases = {
+        "level_and_money": 0,
+        "level_only":      1,
+        "money_only":      2,
+        "level_or_money":  3,
+    }
 
 
 class GoalLevel(Range):

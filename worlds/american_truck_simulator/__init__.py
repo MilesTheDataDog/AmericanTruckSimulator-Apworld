@@ -155,6 +155,29 @@ class ATSWorld(World):
                               None, self.player)
             goal_loc.place_locked_item(victory)
 
+    def generate_early(self) -> None:
+        import logging
+        log = logging.getLogger("Archipelago")
+        o = self.options
+        log.info(
+            f"[ATS] Player {self.player} options: "
+            f"win_condition={o.win_condition.value} "
+            f"goal_level={o.goal_level.value} "
+            f"goal_money={o.goal_money.value}"
+        )
+        # Warn loudly if every option is at its default — this almost certainly
+        # means the YAML options block was not parsed (wrong game key, wrong AP
+        # version, or wrong apworld installed).
+        if (o.win_condition.value == 0 and o.goal_level.value == 35
+                and o.goal_money.value == 1000):
+            log.warning(
+                f"[ATS] Player {self.player}: all options are at their defaults. "
+                "If your YAML sets non-default values, check that the game key "
+                "is exactly 'American Truck Simulator:' and that you are using "
+                "the current apworld version. You can also use numeric values "
+                "(e.g. win_condition: 1) to bypass string-parsing issues."
+            )
+
     def generate_basic(self) -> None:
         self.multiworld.completion_condition[self.player] = lambda state: \
             state.has(VICTORY_ITEM_NAME, self.player)
