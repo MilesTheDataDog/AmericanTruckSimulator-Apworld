@@ -1336,13 +1336,6 @@ class ATSContext(CommonContext):
         for city_id in new_cities:
             self._save_known_cities.add(city_id)
             if is_first_read:
-                # Seed known states from baseline cities so "First Visit - <State>"
-                # doesn't re-fire when the player later visits a second city in a
-                # state that was already visited before this session started.
-                for loc_data in CITY_ARRIVAL_LOCATIONS.values():
-                    if loc_data.game_id == city_id:
-                        self._save_known_states.add(loc_data.region)
-                        break
                 continue  # baseline only — no checks fired on first read
             for loc_data in CITY_ARRIVAL_LOCATIONS.values():
                 if loc_data.game_id == city_id and loc_data.code not in self.checked_locations:
