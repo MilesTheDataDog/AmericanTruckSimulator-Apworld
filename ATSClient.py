@@ -1286,12 +1286,12 @@ class ATSContext(CommonContext):
         # Level milestone checks
         from worlds.american_truck_simulator.locations import ALL_LOCATIONS
         level_checks_sent: List[str] = []
-        for loc_data in ALL_LOCATIONS.values():
+        for loc_name, loc_data in ALL_LOCATIONS.items():
             if loc_data.category == "level":
                 milestone = int(loc_data.game_id.split("_")[1])
                 if self.current_level >= milestone and loc_data.code not in self.checked_locations:
                     new_checks.append(loc_data.code)
-                    level_checks_sent.append(loc_data.name)
+                    level_checks_sent.append(loc_name)
 
         if level_checks_sent and not self.goal_complete:
             wc      = self.slot_data.get("win_condition", WIN_LEVEL_AND_MONEY)
@@ -1308,17 +1308,20 @@ class ATSContext(CommonContext):
             )
 
         # City first arrival checks
+        # The first save read after client launch establishes a baseline — we must NOT
+        # fire checks for cities already in the save at that point, because they may be
+        # from previous runs.  Only cities that appear in SUBSEQUENT reads (i.e. visited
+        # during this session) are eligible for checks.
+        is_first_read = not self._save_first_city_log
         if not self._save_first_city_log:
             self._save_first_city_log = True
-            # Log game.sii city count before profile merge
             game_cities_raw = set()
             for m in re.finditer(r"\bvisited_city\s*\[\d+\]\s*:\s*(\S+)", text):
                 game_cities_raw.add(m.group(1))
             logger.info(
                 f"[ATS] Save poll (first read, fmt={fmt}): "
-                f"{len(save['visited_cities'])} cities total "
-                f"(game.sii raw={len(game_cities_raw)}): "
-                f"{sorted(save['visited_cities'])}"
+                f"{len(save['visited_cities'])} cities — seeding as baseline, no checks fired "
+                f"(game.sii raw={len(game_cities_raw)})"
             )
             if len(game_cities_raw) == 0 and text:
                 idx = text.lower().find("visited")
@@ -1326,11 +1329,21 @@ class ATSContext(CommonContext):
                     logger.info(f"[ATS] Save 'visited' context: {text[max(0,idx-20):idx+200]!r}")
                 else:
                     logger.info(f"[ATS] Save file has no 'visited' keyword. First 400 chars: {text[:400]!r}")
+
         new_cities = save["visited_cities"] - self._save_known_cities
-        if new_cities:
+        if new_cities and not is_first_read:
             logger.info(f"[ATS] New cities detected: {sorted(new_cities)}")
         for city_id in new_cities:
             self._save_known_cities.add(city_id)
+            if is_first_read:
+                # Seed known states from baseline cities so "First Visit - <State>"
+                # doesn't re-fire when the player later visits a second city in a
+                # state that was already visited before this session started.
+                for loc_data in CITY_ARRIVAL_LOCATIONS.values():
+                    if loc_data.game_id == city_id:
+                        self._save_known_states.add(loc_data.region)
+                        break
+                continue  # baseline only — no checks fired on first read
             for loc_data in CITY_ARRIVAL_LOCATIONS.values():
                 if loc_data.game_id == city_id and loc_data.code not in self.checked_locations:
                     if self._city_check_pending:
