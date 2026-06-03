@@ -1011,6 +1011,9 @@ class ATSContext(CommonContext):
         payload = {
             "version": 2,
             "timestamp": time.time(),
+            # seed lets the DLL detect a new AP game and reset its applied counters,
+            # preventing stale carryover from a previous seed from blocking new grants.
+            "seed": getattr(self, "seed_name", "") or "",
             "total_money_granted": self._total_money_granted,
             "total_xp_granted": self._total_xp_granted,
             "win_condition": self.slot_data.get("win_condition", 0),

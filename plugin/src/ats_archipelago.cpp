@@ -67,7 +67,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.2.0";
+static const char* PLUGIN_VERSION = "2.3.0";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -211,6 +211,10 @@ static std::atomic<uintptr_t> g_city_ptr{0};
 static long long g_applied_money = 0;
 static int       g_applied_xp    = 0;
 static std::atomic<bool> g_applied_dirty{false};
+
+// Seed identifier written by the AP client into items.json.
+// When this changes, applied counters are reset so new-seed grants start from zero.
+static std::string g_current_seed;
 
 // Previous city count — detects increases without keeping the breakpoint live.
 static uint64_t g_prev_city_count = UINT64_MAX; // UINT64_MAX = uninitialized
@@ -707,6 +711,20 @@ static void read_items_file() {
         std::ifstream f(g_items_file);
         json j = json::parse(f);
 
+        // Seed-based reset: when the AP client connects to a new seed, it writes
+        // a different "seed" value.  Reset applied counters so the new seed's
+        // grants are applied from zero instead of producing a negative delta.
+        std::string seed = j.value("seed", std::string(""));
+        if (!seed.empty() && seed != g_current_seed) {
+            log("New seed detected (" + seed + ") — resetting applied grant counters"
+                " (was: $" + std::to_string(g_applied_money) +
+                ", " + std::to_string(g_applied_xp) + " XP from seed=" + g_current_seed + ")");
+            g_current_seed  = seed;
+            g_applied_money = 0;
+            g_applied_xp    = 0;
+            save_applied_state();
+        }
+
         g_items.total_money_granted = (long long)j.value("total_money_granted", 0);
         g_items.total_xp_granted    = j.value("total_xp_granted", 0);
         g_items.win_condition       = j.value("win_condition", 0);
@@ -726,8 +744,10 @@ static void load_applied_state() {
         json j = json::parse(f);
         g_applied_money = j.value("applied_money", (long long)0);
         g_applied_xp    = j.value("applied_xp",    0);
+        g_current_seed  = j.value("seed",           std::string(""));
         log("Applied state restored: $" + std::to_string(g_applied_money) +
-            ", " + std::to_string(g_applied_xp) + " XP");
+            ", " + std::to_string(g_applied_xp) + " XP" +
+            (g_current_seed.empty() ? "" : " (seed=" + g_current_seed + ")"));
     } catch (...) {}
 }
 
@@ -736,6 +756,7 @@ static void save_applied_state() {
         json j;
         j["applied_money"] = g_applied_money;
         j["applied_xp"]    = g_applied_xp;
+        j["seed"]          = g_current_seed;
         fs::path tmp = g_applied_file;
         tmp += ".tmp";
         std::ofstream f(tmp);
