@@ -107,6 +107,7 @@ struct ItemState {
     int       goal_level          = 35;
     long long goal_money          = 1000000;
     double    last_read_time      = 0.0;
+    std::string seed;  // AP seed name; used to detect new-seed transitions
 };
 
 static ItemState g_items;
@@ -606,6 +607,35 @@ static void apply_memory_grants(bool allow_paused) {
         if (!g_state.in_game && !allow_paused) return;
     }
 
+    // ── New-seed detection (under g_apply_mutex — correct lock for applied counters)
+    // Two triggers, either of which resets the applied baseline:
+    //
+    //   1. Seed changed: AP client wrote a different seed_name into items.json,
+    //      meaning the player connected to a new multiworld.
+    //   2. Negative delta: total_granted dropped below applied_money, which only
+    //      happens when a new seed has fewer grants so far than the previous one.
+    //      This fallback fires even when seed_name is empty or unavailable.
+    {
+        bool seed_changed = !g_items.seed.empty() && g_items.seed != g_current_seed;
+        bool money_regressed = g_items.total_money_granted > 0 &&
+                               g_items.total_money_granted < g_applied_money;
+        bool xp_regressed    = g_items.total_xp_granted    > 0 &&
+                               g_items.total_xp_granted    < g_applied_xp;
+
+        if (seed_changed || money_regressed || xp_regressed) {
+            std::string reason = seed_changed
+                ? ("seed changed: " + g_current_seed + " -> " + g_items.seed)
+                : "grant totals regressed (new seed without seed field)";
+            log("New seed detected (" + reason + ") — resetting applied grant counters"
+                " (was: $" + std::to_string(g_applied_money) +
+                ", " + std::to_string(g_applied_xp) + " XP)");
+            if (seed_changed) g_current_seed = g_items.seed;
+            g_applied_money = 0;
+            g_applied_xp    = 0;
+            save_applied_state();
+        }
+    }
+
     bool needs_rearm = false;
 
     // Money grant
@@ -711,25 +741,12 @@ static void read_items_file() {
         std::ifstream f(g_items_file);
         json j = json::parse(f);
 
-        // Seed-based reset: when the AP client connects to a new seed, it writes
-        // a different "seed" value.  Reset applied counters so the new seed's
-        // grants are applied from zero instead of producing a negative delta.
-        std::string seed = j.value("seed", std::string(""));
-        if (!seed.empty() && seed != g_current_seed) {
-            log("New seed detected (" + seed + ") — resetting applied grant counters"
-                " (was: $" + std::to_string(g_applied_money) +
-                ", " + std::to_string(g_applied_xp) + " XP from seed=" + g_current_seed + ")");
-            g_current_seed  = seed;
-            g_applied_money = 0;
-            g_applied_xp    = 0;
-            save_applied_state();
-        }
-
         g_items.total_money_granted = (long long)j.value("total_money_granted", 0);
         g_items.total_xp_granted    = j.value("total_xp_granted", 0);
         g_items.win_condition       = j.value("win_condition", 0);
         g_items.goal_level          = j.value("goal_level", 35);
         g_items.goal_money          = (long long)(j.value("goal_money_thousands", 1000)) * 1000;
+        g_items.seed                = j.value("seed", std::string(""));
         g_items.last_read_time      = now_seconds();
     } catch (const std::exception& e) {
         log(std::string("Failed to read items.json: ") + e.what(), SCS_LOG_TYPE_warning);
