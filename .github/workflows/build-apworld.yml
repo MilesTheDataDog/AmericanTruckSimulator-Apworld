@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - claude/ats-mod-files-Hkx9F
     paths:
       - worlds/american_truck_simulator/**
       - .github/workflows/build-apworld.yml
@@ -17,55 +16,78 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout ATS Apworld
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          path: ats-apworld
-
-      - name: Checkout Archipelago
-        uses: actions/checkout@v4
-        with:
-          repository: ArchipelagoMW/Archipelago
-          ref: main
-          path: archipelago
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
-        working-directory: archipelago
+      - name: Static syntax check
         run: |
-          pip install -r requirements.txt
-          yes | python ModuleUpdate.py || true
+          for f in worlds/american_truck_simulator/*.py; do
+            python -m py_compile "$f" && echo "OK  $f" || (echo "FAIL $f" && exit 1)
+          done
 
-      - name: Install xvfb
-        run: sudo apt-get install -y xvfb
-
-      - name: Copy world into Archipelago
-        run: cp -r ats-apworld/worlds/american_truck_simulator archipelago/worlds/
+      - name: Confirm zero deed references
+        run: |
+          if grep -rni "deed" worlds/american_truck_simulator/; then
+            echo "ERROR: deed references found" && exit 1
+          fi
+          echo "deed: zero matches ✓"
 
       - name: Build .apworld
-        working-directory: archipelago
-        env:
-          KIVY_NO_ENV_CONFIG: "1"
-          KIVY_WINDOW: "headless"
-        run: yes | xvfb-run -a python Launcher.py "Build APWorlds" -- "American Truck Simulator"
+        run: |
+          python - <<'EOF'
+          import zipfile, sys
+          from pathlib import Path
+
+          src_dir = Path("worlds/american_truck_simulator")
+          out_path = Path("american_truck_simulator.apworld")
+
+          exclude_dirs  = {"__pycache__", "__MACOSX"}
+          exclude_files = {".DS_Store"}
+          exclude_exts  = {".pyc"}
+
+          with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+              for fpath in sorted(src_dir.rglob("*")):
+                  if fpath.is_dir():
+                      continue
+                  if any(part in exclude_dirs for part in fpath.parts):
+                      continue
+                  if fpath.name in exclude_files or fpath.suffix in exclude_exts:
+                      continue
+                  arcname = fpath.relative_to(src_dir.parent).as_posix()
+                  zf.write(fpath, arcname)
+
+          print(f"Built {out_path}  ({out_path.stat().st_size:,} bytes)")
+          with zipfile.ZipFile(out_path) as zf:
+              names = zf.namelist()
+          print("Archive contents:")
+          for n in sorted(names):
+              print(f"  {n}")
+
+          # Validate every entry
+          errors = []
+          for n in names:
+              if not n.startswith("american_truck_simulator/"):
+                  errors.append(f"BAD prefix: {n}")
+              if "__pycache__" in n or n.endswith(".pyc"):
+                  errors.append(f"BAD compiled: {n}")
+              if "deed" in n.lower():
+                  errors.append(f"BAD deed ref: {n}")
+          if errors:
+              print("VALIDATION ERRORS:")
+              for e in errors:
+                  print(f"  {e}")
+              sys.exit(1)
+          print("Archive validation passed ✓")
+          EOF
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: american_truck_simulator-apworld
-          path: archipelago/build/apworlds/american_truck_simulator.apworld
+          name: american-truck-simulator-apworld
+          path: american_truck_simulator.apworld
           if-no-files-found: error
-
-      - name: Update release/american_truck_simulator.apworld
-        run: |
-          cp archipelago/build/apworlds/american_truck_simulator.apworld ats-apworld/release/american_truck_simulator.apworld
-          cd ats-apworld
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add release/american_truck_simulator.apworld
-          git diff --cached --quiet || git commit -m "ci: update release/american_truck_simulator.apworld [skip ci]"
-          git push

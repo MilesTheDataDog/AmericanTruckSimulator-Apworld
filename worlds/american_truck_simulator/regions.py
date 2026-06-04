@@ -30,9 +30,8 @@ def create_regions(world: "ATSWorld") -> None:
     All cargo delivery and level milestone locations live in "Menu" so they are
     always logically reachable (the player can attempt them from the base states).
 
-    City arrival, garage upgrade, and recruitment office locations live in the
-    corresponding state region and are only logically reachable when that state
-    is unlocked.
+    City arrival and state first-visit locations live in the corresponding state
+    region and are only logically reachable when that state is unlocked.
     """
     from .locations import (
         ALL_LOCATIONS,

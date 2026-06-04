@@ -58,7 +58,7 @@ class GoalMoney(Range):
 class EnabledDLC(OptionSet):
     """
     Which DLC map packs you own and want included in the randomizer.
-    Only cities and garages from enabled DLC states are included as location checks.
+    Only cities in enabled DLC states are included as location checks.
     California and Nevada (base game) are always included.
     Arizona is a free DLC and is safe to include for all players.
     """

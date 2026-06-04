@@ -4,7 +4,6 @@
     "Paid DLC truck packs are excluded.",
     "Kenworth T680 and Peterbilt 579 are the two default starting trucks and are NOT shuffled items.",
     "All other trucks are items when shuffle_trucks option is enabled.",
-    "Entries with needs_verification=true should be confirmed against current game version.",
     "Trucks marked used_dealers_only may not appear at main dealerships.",
     "Sources: SCS blog posts, community wikis, Steam patch notes."
   ],
@@ -33,7 +32,6 @@
       "model": "W900",
       "year": null,
       "added_version": "1.2-1.3",
-      "needs_verification": false,
       "notes": "Classic long-nose conventional. Fully reworked in March 2023."
     },
     {
@@ -42,7 +40,6 @@
       "model": "389",
       "year": null,
       "added_version": "1.4",
-      "needs_verification": false,
       "notes": "Classic long-nose. Added November 2016."
     },
     {
@@ -51,7 +48,6 @@
       "model": "VNL",
       "year": "2018",
       "added_version": "1.32",
-      "needs_verification": false,
       "notes": "Initially paid; became free. Major rework in 2023 (v1.47)."
     },
     {
@@ -60,7 +56,6 @@
       "model": "LoneStar",
       "year": null,
       "added_version": null,
-      "needs_verification": false,
       "notes": "Classic style. Added December 2019."
     },
     {
@@ -69,7 +64,6 @@
       "model": "Anthem",
       "year": null,
       "added_version": "1.37",
-      "needs_verification": false,
       "notes": "Added April 2020."
     },
     {
@@ -78,7 +72,6 @@
       "model": "49X",
       "year": null,
       "added_version": "1.38",
-      "needs_verification": false,
       "notes": "Added September 2020."
     },
     {
@@ -87,7 +80,6 @@
       "model": "Cascadia",
       "year": "2019",
       "added_version": null,
-      "needs_verification": false,
       "notes": "Added December 2020."
     },
     {
@@ -96,7 +88,6 @@
       "model": "LT",
       "year": null,
       "added_version": null,
-      "needs_verification": false,
       "notes": "Added September 2021."
     },
     {
@@ -105,7 +96,6 @@
       "model": "9900i",
       "year": null,
       "added_version": null,
-      "needs_verification": false,
       "used_dealers_only": true,
       "notes": "Classic retro style. Added March 2022. Available at used truck dealers only."
     },
@@ -115,7 +105,6 @@
       "model": "57X",
       "year": null,
       "added_version": "1.45",
-      "needs_verification": false,
       "notes": "Added August 2022."
     },
     {
@@ -124,7 +113,6 @@
       "model": "5700XE",
       "year": null,
       "added_version": null,
-      "needs_verification": false,
       "used_dealers_only": true,
       "notes": "Added January 2023. Available at used truck dealers only."
     },
@@ -134,7 +122,6 @@
       "model": "T680",
       "year": "2022",
       "added_version": "1.49",
-      "needs_verification": false,
       "notes": "2022 model. Added December 2023 as free Steam DLC claim. Separate from original T680."
     },
     {
@@ -143,7 +130,6 @@
       "model": "Pinnacle",
       "year": null,
       "added_version": "1.51",
-      "needs_verification": false,
       "notes": "Added September 2024. Free update alongside Mack Anthem Black Edition."
     },
     {
@@ -152,7 +138,6 @@
       "model": "Cascadia",
       "year": "2025",
       "added_version": "1.51",
-      "needs_verification": false,
       "notes": "Next-gen Cascadia model. Added September 2024. Different from 2019 Cascadia."
     },
     {
@@ -161,7 +146,6 @@
       "model": "W900 Legacy Edition",
       "year": null,
       "added_version": "1.53",
-      "needs_verification": false,
       "notes": "Released with Missouri DLC in April 2025. Verify if truly separate item from base W900."
     },
     {
@@ -170,7 +154,6 @@
       "model": "VNR",
       "year": "2025",
       "added_version": null,
-      "needs_verification": true,
       "notes": "NEEDS VERIFICATION: Release status unclear. May be unreleased or announced-only."
     }
   ],

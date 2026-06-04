@@ -23,7 +23,7 @@ def _load(filename: str):
 class ATSLocationData(NamedTuple):
     code: Optional[int]
     region: str            # region name this location lives in
-    category: str          # "cargo", "city", "level", "garage", "office", "goal"
+    category: str          # "cargo", "city", "level", "goal"
     # game_id is sent to the client so it knows what in-game event satisfies this check
     game_id: str
 

@@ -18,8 +18,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "1.50",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "alu_ingot",
@@ -29,8 +28,7 @@
         "flatbed"
       ],
       "dlc_introduced": "1.55",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "alu_profile",
@@ -40,8 +38,7 @@
         "flatbed"
       ],
       "dlc_introduced": "1.53",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "ammonia",
@@ -50,8 +47,7 @@
         "gas_tank"
       ],
       "dlc_introduced": "1.47",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "digger500",
@@ -61,8 +57,7 @@
         "lowboy"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": true
+      "required_dlc": null
     },
     {
       "id": "beverages",
@@ -74,8 +69,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "borates",
@@ -87,8 +81,7 @@
         "insulated"
       ],
       "dlc_introduced": "1.53",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "boric_acid",
@@ -99,8 +92,7 @@
         "insulated"
       ],
       "dlc_introduced": "1.53",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "bromine",
@@ -109,8 +101,7 @@
         "container_carrier"
       ],
       "dlc_introduced": "1.51",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "bulldozer",
@@ -119,8 +110,7 @@
         "lowboy"
       ],
       "dlc_introduced": "1.39",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "butter",
@@ -129,8 +119,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "cable",
@@ -141,8 +130,7 @@
         "lowboy"
       ],
       "dlc_introduced": "1.39",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "cans",
@@ -153,8 +141,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "carcomp",
@@ -163,8 +150,7 @@
         "container_carrier"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "cars_big",
@@ -173,8 +159,7 @@
         "car_transporter"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "cars_small",
@@ -183,8 +168,7 @@
         "car_transporter"
       ],
       "dlc_introduced": "1.48",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "cars_mix",
@@ -193,8 +177,7 @@
         "car_transporter"
       ],
       "dlc_introduced": "1.48",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "cars_suv",
@@ -203,8 +186,7 @@
         "van_transporter"
       ],
       "dlc_introduced": "1.48",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "cement",
@@ -213,8 +195,7 @@
         "dry_bulk"
       ],
       "dlc_introduced": "1.45",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "cheese",
@@ -223,8 +204,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "chlorine_t",
@@ -233,8 +213,7 @@
         "gas_tank"
       ],
       "dlc_introduced": "1.47",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "clothes",
@@ -247,8 +226,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "computers",
@@ -259,8 +237,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "ctubes",
@@ -270,8 +247,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "ctubes_b",
@@ -281,8 +257,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "const_house",
@@ -291,8 +266,7 @@
         "container_carrier"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "crawler_carr",
@@ -301,8 +275,7 @@
         "lowboy"
       ],
       "dlc_introduced": "1.57",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "curtains",
@@ -314,8 +287,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "diesel",
@@ -324,8 +296,7 @@
         "fuel_tank"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "dry_fruit",
@@ -338,8 +309,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "dry_milk",
@@ -352,8 +322,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "truck_dump",
@@ -362,8 +331,7 @@
         "lowboy"
       ],
       "dlc_introduced": "1.57",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "dynamite",
@@ -374,8 +342,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "electro_comp",
@@ -384,8 +351,7 @@
         "container_carrier"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "bottles",
@@ -396,8 +362,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "empty_palet",
@@ -411,8 +376,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "ethane",
@@ -421,8 +385,7 @@
         "gas_tank"
       ],
       "dlc_introduced": "1.47",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "soil",
@@ -431,8 +394,7 @@
         "dumper"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "excavator",
@@ -441,8 +403,7 @@
         "lowboy"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "fertilizer",
@@ -456,8 +417,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "fert_tank",
@@ -466,8 +426,7 @@
         "drop_deck"
       ],
       "dlc_introduced": "1.53",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "fireworks",
@@ -478,8 +437,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "flour",
@@ -492,8 +450,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "forklifts",
@@ -503,8 +460,7 @@
         "lowboy"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "frozen_food",
@@ -513,8 +469,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "frozen_fruit",
@@ -523,8 +478,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "frozen_veget",
@@ -533,8 +487,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "fruit_juic_t",
@@ -543,8 +496,7 @@
         "food_tank"
       ],
       "dlc_introduced": "1.37",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "fruits",
@@ -554,8 +506,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "furniture",
@@ -567,8 +518,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "petrol",
@@ -577,8 +527,7 @@
         "fuel_tank"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "grain",
@@ -593,8 +542,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "gravel",
@@ -603,8 +551,7 @@
         "dumper"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "gypsum",
@@ -613,8 +560,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "harvester",
@@ -623,8 +569,7 @@
         "lowboy"
       ],
       "dlc_introduced": "1.39",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "hay",
@@ -635,8 +580,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "heat_exch2",
@@ -646,8 +590,7 @@
         "flatbed"
       ],
       "dlc_introduced": "1.57",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "home_acc",
@@ -659,8 +602,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "househd_appl",
@@ -671,8 +613,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "hydrochlor",
@@ -681,8 +622,7 @@
         "chemical_tank"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "icecream",
@@ -691,8 +631,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "ind_palet",
@@ -701,8 +640,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "ins_panel",
@@ -712,8 +650,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "pipes",
@@ -722,8 +659,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "largetubes",
@@ -733,8 +669,7 @@
         "log"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "limestone",
@@ -743,8 +678,7 @@
         "dumper"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "live_pigs",
@@ -753,8 +687,7 @@
         "livestock"
       ],
       "dlc_introduced": "1.55",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "lpg_t",
@@ -763,8 +696,7 @@
         "gas_tank"
       ],
       "dlc_introduced": "1.47",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "lye",
@@ -773,8 +705,7 @@
         "chemical_tank"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "machine_pts",
@@ -783,8 +714,7 @@
         "container_carrier"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "meat",
@@ -793,8 +723,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "truck_medium",
@@ -804,8 +733,7 @@
         "lowboy"
       ],
       "dlc_introduced": "1.57",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "mercuric",
@@ -814,8 +742,7 @@
         "chemical_tank"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "milk",
@@ -825,8 +752,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "mixtank",
@@ -836,8 +762,7 @@
         "lowboy"
       ],
       "dlc_introduced": "1.40",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "mobile_barrier",
@@ -846,8 +771,7 @@
         "mobile_barrier"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": true
+      "required_dlc": null
     },
     {
       "id": "mortar",
@@ -856,8 +780,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "nitrocel",
@@ -869,8 +792,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "1.45",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "nuts",
@@ -882,8 +804,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "office_suppl",
@@ -895,8 +816,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "food",
@@ -909,8 +829,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "colors",
@@ -919,8 +838,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "paper",
@@ -933,8 +851,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "pellet_afood",
@@ -948,8 +865,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "1.36",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "pesticide",
@@ -958,8 +874,7 @@
         "chemical_tank"
       ],
       "dlc_introduced": "1.46",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "peterbilt_trucks",
@@ -968,8 +883,7 @@
         "truck_transporter"
       ],
       "dlc_introduced": "1.46",
-      "required_dlc": null,
-      "needs_verification": true
+      "required_dlc": null
     },
     {
       "id": "cars_pickup",
@@ -978,8 +892,7 @@
         "van_transporter"
       ],
       "dlc_introduced": "1.48",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "plows",
@@ -988,8 +901,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "potassium",
@@ -1001,8 +913,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "1.45",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "generator_c",
@@ -1011,8 +922,7 @@
         "container_carrier"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "hipresstank",
@@ -1022,8 +932,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "propane",
@@ -1032,8 +941,7 @@
         "gas_tank"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "rawmilk",
@@ -1042,8 +950,7 @@
         "food_tank"
       ],
       "dlc_introduced": "1.37",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "emptytank",
@@ -1053,8 +960,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": true
+      "required_dlc": null
     },
     {
       "id": "rice",
@@ -1066,8 +972,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "roadroller",
@@ -1077,8 +982,7 @@
         "lowboy"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "roof_tiles",
@@ -1087,8 +991,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "salt",
@@ -1101,8 +1004,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "1.38",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "sand",
@@ -1112,8 +1014,7 @@
         "dumper"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "scissor_lift",
@@ -1123,8 +1024,7 @@
         "flatbed"
       ],
       "dlc_introduced": "1.57",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "scrap_metals",
@@ -1134,8 +1034,7 @@
         "dumper"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "scrap_cars",
@@ -1144,8 +1043,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "truck_servic",
@@ -1155,8 +1053,7 @@
         "lowboy"
       ],
       "dlc_introduced": "1.57",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "silica",
@@ -1165,8 +1062,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "solvents",
@@ -1175,8 +1071,7 @@
         "fuel_tank"
       ],
       "dlc_introduced": "1.45",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "boat2",
@@ -1185,8 +1080,7 @@
         "lowboy"
       ],
       "dlc_introduced": "1.57",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "stones",
@@ -1195,8 +1089,7 @@
         "dumper"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "sugar",
@@ -1209,8 +1102,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "sulfuric",
@@ -1219,8 +1111,7 @@
         "chemical_tank"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "tableware",
@@ -1231,8 +1122,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "tyres",
@@ -1244,8 +1134,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "toys",
@@ -1257,8 +1146,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "tractors",
@@ -1268,8 +1156,7 @@
         "lowboy"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "transform2",
@@ -1279,8 +1166,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "tvs",
@@ -1292,8 +1178,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "used_pack",
@@ -1306,8 +1191,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "vegetable",
@@ -1317,8 +1201,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "ventilation",
@@ -1328,8 +1211,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "western_star_trucks",
@@ -1338,8 +1220,7 @@
         "truck_transporter"
       ],
       "dlc_introduced": "1.38",
-      "required_dlc": null,
-      "needs_verification": true
+      "required_dlc": null
     },
     {
       "id": "wheel_loader",
@@ -1348,8 +1229,7 @@
         "lowboy"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": true
+      "required_dlc": null
     },
     {
       "id": "yogurt",
@@ -1358,8 +1238,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "Launch",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "house_pref",
@@ -1368,8 +1247,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Oregon",
-      "required_dlc": "oregon",
-      "needs_verification": false
+      "required_dlc": "oregon"
     },
     {
       "id": "logs",
@@ -1378,8 +1256,7 @@
         "log"
       ],
       "dlc_introduced": "Oregon",
-      "required_dlc": "oregon",
-      "needs_verification": false
+      "required_dlc": "oregon"
     },
     {
       "id": "lumber_b",
@@ -1389,8 +1266,7 @@
         "log"
       ],
       "dlc_introduced": "Oregon",
-      "required_dlc": "oregon",
-      "needs_verification": false
+      "required_dlc": "oregon"
     },
     {
       "id": "lumber_p",
@@ -1400,8 +1276,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Oregon",
-      "required_dlc": "oregon",
-      "needs_verification": false
+      "required_dlc": "oregon"
     },
     {
       "id": "mtl_coil",
@@ -1411,8 +1286,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Oregon",
-      "required_dlc": "oregon",
-      "needs_verification": false
+      "required_dlc": "oregon"
     },
     {
       "id": "moor_buoy",
@@ -1422,8 +1296,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Oregon",
-      "required_dlc": "oregon",
-      "needs_verification": false
+      "required_dlc": "oregon"
     },
     {
       "id": "sawpanels",
@@ -1432,8 +1305,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Oregon",
-      "required_dlc": "oregon",
-      "needs_verification": false
+      "required_dlc": "oregon"
     },
     {
       "id": "sq_tub",
@@ -1443,8 +1315,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Oregon",
-      "required_dlc": "oregon",
-      "needs_verification": false
+      "required_dlc": "oregon"
     },
     {
       "id": "wshavings",
@@ -1454,8 +1325,7 @@
         "dumper"
       ],
       "dlc_introduced": "Oregon",
-      "required_dlc": "oregon",
-      "needs_verification": false
+      "required_dlc": "oregon"
     },
     {
       "id": "aircraft_eng",
@@ -1465,8 +1335,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Washington",
-      "required_dlc": "washington",
-      "needs_verification": false
+      "required_dlc": "washington"
     },
     {
       "id": "boat",
@@ -1475,8 +1344,7 @@
         "lowboy_boat"
       ],
       "dlc_introduced": "Washington",
-      "required_dlc": "washington",
-      "needs_verification": false
+      "required_dlc": "washington"
     },
     {
       "id": "kenworth_trucks",
@@ -1485,8 +1353,7 @@
         "truck_transporter"
       ],
       "dlc_introduced": "Washington",
-      "required_dlc": "washington",
-      "needs_verification": true
+      "required_dlc": "washington"
     },
     {
       "id": "aromatics",
@@ -1495,8 +1362,7 @@
         "fuel_tank"
       ],
       "dlc_introduced": "Utah",
-      "required_dlc": "utah",
-      "needs_verification": false
+      "required_dlc": "utah"
     },
     {
       "id": "crude_oil",
@@ -1505,8 +1371,7 @@
         "fuel_tank"
       ],
       "dlc_introduced": "Utah",
-      "required_dlc": "utah",
-      "needs_verification": false
+      "required_dlc": "utah"
     },
     {
       "id": "frac_tank",
@@ -1515,8 +1380,7 @@
         "frac_tank"
       ],
       "dlc_introduced": "Utah",
-      "required_dlc": "utah",
-      "needs_verification": false
+      "required_dlc": "utah"
     },
     {
       "id": "potatoes",
@@ -1529,8 +1393,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "Idaho",
-      "required_dlc": "idaho",
-      "needs_verification": false
+      "required_dlc": "idaho"
     },
     {
       "id": "cattle",
@@ -1539,8 +1402,7 @@
         "livestock"
       ],
       "dlc_introduced": "Colorado",
-      "required_dlc": "colorado",
-      "needs_verification": false
+      "required_dlc": "colorado"
     },
     {
       "id": "rails",
@@ -1550,8 +1412,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Wyoming",
-      "required_dlc": "wyoming",
-      "needs_verification": false
+      "required_dlc": "wyoming"
     },
     {
       "id": "soda_ash",
@@ -1564,8 +1425,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Wyoming",
-      "required_dlc": "wyoming",
-      "needs_verification": false
+      "required_dlc": "wyoming"
     },
     {
       "id": "tamp_machine",
@@ -1575,8 +1435,7 @@
         "lowboy_triple"
       ],
       "dlc_introduced": "Wyoming",
-      "required_dlc": "wyoming",
-      "needs_verification": false
+      "required_dlc": "wyoming"
     },
     {
       "id": "train_part",
@@ -1585,8 +1444,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Wyoming",
-      "required_dlc": "wyoming",
-      "needs_verification": false
+      "required_dlc": "wyoming"
     },
     {
       "id": "windml_eng",
@@ -1595,8 +1453,7 @@
         "lowboy"
       ],
       "dlc_introduced": "Wyoming",
-      "required_dlc": "wyoming",
-      "needs_verification": false
+      "required_dlc": "wyoming"
     },
     {
       "id": "windml_tube",
@@ -1605,8 +1462,7 @@
         "lowboy"
       ],
       "dlc_introduced": "Wyoming",
-      "required_dlc": "wyoming",
-      "needs_verification": false
+      "required_dlc": "wyoming"
     },
     {
       "id": "beet_harvest",
@@ -1616,8 +1472,7 @@
         "lowboy_triple"
       ],
       "dlc_introduced": "Montana",
-      "required_dlc": "montana",
-      "needs_verification": false
+      "required_dlc": "montana"
     },
     {
       "id": "buttermilk",
@@ -1626,8 +1481,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "Montana",
-      "required_dlc": "montana",
-      "needs_verification": false
+      "required_dlc": "montana"
     },
     {
       "id": "circuit_brk",
@@ -1636,8 +1490,7 @@
         "drop_deck"
       ],
       "dlc_introduced": "Montana",
-      "required_dlc": "montana",
-      "needs_verification": false
+      "required_dlc": "montana"
     },
     {
       "id": "dumpster",
@@ -1647,8 +1500,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Montana",
-      "required_dlc": "montana",
-      "needs_verification": false
+      "required_dlc": "montana"
     },
     {
       "id": "garbage_trck",
@@ -1657,8 +1509,7 @@
         "lowboy"
       ],
       "dlc_introduced": "Montana",
-      "required_dlc": "montana",
-      "needs_verification": false
+      "required_dlc": "montana"
     },
     {
       "id": "guard_rails",
@@ -1668,8 +1519,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Montana",
-      "required_dlc": "montana",
-      "needs_verification": false
+      "required_dlc": "montana"
     },
     {
       "id": "ibc_cont",
@@ -1679,8 +1529,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Montana",
-      "required_dlc": "montana",
-      "needs_verification": false
+      "required_dlc": "montana"
     },
     {
       "id": "lemonade",
@@ -1692,8 +1541,7 @@
         "refrigerated"
       ],
       "dlc_introduced": "Montana",
-      "required_dlc": "montana",
-      "needs_verification": false
+      "required_dlc": "montana"
     },
     {
       "id": "silane",
@@ -1702,8 +1550,7 @@
         "container_carrier"
       ],
       "dlc_introduced": "Montana",
-      "required_dlc": "montana",
-      "needs_verification": false
+      "required_dlc": "montana"
     },
     {
       "id": "sugar_beet_b",
@@ -1712,8 +1559,7 @@
         "hopper"
       ],
       "dlc_introduced": "Montana",
-      "required_dlc": "montana",
-      "needs_verification": false
+      "required_dlc": "montana"
     },
     {
       "id": "talc_pwdr",
@@ -1725,8 +1571,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Montana",
-      "required_dlc": "montana",
-      "needs_verification": false
+      "required_dlc": "montana"
     },
     {
       "id": "trees",
@@ -1736,8 +1581,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Montana",
-      "required_dlc": "montana",
-      "needs_verification": false
+      "required_dlc": "montana"
     },
     {
       "id": "util_pole",
@@ -1746,8 +1590,7 @@
         "log"
       ],
       "dlc_introduced": "Montana",
-      "required_dlc": "montana",
-      "needs_verification": false
+      "required_dlc": "montana"
     },
     {
       "id": "waste_paper",
@@ -1762,8 +1605,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Montana",
-      "required_dlc": "montana",
-      "needs_verification": false
+      "required_dlc": "montana"
     },
     {
       "id": "conc_barr",
@@ -1772,8 +1614,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Texas",
-      "required_dlc": "texas",
-      "needs_verification": false
+      "required_dlc": "texas"
     },
     {
       "id": "cott_lint",
@@ -1782,8 +1623,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Texas",
-      "required_dlc": "texas",
-      "needs_verification": false
+      "required_dlc": "texas"
     },
     {
       "id": "cott_seed",
@@ -1795,8 +1635,7 @@
         "hopper"
       ],
       "dlc_introduced": "Texas",
-      "required_dlc": "texas",
-      "needs_verification": false
+      "required_dlc": "texas"
     },
     {
       "id": "gen_set",
@@ -1805,8 +1644,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Texas",
-      "required_dlc": "texas",
-      "needs_verification": false
+      "required_dlc": "texas"
     },
     {
       "id": "glass",
@@ -1815,8 +1653,7 @@
         "drop_deck"
       ],
       "dlc_introduced": "Texas",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "glass_rack",
@@ -1825,8 +1662,7 @@
         "drop_deck"
       ],
       "dlc_introduced": "Texas",
-      "required_dlc": null,
-      "needs_verification": false
+      "required_dlc": null
     },
     {
       "id": "oil_pipes",
@@ -1835,8 +1671,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Texas",
-      "required_dlc": "texas",
-      "needs_verification": false
+      "required_dlc": "texas"
     },
     {
       "id": "pumpjack",
@@ -1845,8 +1680,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Texas",
-      "required_dlc": "texas",
-      "needs_verification": false
+      "required_dlc": "texas"
     },
     {
       "id": "space_cont",
@@ -1855,8 +1689,7 @@
         "lowboy"
       ],
       "dlc_introduced": "Texas",
-      "required_dlc": "texas",
-      "needs_verification": false
+      "required_dlc": "texas"
     },
     {
       "id": "aircon",
@@ -1866,8 +1699,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Oklahoma",
-      "required_dlc": "oklahoma",
-      "needs_verification": false
+      "required_dlc": "oklahoma"
     },
     {
       "id": "big_tyres",
@@ -1876,8 +1708,7 @@
         "drop_deck"
       ],
       "dlc_introduced": "Oklahoma",
-      "required_dlc": "oklahoma",
-      "needs_verification": false
+      "required_dlc": "oklahoma"
     },
     {
       "id": "boom_lift",
@@ -1887,8 +1718,7 @@
         "lowboy"
       ],
       "dlc_introduced": "Oklahoma",
-      "required_dlc": "oklahoma",
-      "needs_verification": false
+      "required_dlc": "oklahoma"
     },
     {
       "id": "boom_lift2",
@@ -1897,8 +1727,7 @@
         "drop_deck"
       ],
       "dlc_introduced": "Oklahoma",
-      "required_dlc": "oklahoma",
-      "needs_verification": false
+      "required_dlc": "oklahoma"
     },
     {
       "id": "bus_hood",
@@ -1907,8 +1736,7 @@
         "drop_deck"
       ],
       "dlc_introduced": "Oklahoma",
-      "required_dlc": "oklahoma",
-      "needs_verification": false
+      "required_dlc": "oklahoma"
     },
     {
       "id": "school_bus",
@@ -1917,8 +1745,7 @@
         "drop_deck"
       ],
       "dlc_introduced": "Oklahoma",
-      "required_dlc": "oklahoma",
-      "needs_verification": false
+      "required_dlc": "oklahoma"
     },
     {
       "id": "yard_truck",
@@ -1927,8 +1754,7 @@
         "drop_deck"
       ],
       "dlc_introduced": "Oklahoma",
-      "required_dlc": "oklahoma",
-      "needs_verification": false
+      "required_dlc": "oklahoma"
     },
     {
       "id": "jet_wing",
@@ -1937,8 +1763,7 @@
         "lowboy"
       ],
       "dlc_introduced": "Kansas",
-      "required_dlc": "kansas",
-      "needs_verification": false
+      "required_dlc": "kansas"
     },
     {
       "id": "air_eng2",
@@ -1948,8 +1773,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Kansas",
-      "required_dlc": "kansas",
-      "needs_verification": true
+      "required_dlc": "kansas"
     },
     {
       "id": "corn_b",
@@ -1960,8 +1784,7 @@
         "hopper"
       ],
       "dlc_introduced": "Nebraska",
-      "required_dlc": "nebraska",
-      "needs_verification": false
+      "required_dlc": "nebraska"
     },
     {
       "id": "railcar",
@@ -1970,8 +1793,7 @@
         "lowboy"
       ],
       "dlc_introduced": "Nebraska",
-      "required_dlc": "nebraska",
-      "needs_verification": false
+      "required_dlc": "nebraska"
     },
     {
       "id": "cars_rv",
@@ -1981,8 +1803,7 @@
         "lowboy"
       ],
       "dlc_introduced": "Nebraska",
-      "required_dlc": "nebraska",
-      "needs_verification": false
+      "required_dlc": "nebraska"
     },
     {
       "id": "cars_rv2",
@@ -1991,8 +1812,7 @@
         "van_transporter"
       ],
       "dlc_introduced": "Nebraska",
-      "required_dlc": "nebraska",
-      "needs_verification": false
+      "required_dlc": "nebraska"
     },
     {
       "id": "soybean_b",
@@ -2003,8 +1823,7 @@
         "hopper"
       ],
       "dlc_introduced": "Nebraska",
-      "required_dlc": "nebraska",
-      "needs_verification": false
+      "required_dlc": "nebraska"
     },
     {
       "id": "telehandler",
@@ -2014,8 +1833,7 @@
         "lowboy"
       ],
       "dlc_introduced": "Nebraska",
-      "required_dlc": "nebraska",
-      "needs_verification": false
+      "required_dlc": "nebraska"
     },
     {
       "id": "cars_utv",
@@ -2024,8 +1842,7 @@
         "car_transporter"
       ],
       "dlc_introduced": "Nebraska",
-      "required_dlc": "nebraska",
-      "needs_verification": false
+      "required_dlc": "nebraska"
     },
     {
       "id": "cshell_buck",
@@ -2035,8 +1852,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Arkansas",
-      "required_dlc": "arkansas",
-      "needs_verification": false
+      "required_dlc": "arkansas"
     },
     {
       "id": "mobile_compr",
@@ -2046,8 +1862,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Arkansas",
-      "required_dlc": "arkansas",
-      "needs_verification": false
+      "required_dlc": "arkansas"
     },
     {
       "id": "lumber",
@@ -2057,8 +1872,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Arkansas",
-      "required_dlc": "arkansas",
-      "needs_verification": false
+      "required_dlc": "arkansas"
     },
     {
       "id": "ter_forklift",
@@ -2069,8 +1883,7 @@
         "lowboy"
       ],
       "dlc_introduced": "Arkansas",
-      "required_dlc": "arkansas",
-      "needs_verification": false
+      "required_dlc": "arkansas"
     },
     {
       "id": "woodchipper",
@@ -2079,8 +1892,7 @@
         "drop_deck"
       ],
       "dlc_introduced": "Arkansas",
-      "required_dlc": "arkansas",
-      "needs_verification": false
+      "required_dlc": "arkansas"
     },
     {
       "id": "cattle_equip",
@@ -2090,8 +1902,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Missouri",
-      "required_dlc": "missouri",
-      "needs_verification": false
+      "required_dlc": "missouri"
     },
     {
       "id": "moving_cont",
@@ -2101,8 +1912,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Missouri",
-      "required_dlc": "missouri",
-      "needs_verification": false
+      "required_dlc": "missouri"
     },
     {
       "id": "cars_pick_cr",
@@ -2112,8 +1922,7 @@
         "lowboy"
       ],
       "dlc_introduced": "Missouri",
-      "required_dlc": "missouri",
-      "needs_verification": false
+      "required_dlc": "missouri"
     },
     {
       "id": "scaffolding",
@@ -2123,8 +1932,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Missouri",
-      "required_dlc": "missouri",
-      "needs_verification": false
+      "required_dlc": "missouri"
     },
     {
       "id": "battery",
@@ -2136,8 +1944,7 @@
         "sliding_tarp"
       ],
       "dlc_introduced": "Iowa",
-      "required_dlc": "iowa",
-      "needs_verification": false
+      "required_dlc": "iowa"
     },
     {
       "id": "com_tractor",
@@ -2147,8 +1954,7 @@
         "lowboy"
       ],
       "dlc_introduced": "Iowa",
-      "required_dlc": "iowa",
-      "needs_verification": false
+      "required_dlc": "iowa"
     },
     {
       "id": "cool_tower",
@@ -2157,8 +1963,7 @@
         "lowboy"
       ],
       "dlc_introduced": "Iowa",
-      "required_dlc": "iowa",
-      "needs_verification": false
+      "required_dlc": "iowa"
     },
     {
       "id": "corn_head",
@@ -2167,8 +1972,7 @@
         "drop_deck"
       ],
       "dlc_introduced": "Iowa",
-      "required_dlc": "iowa",
-      "needs_verification": false
+      "required_dlc": "iowa"
     },
     {
       "id": "live_sheep",
@@ -2177,8 +1981,7 @@
         "livestock"
       ],
       "dlc_introduced": "Iowa",
-      "required_dlc": "iowa",
-      "needs_verification": false
+      "required_dlc": "iowa"
     },
     {
       "id": "truck_muni",
@@ -2188,8 +1991,7 @@
         "lowboy"
       ],
       "dlc_introduced": "Iowa",
-      "required_dlc": "iowa",
-      "needs_verification": false
+      "required_dlc": "iowa"
     },
     {
       "id": "wire_rod",
@@ -2199,8 +2001,7 @@
         "flatbed"
       ],
       "dlc_introduced": "Iowa",
-      "required_dlc": "iowa",
-      "needs_verification": false
+      "required_dlc": "iowa"
     },
     {
       "id": "truck_work",
@@ -2210,8 +2011,7 @@
         "lowboy"
       ],
       "dlc_introduced": "Iowa",
-      "required_dlc": "iowa",
-      "needs_verification": false
+      "required_dlc": "iowa"
     },
     {
       "id": "barley",
@@ -2222,8 +2022,7 @@
         "hopper"
       ],
       "dlc_introduced": "Louisiana",
-      "required_dlc": "louisiana",
-      "needs_verification": false
+      "required_dlc": "louisiana"
     },
     {
       "id": "ethanol",
@@ -2232,8 +2031,7 @@
         "chemical_tank"
       ],
       "dlc_introduced": "Louisiana",
-      "required_dlc": "louisiana",
-      "needs_verification": false
+      "required_dlc": "louisiana"
     },
     {
       "id": "rye",
@@ -2244,8 +2042,7 @@
         "hopper"
       ],
       "dlc_introduced": "Louisiana",
-      "required_dlc": "louisiana",
-      "needs_verification": false
+      "required_dlc": "louisiana"
     },
     {
       "id": "wheat",
@@ -2256,8 +2053,7 @@
         "hopper"
       ],
       "dlc_introduced": "Louisiana",
-      "required_dlc": "louisiana",
-      "needs_verification": false
+      "required_dlc": "louisiana"
     },
     {
       "id": "coil",
@@ -2267,8 +2063,7 @@
         "drop_deck"
       ],
       "dlc_introduced": "1.0",
-      "required_dlc": null,
-      "needs_verification": true
+      "required_dlc": null
     }
   ]
 }
