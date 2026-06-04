@@ -75,6 +75,9 @@ SLOT_DATA_FILE = COMM_DIR / "slot_data.json"
 # was generated with incorrect options and cannot be regenerated.
 # Example contents:  {"win_condition": 1, "goal_level": 5}
 SLOT_DATA_OVERRIDE_FILE = COMM_DIR / "slot_data_override.json"
+# Persisted user settings written by /setoptions. Read as fallback when server
+# slot_data is empty and YAML search also fails.
+CLIENT_OPTIONS_FILE = COMM_DIR / "ats_client_options.json"
 
 # ── Save file parsing ─────────────────────────────────────────────────────────
 
@@ -979,21 +982,45 @@ def _find_ats_yaml(username: str, yaml_hint: Optional[Path] = None) -> Optional[
 
 
 
-def _apply_yaml_options(ctx: "ATSContext") -> None:
-    """Patch ctx.slot_data with ATS options read from the player's YAML file.
+def _load_client_options() -> Optional[Dict]:
+    """Load user-saved options written by /setoptions."""
+    try:
+        if CLIENT_OPTIONS_FILE.is_file():
+            data = json.loads(CLIENT_OPTIONS_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+    except Exception as e:
+        logger.debug(f"[ATS] Could not load client options file: {e}")
+    return None
 
-    Only called when the server's slot_data lacks 'game_version', which means
-    AP's built-in ATS world was used and may have returned wrong/default values.
+
+def _apply_yaml_options(ctx: "ATSContext") -> None:
+    """Patch ctx.slot_data with ATS options.
+
+    Tries, in order:
+      1. Player's YAML file (searched automatically or via --yaml)
+      2. Saved options from /setoptions  (CLIENT_OPTIONS_FILE)
+
+    Only called when the server's slot_data lacks 'game_version'.
     """
     yaml_hint: Optional[Path] = getattr(ctx, "_yaml_hint", None)
     yaml_opts = _find_ats_yaml(getattr(ctx, "username", "") or "", yaml_hint)
+    source = "YAML"
+
     if yaml_opts is None:
-        logger.warning(
-            "[ATS] Could not find the player's YAML. "
-            "Win condition will default to level_and_money. "
-            "Use  --yaml <path>  to point the client at your YAML file."
-        )
-        return
+        saved = _load_client_options()
+        if saved:
+            yaml_opts = saved
+            source = "saved config (/setoptions)"
+            logger.info("[ATS] YAML not found — using options saved by /setoptions.")
+        else:
+            logger.warning(
+                "[ATS] Could not find YAML or saved options. "
+                "Win condition defaults to level_and_money.\n"
+                "[ATS] Fix: run  /setoptions win_condition=level_only  (and optionally "
+                "goal_level=5 goal_money=1000) to save your settings permanently."
+            )
+            return
 
     changed: List[str] = []
 
@@ -1021,10 +1048,10 @@ def _apply_yaml_options(ctx: "ATSContext") -> None:
             pass
 
     if changed:
-        logger.info(f"[ATS] Applied options from YAML: {', '.join(changed)}")
-        ctx._slot_data_from_yaml = True
+        logger.info(f"[ATS] Applied options from {source}: {', '.join(changed)}")
+        ctx._options_source = source
     else:
-        logger.warning("[ATS] YAML found but contained no win_condition/goal_level/goal_money values.")
+        logger.warning(f"[ATS] {source} found but no win_condition/goal_level/goal_money could be parsed.")
 
 
 class ATSCommandProcessor(ClientCommandProcessor):
@@ -1044,9 +1071,9 @@ class ATSCommandProcessor(ClientCommandProcessor):
         logger.info(f"[ATS] Checks sent:         {len(ctx.checked_locations)}")
         logger.info(f"[ATS] Goal satisfied:      {ctx.goal_complete}")
         logger.info(f"[ATS] Raw slot_data keys:  {list(ctx.slot_data.keys())}")
-        yaml_src = "yes" if ctx._slot_data_from_yaml else "no"
+        src = ctx._options_source or ("server" if ctx.slot_data.get("game_version") else "none — run /setoptions")
         yaml_hint = ctx._yaml_hint
-        logger.info(f"[ATS] Options from YAML:   {yaml_src}"
+        logger.info(f"[ATS] Options source:      {src}"
                     + (f" (--yaml {yaml_hint})" if yaml_hint else ""))
 
         wc       = ctx.slot_data.get("win_condition", 0)
@@ -1081,8 +1108,81 @@ class ATSCommandProcessor(ClientCommandProcessor):
         logger.info(f"[ATS]  cwd:      {Path.cwd()}")
         logger.info("[ATS]  Retrying YAML search now...")
         _apply_yaml_options(ctx)
-        logger.info(f"[ATS]  Options from YAML after retry: {ctx._slot_data_from_yaml}")
+        logger.info(f"[ATS]  Options source after retry: {ctx._options_source}")
         logger.info("[ATS] ─────────────────────────────────────────────────────────")
+
+    def _cmd_setoptions(self, args: str):
+        """Manually set win condition and goals; saved permanently.
+
+        Usage: /setoptions win_condition=level_only goal_level=5 goal_money=1000
+          win_condition: level_only | level_and_money | money_only | level_or_money
+          goal_level:    5–35  (driver level target)
+          goal_money:    100–10000  (target in thousands; 1000 = $1,000,000)
+
+        Settings are saved to a local file and loaded automatically on every
+        future connect when the server slot_data is empty.
+        """
+        ctx: ATSContext = self.ctx
+        wc_names = {0: "level_and_money", 1: "level_only", 2: "money_only", 3: "level_or_money"}
+        opts: Dict[str, Any] = {}
+
+        for token in args.strip().split():
+            if "=" not in token:
+                logger.warning(f"[ATS] /setoptions: skipping {token!r} — expected key=value")
+                continue
+            key, _, val = token.partition("=")
+            key = key.strip().lower()
+            val = val.strip()
+
+            if key == "win_condition":
+                wc = _parse_yaml_win_condition(val)
+                if wc is None:
+                    logger.warning(
+                        f"[ATS] /setoptions: unknown win_condition {val!r}. "
+                        "Valid values: level_only, level_and_money, money_only, level_or_money"
+                    )
+                    continue
+                ctx.slot_data["win_condition"] = wc
+                opts["win_condition"] = wc
+                logger.info(f"[ATS] win_condition → {wc_names[wc]} ({wc})")
+
+            elif key == "goal_level":
+                try:
+                    gl = int(val)
+                    ctx.slot_data["goal_level"] = gl
+                    opts["goal_level"] = gl
+                    logger.info(f"[ATS] goal_level → {gl}")
+                except ValueError:
+                    logger.warning(f"[ATS] /setoptions: goal_level must be a number, got {val!r}")
+
+            elif key == "goal_money":
+                try:
+                    gm = int(val)
+                    ctx.slot_data["goal_money"] = gm
+                    opts["goal_money"] = gm
+                    logger.info(f"[ATS] goal_money → {gm} (= ${gm * 1000:,})")
+                except ValueError:
+                    logger.warning(f"[ATS] /setoptions: goal_money must be a number (thousands), got {val!r}")
+
+            else:
+                logger.warning(f"[ATS] /setoptions: unknown key {key!r}")
+
+        if opts:
+            existing = _load_client_options() or {}
+            existing.update(opts)
+            _write_json(CLIENT_OPTIONS_FILE, existing)
+            ctx._options_source = "saved config (/setoptions)"
+            _write_json(SLOT_DATA_FILE, ctx.slot_data)
+            ctx._write_items_file()
+            logger.info(
+                f"[ATS] Options saved to {CLIENT_OPTIONS_FILE.name}. "
+                "Active now and will load automatically on future connects."
+            )
+        else:
+            logger.info(
+                "[ATS] /setoptions: no valid options provided.\n"
+                "[ATS] Example: /setoptions win_condition=level_only goal_level=5"
+            )
 
 
 try:
@@ -1159,8 +1259,8 @@ class ATSContext(CommonContext):
 
         # Set by launch() from --yaml CLI arg; used as first search hint for YAML fallback
         self._yaml_hint: Optional[Path] = None
-        # True once _apply_yaml_options has successfully patched slot_data from YAML
-        self._slot_data_from_yaml: bool = False
+        # Set to "YAML", "saved config (/setoptions)", etc. when options loaded from fallback
+        self._options_source: Optional[str] = None
 
     # ── Archipelago callbacks ──────────────────────────────────────────────────
 
