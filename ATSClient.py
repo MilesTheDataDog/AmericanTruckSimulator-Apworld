@@ -991,7 +991,8 @@ class ATSCommandProcessor(ClientCommandProcessor):
     def _cmd_status(self):
         """Show current ATS game state as seen by the client."""
         ctx: ATSContext = self.ctx
-        logger.info(f"[ATS] Seed name:           {getattr(ctx, 'seed_name', '<not set>')}")
+        logger.info(f"[ATS] Seed name (AP):      {getattr(ctx, 'seed_name', '<not set>')}")
+        logger.info(f"[ATS] Seed ID (DLL):       {ctx._seed_id()}")
         logger.info(f"[ATS] Plugin connected:    {ctx.plugin_connected}")
         logger.info(f"[ATS] Money ptr ready:     {ctx._ptr_money_ready}")
         logger.info(f"[ATS] XP ptr ready:        {ctx._ptr_xp_ready}")
@@ -1022,6 +1023,26 @@ class ATSCommandProcessor(ClientCommandProcessor):
         ctx: ATSContext = self.ctx
         logger.info("[ATS] Resyncing with plugin events file...")
         ctx._process_events_file(force=True)
+
+    def _cmd_yamldebug(self):
+        """Show all paths the client searched for your YAML, and retry the search."""
+        ctx: ATSContext = self.ctx
+        logger.info("[ATS] ── YAML search debug ──────────────────────────────────")
+        yaml_hint: Optional[Path] = ctx._yaml_hint
+        if yaml_hint:
+            logger.info(f"[ATS]  --yaml arg provided: {yaml_hint}")
+        try:
+            import Utils
+            ap_dir = Utils.local_path("")
+            logger.info(f"[ATS]  Utils.local_path(''): {ap_dir}")
+        except Exception as e:
+            logger.info(f"[ATS]  Utils.local_path: unavailable ({e})")
+        logger.info(f"[ATS]  __file__: {Path(__file__).resolve()}")
+        logger.info(f"[ATS]  cwd:      {Path.cwd()}")
+        logger.info("[ATS]  Retrying YAML search now...")
+        _apply_yaml_options(ctx)
+        logger.info(f"[ATS]  Options from YAML after retry: {ctx._slot_data_from_yaml}")
+        logger.info("[ATS] ─────────────────────────────────────────────────────────")
 
 
 try:
@@ -1216,6 +1237,22 @@ class ATSContext(CommonContext):
 
     # ── Items file (client → plugin) ───────────────────────────────────────────
 
+    def _seed_id(self) -> str:
+        """Return a stable, per-seed string for the DLL's new-seed detection.
+
+        AP's seed_name attribute is None in some versions.  When that happens we
+        build a fallback from the server address + slot number, which changes
+        every time the user opens a new room on archipelago.gg (each room has a
+        unique port), giving the DLL a reliable 'this is a new game' signal.
+        """
+        seed = (getattr(self, "seed_name", "") or "")
+        if not seed:
+            addr = getattr(self, "server_address", "") or ""
+            slot = getattr(self, "slot", 0) or 0
+            if addr:
+                seed = f"auto_{addr}_{slot}"
+        return seed
+
     def _write_items_file(self) -> None:
         """Write cumulative grant totals and win-condition config for the DLL."""
         payload = {
@@ -1223,7 +1260,7 @@ class ATSContext(CommonContext):
             "timestamp": time.time(),
             # seed lets the DLL detect a new AP game and reset its applied counters,
             # preventing stale carryover from a previous seed from blocking new grants.
-            "seed": getattr(self, "seed_name", "") or "",
+            "seed": self._seed_id(),
             "total_money_granted": self._total_money_granted,
             "total_xp_granted": self._total_xp_granted,
             "win_condition": self.slot_data.get("win_condition", 0),
