@@ -799,6 +799,7 @@ class ATSCommandProcessor(ClientCommandProcessor):
     def _cmd_status(self):
         """Show current ATS game state as seen by the client."""
         ctx: ATSContext = self.ctx
+        logger.info(f"[ATS] Seed name:           {getattr(ctx, 'seed_name', '<not set>')}")
         logger.info(f"[ATS] Plugin connected:    {ctx.plugin_connected}")
         logger.info(f"[ATS] Money ptr ready:     {ctx._ptr_money_ready}")
         logger.info(f"[ATS] XP ptr ready:        {ctx._ptr_xp_ready}")
@@ -809,6 +810,7 @@ class ATSCommandProcessor(ClientCommandProcessor):
         logger.info(f"[ATS] Total XP granted:    {ctx._total_xp_granted:,}")
         logger.info(f"[ATS] Checks sent:         {len(ctx.checked_locations)}")
         logger.info(f"[ATS] Goal satisfied:      {ctx.goal_complete}")
+        logger.info(f"[ATS] Raw slot_data keys:  {list(ctx.slot_data.keys())}")
 
         wc       = ctx.slot_data.get("win_condition", 0)
         lvl      = ctx.slot_data.get("goal_level", 35)
@@ -818,6 +820,11 @@ class ATSCommandProcessor(ClientCommandProcessor):
         logger.info(f"[ATS] Win condition:       {wc_names.get(wc, wc)} (slot_data={wc})")
         logger.info(f"[ATS]   Level:  {ctx.current_level} >= {lvl} → {ctx.current_level >= lvl}")
         logger.info(f"[ATS]   Money:  ${ctx.current_money:,} >= ${goal_money:,} → {ctx.current_money >= goal_money}")
+        override_path = SLOT_DATA_OVERRIDE_FILE
+        if override_path.exists():
+            logger.info(f"[ATS] Override file:       {override_path} (ACTIVE)")
+        else:
+            logger.info(f"[ATS] Override file:       {override_path} (not present)")
 
     def _cmd_resync(self):
         """Re-read the events file and resend any unchecked locations."""
@@ -914,7 +921,21 @@ class ATSContext(CommonContext):
         if asyncio.iscoroutine(result):
             await result
         if cmd == "Connected":
-            self.slot_data = args.get("slot_data", {})
+            raw_sd = args.get("slot_data", {})
+            # Log the raw slot_data from the server BEFORE any local override so
+            # the user can see exactly what the server baked into the seed.
+            logger.info(f"[ATS] Raw slot_data from server: {json.dumps(raw_sd)}")
+            wc_raw = raw_sd.get("win_condition", "<missing>")
+            gl_raw = raw_sd.get("goal_level", "<missing>")
+            if wc_raw == 0 or wc_raw == "<missing>" or gl_raw == 35 or gl_raw == "<missing>":
+                logger.warning(
+                    "[ATS] slot_data looks like defaults (win_condition=0, goal_level=35). "
+                    "If your YAML had different settings, AP may have used its built-in ATS world "
+                    "whose fill_slot_data() returns wrong values. "
+                    f"To override, create: {SLOT_DATA_OVERRIDE_FILE}\n"
+                    '    Contents example: {"win_condition": 1, "goal_level": 5}'
+                )
+            self.slot_data = raw_sd
             if SLOT_DATA_OVERRIDE_FILE.exists():
                 try:
                     overrides = _read_json(SLOT_DATA_OVERRIDE_FILE)
