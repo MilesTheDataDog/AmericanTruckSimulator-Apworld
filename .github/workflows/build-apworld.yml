@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - claude/ats-mod-files-Hkx9F
     paths:
       - worlds/american_truck_simulator/**
       - .github/workflows/build-apworld.yml
