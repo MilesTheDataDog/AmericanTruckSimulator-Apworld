@@ -25,13 +25,13 @@ American Truck Simulator:
 
   # ── Win Condition ─────────────────────────────────────────────────────────────
   # What you need to accomplish to complete your run.
-  # Use the NUMERIC value to avoid string-parsing issues across AP versions:
+  # Valid values (use the string name — most reliable across all AP versions):
   #
-  #   0 = level_and_money : Reach the goal level AND the goal money amount (both).
-  #   1 = level_only      : Reach the goal level.
-  #   2 = money_only      : Reach the goal money amount.
-  #   3 = level_or_money  : Reach either the goal level OR the goal money (first wins).
-  win_condition: 1  # level_only
+  #   level_and_money  Reach the goal level AND the goal money amount (both).
+  #   level_only       Reach the goal level.
+  #   money_only       Reach the goal money amount.
+  #   level_or_money   Reach either the goal level OR the goal money (first wins).
+  win_condition: level_only
 
   # Driver level target (5–35). Level 35 is the maximum and unlocks all skill upgrades.
   goal_level: 5

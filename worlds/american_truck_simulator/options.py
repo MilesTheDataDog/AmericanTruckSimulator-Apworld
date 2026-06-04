@@ -17,13 +17,19 @@ class WinCondition(Choice):
     option_money_only = 2
     option_level_or_money = 3
     default = 0
-    # Explicit aliases ensure the string names are recognised even in AP builds
-    # where the auto-generated name_lookup from option_* attributes is unreliable.
+    # Explicit aliases ensure the names are recognised even in AP builds where
+    # the auto-generated name_lookup from option_* attributes is unreliable.
+    # Numeric-string aliases ("0", "1", ...) handle the case where AP receives
+    # an integer from YAML, converts it to str, then calls from_text().
     aliases = {
         "level_and_money": 0,
         "level_only":      1,
         "money_only":      2,
         "level_or_money":  3,
+        "0": 0,
+        "1": 1,
+        "2": 2,
+        "3": 3,
     }
 
 
