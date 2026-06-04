@@ -812,15 +812,16 @@ def _parse_yaml_win_condition(raw: Any) -> Optional[int]:
 def _find_ats_yaml(username: str, yaml_hint: Optional[Path] = None) -> Optional[Dict]:
     """Search for the player's ATS YAML file and return its options block.
 
+    A YAML file is accepted if it contains an 'American Truck Simulator:' mapping
+    section (regardless of the top-level 'game:' value).
+
     Search order:
       1. yaml_hint path (from --yaml CLI arg) — tried directly as a file
-      2. Utils.local_path("Players") — standard AP installation Players folder
-      3. Players/ next to ATSClient.py
-      4. Players/ in cwd and its parent
-      5. Common Windows AP installation paths (ProgramData, AppData, Desktop, etc.)
-
-    Within each directory, match by game name then player name; fall back to the
-    sole ATS YAML if exactly one is present.
+      2. C:\\ProgramData\\Archipelago\\Players  (most common AP install)
+      3. Utils.local_path("Players") — AP launcher's own Players folder
+      4. Players/ next to ATSClient.py
+      5. Players/ in cwd and its parent
+      6. Other common Windows AP installation paths
     """
     try:
         import yaml as _yaml
@@ -828,47 +829,44 @@ def _find_ats_yaml(username: str, yaml_hint: Optional[Path] = None) -> Optional[
         logger.warning("[ATS] YAML search: PyYAML not available — cannot read YAML options")
         return None
 
+    def _parse_yaml_file(path: Path) -> "Optional[tuple]":
+        """Return (data_dict, ats_block) if path is a valid ATS YAML, else None."""
+        try:
+            raw = path.read_bytes()
+            # Strip UTF-8 BOM if present
+            if raw.startswith(b"\xef\xbb\xbf"):
+                raw = raw[3:]
+            text = raw.decode("utf-8", errors="replace")
+            data = _yaml.safe_load(text)
+            if not isinstance(data, dict):
+                return None
+            ats_block = data.get("American Truck Simulator")
+            if not isinstance(ats_block, dict):
+                return None
+            return data, ats_block
+        except Exception as e:
+            logger.info(f"[ATS] YAML search:   parse error in {path.name}: {e}")
+            return None
+
     # ── If the user pointed us directly at a file ────────────────────────────
     if yaml_hint is not None:
-        try:
-            with yaml_hint.open(encoding="utf-8", errors="replace") as f:
-                data = _yaml.safe_load(f)
-            if isinstance(data, dict) and data.get("game") == "American Truck Simulator":
-                ats = data.get("American Truck Simulator", {})
-                if isinstance(ats, dict):
-                    logger.info(f"[ATS] Using YAML from --yaml arg: {yaml_hint}")
-                    return ats
-            logger.warning(f"[ATS] --yaml path {yaml_hint} is not a valid ATS YAML file — falling back to search")
-        except Exception as e:
-            logger.warning(f"[ATS] Could not read --yaml path {yaml_hint}: {e}")
+        result = _parse_yaml_file(yaml_hint)
+        if result:
+            _, ats = result
+            logger.info(f"[ATS] Using YAML from --yaml arg: {yaml_hint}")
+            return ats
+        logger.warning(
+            f"[ATS] --yaml path {yaml_hint!r} is not a valid ATS YAML "
+            "(no 'American Truck Simulator:' section found) — falling back to search"
+        )
 
-    # ── Build candidate directory list ───────────────────────────────────────
+    # ── Build candidate directory list (most-likely first) ───────────────────
     candidate_dirs: List[Path] = []
 
-    # Standard AP Players/ folder (works when running from the AP launcher)
-    try:
-        import Utils
-        candidate_dirs.append(Path(Utils.local_path("Players")))
-    except Exception:
-        pass
-
-    # Players/ next to ATSClient.py (works when running the script directly)
-    try:
-        candidate_dirs.append(Path(__file__).resolve().parent / "Players")
-    except Exception:
-        pass
-
-    # Players/ in the current working directory and its immediate parent
-    candidate_dirs.append(Path.cwd() / "Players")
-    candidate_dirs.append(Path.cwd().parent / "Players")
-
-    # Common Windows AP installation paths
+    # Most common AP installation path on Windows — try it first
     if os.name == "nt":
-        for base in [
-            r"C:\ProgramData\Archipelago",
-            r"C:\Archipelago",
-        ]:
-            candidate_dirs.append(Path(base) / "Players")
+        candidate_dirs.append(Path(r"C:\ProgramData\Archipelago\Players"))
+        candidate_dirs.append(Path(r"C:\Archipelago\Players"))
         userprofile = os.environ.get("USERPROFILE", "")
         if userprofile:
             up = Path(userprofile)
@@ -876,6 +874,23 @@ def _find_ats_yaml(username: str, yaml_hint: Optional[Path] = None) -> Optional[
             candidate_dirs.append(up / "AppData" / "Local" / "Programs" / "Archipelago" / "Players")
             candidate_dirs.append(up / "Desktop" / "Archipelago" / "Players")
             candidate_dirs.append(up / "Archipelago" / "Players")
+
+    # AP launcher's own Players folder
+    try:
+        import Utils
+        candidate_dirs.append(Path(Utils.local_path("Players")))
+    except Exception:
+        pass
+
+    # Players/ next to ATSClient.py
+    try:
+        candidate_dirs.append(Path(__file__).resolve().parent / "Players")
+    except Exception:
+        pass
+
+    # cwd and parent
+    candidate_dirs.append(Path.cwd() / "Players")
+    candidate_dirs.append(Path.cwd().parent / "Players")
 
     # Deduplicate while preserving order
     seen: set = set()
@@ -893,50 +908,55 @@ def _find_ats_yaml(username: str, yaml_hint: Optional[Path] = None) -> Optional[
 
     for players_dir in unique_dirs:
         if not players_dir.is_dir():
-            logger.debug(f"[ATS] YAML search: {players_dir} — not found, skipping")
+            logger.debug(f"[ATS] YAML search: {players_dir} — not a directory, skipping")
             continue
 
-        logger.info(f"[ATS] YAML search: scanning {players_dir}")
-        matches: List[tuple] = []
+        # Glob both .yaml and .yml
+        yaml_files = sorted(players_dir.glob("*.yaml")) + sorted(players_dir.glob("*.yml"))
+        logger.info(f"[ATS] YAML search: scanning {players_dir} ({len(yaml_files)} yaml/yml file(s))")
 
-        for yaml_path in sorted(players_dir.glob("*.yaml")):
-            try:
-                with yaml_path.open(encoding="utf-8", errors="replace") as f:
-                    data = _yaml.safe_load(f)
-                if not isinstance(data, dict):
-                    continue
-                if data.get("game", "") != "American Truck Simulator":
-                    continue
-                ats_block = data.get("American Truck Simulator", {})
-                if not isinstance(ats_block, dict):
-                    continue
-                matches.append((yaml_path, data, ats_block))
-                logger.debug(f"[ATS] YAML search:   found ATS YAML: {yaml_path.name} (name={data.get('name', '?')})")
-            except Exception as e:
-                logger.debug(f"[ATS] YAML search:   could not parse {yaml_path.name}: {e}")
+        matches: List[tuple] = []
+        for yaml_path in yaml_files:
+            result = _parse_yaml_file(yaml_path)
+            if result is None:
+                continue
+            data, ats_block = result
+            matches.append((yaml_path, data, ats_block))
+            logger.info(
+                f"[ATS] YAML search:   ATS YAML found: {yaml_path.name} "
+                f"(name={data.get('name', '?')!r}, "
+                f"win_condition={ats_block.get('win_condition', '?')!r})"
+            )
 
         if not matches:
             logger.debug(f"[ATS] YAML search: no ATS YAMLs in {players_dir}")
             continue
 
-        # Prefer an exact player-name match.
+        # Prefer an exact player-name match
         for yaml_path, data, ats_block in matches:
-            if user_lower and str(data.get("name", "")).lower().strip() == user_lower:
-                logger.info(f"[ATS] Found YAML for player '{username}': {yaml_path}")
+            yaml_name = str(data.get("name", "")).lower().strip()
+            if user_lower and yaml_name == user_lower:
+                logger.info(f"[ATS] Using YAML matched by player name '{username}': {yaml_path}")
                 return ats_block
 
-        # Use the only ATS YAML if no name match (single-player scenario).
+        # Single YAML in the folder — use it regardless of name
         if len(matches) == 1:
             yaml_path, _, ats_block = matches[0]
             logger.info(f"[ATS] Using sole ATS YAML found: {yaml_path}")
             return ats_block
 
         logger.warning(
-            f"[ATS] Found {len(matches)} ATS YAMLs in {players_dir} but none matched "
-            f"player name '{username}'. Add --yaml <path> to point directly at your file."
+            f"[ATS] Found {len(matches)} ATS YAMLs in {players_dir} "
+            f"but none matched player name '{username}'. "
+            "Use --yaml <path> to point directly at the correct file."
         )
 
+    logger.warning(
+        "[ATS] YAML search exhausted all candidate directories — "
+        "options not found. Use  --yaml \"<full path to your YAML>\"  to fix this."
+    )
     return None
+
 
 
 def _apply_yaml_options(ctx: "ATSContext") -> None:
