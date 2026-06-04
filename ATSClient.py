@@ -803,7 +803,27 @@ _WIN_COND_NAME_TO_INT: Dict[str, int] = {
 }
 
 
+def _resolve_weighted(raw: Any) -> Any:
+    """Resolve an AP weighted-choice dict {option: weight} to its chosen value.
+
+    AP YAML templates express every option as a weighted dict, e.g.:
+        win_condition:
+          level_only: 50
+          level_and_money: 0
+    PyYAML parses that as {"level_only": 50, "level_and_money": 0}.
+    This function returns the key with the highest positive weight.
+    Plain int/string values pass through unchanged.
+    """
+    if not isinstance(raw, dict) or not raw:
+        return raw
+    candidates = {k: v for k, v in raw.items() if isinstance(v, (int, float)) and v > 0}
+    if not candidates:
+        return raw
+    return max(candidates, key=lambda k: candidates[k])
+
+
 def _parse_yaml_win_condition(raw: Any) -> Optional[int]:
+    raw = _resolve_weighted(raw)
     if isinstance(raw, int) and 0 <= raw <= 3:
         return raw
     return _WIN_COND_NAME_TO_INT.get(str(raw).strip().lower())
@@ -984,7 +1004,7 @@ def _apply_yaml_options(ctx: "ATSContext") -> None:
             ctx.slot_data["win_condition"] = wc_int
             changed.append(f"win_condition={wc_int} ({wc_raw})")
 
-    gl_raw = yaml_opts.get("goal_level")
+    gl_raw = _resolve_weighted(yaml_opts.get("goal_level"))
     if gl_raw is not None:
         try:
             ctx.slot_data["goal_level"] = int(gl_raw)
@@ -992,7 +1012,7 @@ def _apply_yaml_options(ctx: "ATSContext") -> None:
         except (ValueError, TypeError):
             pass
 
-    gm_raw = yaml_opts.get("goal_money")
+    gm_raw = _resolve_weighted(yaml_opts.get("goal_money"))
     if gm_raw is not None:
         try:
             ctx.slot_data["goal_money"] = int(gm_raw)
