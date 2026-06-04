@@ -189,10 +189,13 @@ class ATSWorld(World):
         """
         Data sent to the client via the Archipelago server after connection.
         The client uses this to know the player's exact win condition and options.
+        game_version acts as a marker: if it's absent from the server's slot_data
+        the client knows AP used a built-in world with a broken fill_slot_data()
+        and falls back to reading options from the player's YAML file instead.
         """
         o = self.options
         return {
-            "game_version": "1.0.0",
+            "game_version": "1.1.0",
             "win_condition": int(o.win_condition.value),
             "goal_level": int(o.goal_level.value),
             "goal_money": int(o.goal_money.value),  # in thousands

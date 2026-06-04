@@ -794,6 +794,130 @@ WIN_LEVEL_ONLY = 1
 WIN_MONEY_ONLY = 2
 WIN_LEVEL_OR_MONEY = 3
 
+_WIN_COND_NAME_TO_INT: Dict[str, int] = {
+    "level_and_money": 0,
+    "level_only":      1,
+    "money_only":      2,
+    "level_or_money":  3,
+    "0": 0, "1": 1, "2": 2, "3": 3,
+}
+
+
+def _parse_yaml_win_condition(raw: Any) -> Optional[int]:
+    if isinstance(raw, int) and 0 <= raw <= 3:
+        return raw
+    return _WIN_COND_NAME_TO_INT.get(str(raw).strip().lower())
+
+
+def _find_ats_yaml(username: str) -> Optional[Dict]:
+    """Search the AP Players/ folder for the ATS YAML matching the connected player.
+
+    Returns the 'American Truck Simulator' options block, or None if not found.
+    Strategy: match by game name + player name; fall back to the sole ATS YAML if
+    there is exactly one.
+    """
+    try:
+        import Utils
+        players_dir = Path(Utils.local_path("Players"))
+    except Exception:
+        players_dir = Path("Players")
+
+    if not players_dir.is_dir():
+        logger.debug(f"[ATS] YAML search: Players directory not found at {players_dir}")
+        return None
+
+    try:
+        import yaml as _yaml
+    except ImportError:
+        logger.debug("[ATS] YAML search: PyYAML not available")
+        return None
+
+    user_lower = (username or "").lower().strip()
+    matches: List[tuple] = []  # (yaml_path, ats_options_dict)
+
+    for yaml_path in sorted(players_dir.glob("*.yaml")):
+        try:
+            with yaml_path.open(encoding="utf-8", errors="replace") as f:
+                data = _yaml.safe_load(f)
+            if not isinstance(data, dict):
+                continue
+            if data.get("game", "") != "American Truck Simulator":
+                continue
+            ats_block = data.get("American Truck Simulator", {})
+            if not isinstance(ats_block, dict):
+                continue
+            matches.append((yaml_path, data, ats_block))
+        except Exception as e:
+            logger.debug(f"[ATS] YAML search: could not parse {yaml_path.name}: {e}")
+
+    if not matches:
+        logger.debug("[ATS] YAML search: no YAML files with game: American Truck Simulator")
+        return None
+
+    # Prefer an exact player-name match.
+    for yaml_path, data, ats_block in matches:
+        if user_lower and str(data.get("name", "")).lower().strip() == user_lower:
+            logger.info(f"[ATS] Found YAML for player '{username}': {yaml_path.name}")
+            return ats_block
+
+    # If only one ATS YAML exists and no name matched, use it (single-player scenario).
+    if len(matches) == 1:
+        yaml_path, _, ats_block = matches[0]
+        logger.info(f"[ATS] Using sole ATS YAML found: {yaml_path.name}")
+        return ats_block
+
+    logger.warning(
+        f"[ATS] Found {len(matches)} ATS YAML files but none matched player name '{username}'. "
+        "Rename the YAML 'name:' field to match your Archipelago slot name."
+    )
+    return None
+
+
+def _apply_yaml_options(ctx: "ATSContext") -> None:
+    """Patch ctx.slot_data with ATS options read from the player's YAML file.
+
+    Only called when the server's slot_data lacks 'game_version', which means
+    AP's built-in ATS world was used and may have returned wrong/default values.
+    """
+    yaml_opts = _find_ats_yaml(getattr(ctx, "username", "") or "")
+    if yaml_opts is None:
+        logger.warning(
+            "[ATS] Could not find the player's YAML in the AP Players/ folder. "
+            "Win condition will default to level_and_money. "
+            "Place your YAML in <AP directory>/Players/ and reconnect."
+        )
+        return
+
+    changed: List[str] = []
+
+    wc_raw = yaml_opts.get("win_condition")
+    if wc_raw is not None:
+        wc_int = _parse_yaml_win_condition(wc_raw)
+        if wc_int is not None:
+            ctx.slot_data["win_condition"] = wc_int
+            changed.append(f"win_condition={wc_int} ({wc_raw})")
+
+    gl_raw = yaml_opts.get("goal_level")
+    if gl_raw is not None:
+        try:
+            ctx.slot_data["goal_level"] = int(gl_raw)
+            changed.append(f"goal_level={gl_raw}")
+        except (ValueError, TypeError):
+            pass
+
+    gm_raw = yaml_opts.get("goal_money")
+    if gm_raw is not None:
+        try:
+            ctx.slot_data["goal_money"] = int(gm_raw)
+            changed.append(f"goal_money={gm_raw}")
+        except (ValueError, TypeError):
+            pass
+
+    if changed:
+        logger.info(f"[ATS] Applied options from YAML: {', '.join(changed)}")
+    else:
+        logger.warning("[ATS] YAML found but contained no win_condition/goal_level/goal_money values.")
+
 
 class ATSCommandProcessor(ClientCommandProcessor):
     def _cmd_status(self):
@@ -922,30 +1046,23 @@ class ATSContext(CommonContext):
             await result
         if cmd == "Connected":
             raw_sd = args.get("slot_data", {})
-            # Log the raw slot_data from the server BEFORE any local override so
-            # the user can see exactly what the server baked into the seed.
+            # Log the raw slot_data from the server BEFORE any patching so the
+            # user can confirm what the server actually baked into the seed.
             logger.info(f"[ATS] Raw slot_data from server: {json.dumps(raw_sd)}")
-            wc_raw = raw_sd.get("win_condition", "<missing>")
-            gl_raw = raw_sd.get("goal_level", "<missing>")
-            if wc_raw == 0 or wc_raw == "<missing>" or gl_raw == 35 or gl_raw == "<missing>":
-                logger.warning(
-                    "[ATS] slot_data looks like defaults (win_condition=0, goal_level=35). "
-                    "If your YAML had different settings, AP may have used its built-in ATS world "
-                    "whose fill_slot_data() returns wrong values. "
-                    f"To override, create: {SLOT_DATA_OVERRIDE_FILE}\n"
-                    '    Contents example: {"win_condition": 1, "goal_level": 5}'
-                )
             self.slot_data = raw_sd
-            if SLOT_DATA_OVERRIDE_FILE.exists():
-                try:
-                    overrides = _read_json(SLOT_DATA_OVERRIDE_FILE)
-                    if isinstance(overrides, dict):
-                        self.slot_data.update(overrides)
-                        logger.info(f"[ATS] slot_data_override.json applied: {overrides}")
-                    else:
-                        logger.warning("[ATS] slot_data_override.json is not a JSON object — ignored")
-                except Exception:
-                    logger.warning(f"[ATS] Could not read slot_data_override.json:\n{traceback.format_exc()}")
+
+            # If the server's slot_data lacks "game_version" it was produced by AP's
+            # built-in ATS world (not our custom apworld) whose fill_slot_data() may
+            # return empty or default values.  Fall back to the player's YAML file,
+            # which is the authoritative source of what the user intended.
+            if not self.slot_data.get("game_version"):
+                logger.warning(
+                    "[ATS] slot_data from server has no 'game_version' key — "
+                    "AP likely used its built-in ATS world instead of the custom apworld. "
+                    "Attempting to read options from the player's YAML file..."
+                )
+                _apply_yaml_options(self)
+
             self._on_connected()
         # ReceivedItems is intentionally NOT handled here.
         # args["items"] contains raw JSON lists, not NetworkItem objects.
