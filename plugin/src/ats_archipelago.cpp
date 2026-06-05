@@ -67,7 +67,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.4.0";
+static const char* PLUGIN_VERSION = "2.5.0";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -220,8 +220,7 @@ static std::string g_current_seed;
 // Previous city count — detects increases without keeping the breakpoint live.
 static uint64_t g_prev_city_count = UINT64_MAX; // UINT64_MAX = uninitialized
 
-static std::mutex              g_apply_mutex;          // prevents timer + game thread double-applying
-static std::atomic<bool>       g_delivery_grant_pending{false};
+static std::mutex              g_apply_mutex;          // prevents concurrent double-apply
 
 // Re-entrancy suppression: true while apply_memory_grants is writing to memory.
 // telemetry_paused / telemetry_started skip calling apply_memory_grants while this is set
@@ -233,8 +232,8 @@ static std::atomic<bool> g_applying_grant{false};
 static long long g_last_written_money = LLONG_MIN;
 static int32_t   g_last_written_xp    = INT32_MIN;
 
-// Per-delivery grant guard: records which cargo delivery started the active timer.
-// Prevents the timer from being spawned twice for the same delivery (duplicate events).
+// Per-delivery idempotency guard: records which cargo delivery last triggered a grant
+// application.  Prevents duplicate job_delivered events from applying the same grant twice.
 static std::string g_applied_delivery_id;
 
 static PVOID g_veh_handle = nullptr;
@@ -576,63 +575,10 @@ static LONG WINAPI ats_veh(EXCEPTION_POINTERS* ep) {
     return EXCEPTION_CONTINUE_EXECUTION;
 }
 
-// ── Forward declarations (timer calls these before their definitions) ──────────
+// ── Forward declarations ───────────────────────────────────────────────────────
 static void read_items_file();
 static void save_applied_state();
 static void apply_memory_grants(bool allow_paused = false);
-
-// ── Delivery-screen grant timer ────────────────────────────────────────────────
-// Spawned by job_delivered; polls items.json during the delivery summary screen
-// so grants reach the player before they dismiss the screen, not at the next delivery.
-static DWORD WINAPI grant_timer_func(LPVOID) {
-    // Poll items.json for up to 10 s after a delivery so grants that arrive
-    // from the AP server after the delivery event are still applied promptly.
-    // Only write to memory when there is actually a pending delta; exit as soon
-    // as all grants are applied (plus a minimum 2-second grace period to give the
-    // AP server time to send items).
-    bool applied_any = false;
-
-    const int MAX_POLLS  = 20; // 20 × 500 ms = 10 s maximum
-    const int GRACE_ITERS = 4; // 4 × 500 ms = 2 s minimum before early exit
-
-    for (int i = 0; i < MAX_POLLS; ++i) {
-        Sleep(500);
-        if (!g_delivery_grant_pending.load(std::memory_order_relaxed)) break;
-        read_items_file();
-
-        // Only call apply_memory_grants when there is a positive pending delta.
-        // Calling it unconditionally re-reads memory and writes nothing but still
-        // constitutes an unnecessary interaction with the game's economy objects.
-        bool money_pending = g_items.total_money_granted > g_applied_money;
-        bool xp_pending    = g_items.total_xp_granted    > g_applied_xp;
-
-        if (money_pending || xp_pending) {
-            log("Grant timer iter " + std::to_string(i) +
-                ": applying pending delta (money=" + std::to_string(money_pending) +
-                " xp=" + std::to_string(xp_pending) + ")");
-            apply_memory_grants(/*allow_paused=*/true);
-            applied_any = true;
-        }
-
-        // Exit once everything is applied and the grace period has elapsed.
-        bool all_applied = g_applied_money >= g_items.total_money_granted &&
-                           g_applied_xp    >= g_items.total_xp_granted;
-        if (all_applied && i >= GRACE_ITERS) {
-            log("Grant timer: all grants applied — exiting early at iter " +
-                std::to_string(i) + " (applied_any=" + (applied_any ? "true" : "false") + ")");
-            break;
-        }
-    }
-    g_delivery_grant_pending.store(false, std::memory_order_relaxed);
-    return 0;
-}
-
-static void start_grant_timer() {
-    if (g_delivery_grant_pending.load(std::memory_order_relaxed)) return;
-    g_delivery_grant_pending.store(true, std::memory_order_relaxed);
-    HANDLE th = CreateThread(nullptr, 0, grant_timer_func, nullptr, 0, nullptr);
-    if (th) CloseHandle(th);  // fire-and-forget; thread cleans itself up
-}
 
 // ── Apply pending grants directly to live memory ───────────────────────────────
 static void apply_memory_grants(bool allow_paused) {
@@ -703,10 +649,11 @@ static void apply_memory_grants(bool allow_paused) {
                 g_applied_money      = g_items.total_money_granted;
                 g_last_written_money = newval;
                 g_applied_dirty.store(true, std::memory_order_relaxed);
+                // g_applied_dirty deferred to frame flush (≤2 s) — do NOT call
+                // save_applied_state() here; each per-write file-write can
+                // trigger an ATS directory-change scan and a game save.
                 log("Grant applied (money): +$" + std::to_string(delta) +
-                    " → balance $" + std::to_string(newval) +
-                    " [reason: direct write, delivery grant]");
-                save_applied_state();
+                    " → balance $" + std::to_string(newval));
             } else {
                 log("Grant failed: money write error — resetting pointer", SCS_LOG_TYPE_warning);
                 g_money_ptr.store(0, std::memory_order_relaxed);
@@ -736,10 +683,9 @@ static void apply_memory_grants(bool allow_paused) {
                 g_applied_xp      = g_items.total_xp_granted;
                 g_last_written_xp = newval;
                 g_applied_dirty.store(true, std::memory_order_relaxed);
+                // Deferred to frame flush — see money comment above.
                 log("Grant applied (XP): +" + std::to_string(delta) +
-                    " XP → total " + std::to_string(newval) +
-                    " [reason: direct write, delivery grant]");
-                save_applied_state();
+                    " XP → total " + std::to_string(newval));
             } else {
                 log("Grant failed: XP write error — resetting pointer", SCS_LOG_TYPE_warning);
                 g_xp_ptr.store(0, std::memory_order_relaxed);
@@ -932,15 +878,24 @@ SCSAPI_VOID telemetry_gameplay_event(const scs_event_t event,
         }
         flush_events_file();
 
-        // Idempotency guard: only start the grant timer once per unique delivery.
-        // Duplicate job_delivered events (observed in some ATS versions) must not
-        // spawn a second timer thread that would re-apply already-applied grants.
+        // Apply any grant that was pending when the delivery completed.
+        // This is intentionally a single synchronous call — no timer thread, no loop.
+        //
+        // Three cases are handled correctly without a timer:
+        //   1. Pointer already captured (2nd+ delivery this session): direct write happens here.
+        //   2. Pointer captured during this delivery's economy writes (VEH fired just before
+        //      job_delivered): VEH already injected the grant at capture; delta is now 0.
+        //   3. Pointer not yet captured (delivery ran on an un-breakpointed thread): write is
+        //      skipped here (pointer==0); the VEH will inject on the game's next XP/money write,
+        //      and telemetry_started + telemetry_frame_start catch any AP items that arrive later.
+        //
+        // allow_paused=true because the delivery screen pauses the simulation.
         if (!delivery_id.empty() && delivery_id != g_applied_delivery_id) {
             g_applied_delivery_id = delivery_id;
-            log("Delivery complete: cargo=" + delivery_id + " — starting grant timer");
-            start_grant_timer();
+            log("Delivery complete: cargo=" + delivery_id + " — applying pending grant once");
+            apply_memory_grants(/*allow_paused=*/true);
         } else if (!delivery_id.empty()) {
-            log("Grant timer skipped: duplicate delivery event for cargo=" + delivery_id,
+            log("Duplicate delivery event for cargo=" + delivery_id + " — skipped",
                 SCS_LOG_TYPE_warning);
         }
     }
@@ -994,16 +949,13 @@ SCSAPI_VOID telemetry_configuration(const scs_event_t event,
 
 SCSAPI_VOID telemetry_paused(const scs_event_t event, const void* const event_info,
                               const scs_context_t context) {
-    // Read items.json and attempt grant application before marking in_game=false,
-    // but ONLY when the delivery grant timer is not already in the middle of a write.
-    // The game saves after each delivery; that save fires telemetry_paused, which
-    // would otherwise re-enter apply_memory_grants while the timer thread holds
-    // g_apply_mutex, stacking an additional write on top of the delivery write.
+    // Attempt grant application while in_game is still true (set false below).
+    // The re-entrancy guard ensures the job_delivered apply_memory_grants call (which
+    // runs synchronously on this same thread just before the pause event) isn't
+    // duplicated if the game immediately fires another paused event.
     if (!g_applying_grant.load(std::memory_order_acquire)) {
         read_items_file();
         apply_memory_grants();
-    } else {
-        log("telemetry_paused: grant write in progress — skipping apply to prevent re-entry");
     }
     std::lock_guard<std::mutex> lock(g_state_mutex);
     g_state.in_game = false;
@@ -1011,11 +963,12 @@ SCSAPI_VOID telemetry_paused(const scs_event_t event, const void* const event_in
 
 SCSAPI_VOID telemetry_started(const scs_event_t event, const void* const event_info,
                                const scs_context_t context) {
-    g_delivery_grant_pending.store(false, std::memory_order_relaxed);
     {
         std::lock_guard<std::mutex> lock(g_state_mutex);
         g_state.in_game = true;
     }
+    // Apply any grants that arrived while the game was paused (delivery screen, etc.)
+    // and that couldn't be written without the pointer being ready.
     if (!g_applying_grant.load(std::memory_order_acquire)) {
         read_items_file();
         apply_memory_grants();
