@@ -55,6 +55,24 @@ jobs:
           New-Item -ItemType Directory -Force -Path archipelago\hooks | Out-Null
           Copy-Item ats-apworld\hooks\rthook_ats_worlds.py archipelago\hooks\rthook_ats_worlds.py
 
+      - name: Verify entry point (must not use run_as_textclient)
+        shell: pwsh
+        run: |
+          $file = "ats-apworld\ATSClient.py"
+          if (Select-String -Path $file -Pattern "run_as_textclient" -Quiet) {
+            Write-Error "FAIL: ATSClient.py calls run_as_textclient — that hardcodes want_slot_data=False"
+            exit 1
+          }
+          if (-not (Select-String -Path $file -Pattern "want_slot_data\s*=\s*True" -Quiet)) {
+            Write-Error "FAIL: ATSContext.want_slot_data is not explicitly set to True"
+            exit 1
+          }
+          if (-not (Select-String -Path $file -Pattern 'game\s*=\s*[''"]American Truck Simulator[''"]' -Quiet)) {
+            Write-Error "FAIL: ATSContext.game is not set to 'American Truck Simulator'"
+            exit 1
+          }
+          Write-Host "Entry point checks passed."
+
       - name: Build ATSClient.exe
         working-directory: archipelago
         shell: pwsh

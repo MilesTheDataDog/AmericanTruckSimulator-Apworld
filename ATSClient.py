@@ -1200,6 +1200,7 @@ class ATSContext(CommonContext):
     command_processor = ATSCommandProcessor
     game = GAME_NAME
     items_handling = 0b111  # receive all items
+    want_slot_data = True   # request slot_data from server on connect
     if ATSManager is not None:
         game_manager_class = ATSManager
 
@@ -1868,6 +1869,7 @@ def launch():
             args.password,
             auto_launch_game=not args.no_launch,
         )
+        logger.info(f"[ATS] Client starting — game={ctx.game!r}, want_slot_data={ctx.want_slot_data}")
         # Store the --yaml hint on the context so _apply_yaml_options can use it.
         ctx._yaml_hint = Path(args.yaml) if args.yaml else None
         ctx.server_task = asyncio.ensure_future(server_loop(ctx))
