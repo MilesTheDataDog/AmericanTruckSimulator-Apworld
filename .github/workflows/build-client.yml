@@ -67,8 +67,8 @@ jobs:
             Write-Error "FAIL: ATSContext.want_slot_data is not explicitly set to True"
             exit 1
           }
-          if (-not (Select-String -Path $file -Pattern 'game\s*=\s*[''"]American Truck Simulator[''"]' -Quiet)) {
-            Write-Error "FAIL: ATSContext.game is not set to 'American Truck Simulator'"
+          if (-not (Select-String -Path $file -Pattern 'GAME_NAME\s*=\s*[''"]American Truck Simulator[''"]' -Quiet)) {
+            Write-Error "FAIL: GAME_NAME is not set to 'American Truck Simulator'"
             exit 1
           }
           Write-Host "Entry point checks passed."
