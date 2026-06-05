@@ -1750,20 +1750,26 @@ class ATSContext(CommonContext):
             logger.info(f"[ATS] New cities detected: {sorted(new_cities)}")
         for city_id in new_cities:
             self._save_known_cities.add(city_id)
-            if is_first_read:
-                continue  # baseline only — no checks fired on first read
             for loc_data in CITY_ARRIVAL_LOCATIONS.values():
-                if loc_data.game_id == city_id and loc_data.code not in self.checked_locations:
-                    new_checks.append(loc_data.code)
-                    logger.info(f"[ATS] City arrival check: {city_id} → {loc_data.code}")
-                    state_name = loc_data.region
-                    if state_name not in self._save_known_states:
-                        self._save_known_states.add(state_name)
-                        for sa_data in STATE_ARRIVAL_LOCATIONS.values():
-                            if sa_data.region == state_name and sa_data.code not in self.checked_locations:
-                                new_checks.append(sa_data.code)
-                                logger.info(f"[ATS] State first visit: {state_name}")
-                                break
+                if loc_data.game_id == city_id:
+                    if is_first_read:
+                        # Seed known states from baseline cities so they don't re-fire next session
+                        self._save_known_states.add(loc_data.region)
+                    else:
+                        # City check — independent of state check below
+                        if loc_data.code not in self.checked_locations:
+                            new_checks.append(loc_data.code)
+                            logger.info(f"[ATS] City arrival check: {city_id} → {loc_data.code}")
+                        # State check — always runs regardless of city check status
+                        state_name = loc_data.region
+                        if state_name not in self._save_known_states:
+                            logger.info(f"[ATS] New state detected: {state_name}")
+                            self._save_known_states.add(state_name)
+                            for sa_data in STATE_ARRIVAL_LOCATIONS.values():
+                                if sa_data.region == state_name and sa_data.code not in self.checked_locations:
+                                    new_checks.append(sa_data.code)
+                                    logger.info(f"[ATS] State arrival check: {state_name} → {sa_data.code}")
+                                    break
                     break
 
         if new_checks:
