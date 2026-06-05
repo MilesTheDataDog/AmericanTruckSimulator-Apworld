@@ -1201,8 +1201,10 @@ class ATSContext(CommonContext):
     game = GAME_NAME
     items_handling = 0b111  # receive all items
     want_slot_data = True   # request slot_data from server on connect
-    if ATSManager is not None:
-        game_manager_class = ATSManager
+    def make_gui(self):
+        if ATSManager is not None:
+            return ATSManager
+        return super().make_gui()
 
     def __init__(self, server_address: str, password: Optional[str],
                  auto_launch_game: bool = True) -> None:
