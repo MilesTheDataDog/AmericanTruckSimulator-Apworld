@@ -1271,13 +1271,9 @@ class ATSContext(CommonContext):
         await self.get_username()
         await self.send_connect()
 
-    async def on_package(self, cmd: str, args: Dict) -> None:
+    def on_package(self, cmd: str, args: Dict) -> None:
         logger.debug(f"[ATS] Packet in: {cmd}")
-        # Await super() correctly regardless of whether this AP version uses
-        # async or sync on_package — unawaited coroutine = items_received never filled.
-        result = super().on_package(cmd, args)
-        if asyncio.iscoroutine(result):
-            await result
+        super().on_package(cmd, args)
         if cmd == "Connected":
             raw_sd = args.get("slot_data", {})
             # Log the raw slot_data from the server BEFORE any patching so the
