@@ -1257,6 +1257,14 @@ class ATSContext(CommonContext):
         self.current_xp: int = 0
         self._save_not_found_warned: bool = False
 
+        # Delivery-state tracking for arrival reward coalescing.
+        # While a delivery is active, items.json writes from item receipts are
+        # deferred so the arrival grant and the delivery grant coalesce into one
+        # plugin apply at job_delivered.  Flushed at cargo_delivered or job_cancelled.
+        self._job_active: bool = False
+        self._items_write_deferred: bool = False
+        self._held_arrival_labels: List[str] = []
+
         # Set by launch() from --yaml CLI arg; used as first search hint for YAML fallback
         self._yaml_hint: Optional[Path] = None
         # Set to "YAML", "saved config (/setoptions)", etc. when options loaded from fallback
@@ -1345,7 +1353,11 @@ class ATSContext(CommonContext):
             self._applied_item_count += 1
             applied_any = True
         if applied_any:
-            self._write_items_file()
+            if self._job_active:
+                logger.debug("[ATS] Item write deferred — delivery in progress")
+                self._items_write_deferred = True
+            else:
+                self._write_items_file()
 
     def _apply_item(self, item_name: str) -> None:
         if item_name.endswith("Money Grant"):
@@ -1405,6 +1417,18 @@ class ATSContext(CommonContext):
             "item_notifications": self._notifications,
         }
         _write_json(ITEMS_FILE, payload)
+
+    def _flush_held_grants(self, reason: str) -> None:
+        """Write items.json now, combining all arrival grants held during a delivery."""
+        if self._items_write_deferred:
+            labels = self._held_arrival_labels[:]
+            logger.info(
+                f"[ATS] Flushing held arrival grants ({reason})"
+                + (f" — arrivals: {labels}" if labels else "")
+            )
+            self._items_write_deferred = False
+            self._write_items_file()
+        self._held_arrival_labels.clear()
 
     # ── Events file (plugin → client) ─────────────────────────────────────────
 
@@ -1485,6 +1509,16 @@ class ATSContext(CommonContext):
         if _applied_money > 0 or _applied_xp > 0:
             logger.debug(f"[ATS] DLL applied grants: money=${_applied_money:,} xp={_applied_xp:,}")
 
+        # Track delivery state for arrival-reward coalescing.
+        # job_active stays true in the plugin after delivery (until next job config);
+        # cargo_delivered is the authoritative signal that delivery has completed.
+        new_job_active = data.get("job_active", False)
+        if self._job_active and not new_job_active:
+            # Job was cancelled (plugin cleared job_active without a delivery event).
+            logger.info("[ATS] Job no longer active — flushing any held arrival grants")
+            self._flush_held_grants("job cancelled")
+        self._job_active = new_job_active
+
         # When the DLL signals a new city, start a dedicated polling task that
         # retries reading the save file until the game writes it (autosave or delivery).
         # This decouples city checks from deliveries: the check fires at the next save,
@@ -1504,10 +1538,12 @@ class ATSContext(CommonContext):
             logger.debug(f"[ATS] New event: {event_id}")
             self._processed_event_ids.add(event_id)
 
-            # On delivery, schedule a post-delivery save poll.  The game writes
-            # game.sii ~12-18 s after the delivery event; we wait 20 s then force
-            # a fresh save read to catch the destination city and any other updates.
+            # On delivery: clear local job-active state and flush any arrival grants
+            # held during the delivery so they combine with the delivery grant in
+            # one plugin apply.  Then schedule a post-delivery save poll.
             if event.get("type") == "cargo_delivered":
+                self._job_active = False
+                self._flush_held_grants("delivery complete")
                 asyncio.create_task(self._poll_save_after_delivery())
 
             try:
@@ -1756,10 +1792,13 @@ class ATSContext(CommonContext):
                         # Seed known states from baseline cities so they don't re-fire next session
                         self._save_known_states.add(loc_data.region)
                     else:
+                        _reward_tag = "(reward held — delivery active)" if self._job_active else "(reward immediate — no active delivery)"
                         # City check — independent of state check below
                         if loc_data.code not in self.checked_locations:
                             new_checks.append(loc_data.code)
-                            logger.info(f"[ATS] City arrival check: {city_id} → {loc_data.code}")
+                            if self._job_active and city_id not in self._held_arrival_labels:
+                                self._held_arrival_labels.append(city_id)
+                            logger.info(f"[ATS] City arrival check: {city_id} → {loc_data.code} {_reward_tag}")
                         # State check — always runs regardless of city check status
                         state_name = loc_data.region
                         if state_name not in self._save_known_states:
@@ -1768,7 +1807,10 @@ class ATSContext(CommonContext):
                             for sa_data in STATE_ARRIVAL_LOCATIONS.values():
                                 if sa_data.region == state_name and sa_data.code not in self.checked_locations:
                                     new_checks.append(sa_data.code)
-                                    logger.info(f"[ATS] State arrival check: {state_name} → {sa_data.code}")
+                                    _slabel = f"state:{state_name}"
+                                    if self._job_active and _slabel not in self._held_arrival_labels:
+                                        self._held_arrival_labels.append(_slabel)
+                                    logger.info(f"[ATS] State arrival check: {state_name} → {sa_data.code} {_reward_tag}")
                                     break
                     break
 

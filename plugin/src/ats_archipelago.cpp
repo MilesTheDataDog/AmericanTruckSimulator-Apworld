@@ -67,7 +67,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.5.0";
+static const char* PLUGIN_VERSION = "2.6.0";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -810,6 +810,7 @@ static void flush_events_file() {
     j["current_xp"]     = live_xp;
     j["truck_position"] = {g_state.truck_x, g_state.truck_y, g_state.truck_z};
     j["in_game"]        = g_state.in_game;
+    j["job_active"]     = g_state.job_active;
 
     // Memory grant status
     j["ptr_money_ready"]    = (mp != 0);
