@@ -14,8 +14,9 @@ Workflow:
 
 Cross-check source: Koenvh1/ETS2-City-Coordinate-Retriever cities_ats.json
   (telemetry-captured coordinates for the original CA+NV launch cities).
-  Only 24 of our 265 cities appear in that dataset; the rest come solely
-  from def.scs extraction.  Discrepancy threshold: 500 m.
+  27 of our 273 cities appear in that dataset.  Discrepancy threshold: 500 m.
+  Note: city_data SII blocks do not embed pos: coordinates; coordinates must
+  come from community data or map-file extraction.
 """
 
 import json
@@ -25,11 +26,10 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # Koenvh1 telemetry-verified reference data (original CA+NV, 2015 launch)
 # Token mapping notes:
-#   san_francisc → san_francisco  (Koenvh1 truncated the token)
-#   carlsbad     → skipped        (NM city, not CA)
-#   hornbrook    → hilt           (city was renamed/replaced in game)
-#   oakdale      → skipped        (removed from modern game)
-#   san_rafael   → skipped        (removed from modern game)
+#   Koenvh1 uses game-internal tokens, which ATS truncates to 12 chars.
+#   carlsbad     → skipped  (Koenvh1's carlsbad = CA; our NM city is carlsbad_nm)
+#   hornbrook    → hilt     (both tokens now coexist in game; hilt is the hub)
+#   oakdale      → carlsbad, oakdale, san_rafael still active in game as CA cities
 # ---------------------------------------------------------------------------
 KOENVH1: dict[str, tuple[float, float]] = {
     "bakersfield":   (-52261.9,  20598.8),
@@ -40,7 +40,7 @@ KOENVH1: dict[str, tuple[float, float]] = {
     "ely":           (-43077.7,   7074.1),
     "eureka":        (-68616.5,   3021.1),
     "fresno":        (-54802.6,  16248.6),
-    "hilt":          (-63040.5,  -2368.5),  # Koenvh1 "hornbrook" → now "hilt"
+    "hilt":          (-63040.5,  -2368.5),
     "huron":         (-56245.7,  18908.2),
     "jackpot":       (-41684.1,  -1865.5),
     "las_vegas":     (-41596.9,  17626.8),
@@ -53,7 +53,7 @@ KOENVH1: dict[str, tuple[float, float]] = {
     "reno":          (-55425.1,   5836.5),
     "sacramento":    (-59012.1,  10440.7),
     "san_diego":     (-46897.8,  29857.3),
-    "san_francisco": (-60374.2,  13271.0),  # Koenvh1 "san_francisc"
+    "san_francisc":  (-60374.2,  13271.0),
     "santa_cruz":    (-58791.1,  18772.1),
     "stockton":      (-57824.6,  12037.9),
     "tonopah":       (-48104.3,  12496.8),
@@ -80,17 +80,17 @@ LARGE_RADIUS: dict[str, int] = {
     "portland":       2500,
     "denver":         2500,
     "las_vegas":      2500,
-    "salt_lake":      2500,  # city ID is "salt_lake" (not salt_lake_city)
-    "kansas_city_ks": 2500,
+    "salt_lake":      2500,
+    "kansas_ci_ks":   2500,
     "kansas_city_mo": 2500,
-    "oklahoma_city":  2500,
+    "oklahoma_cit":   2500,
     "el_paso":        2500,
     "tulsa":          2500,
     "omaha":          2500,
     "st_louis":       2500,
     "new_orleans":    2500,
     # Tier 3 — medium-large, slightly larger than default
-    "san_francisco":  2000,
+    "san_francisc":   2000,
     "san_jose":       2000,
     "sacramento":     2000,
     "albuquerque":    2000,
@@ -99,8 +99,7 @@ LARGE_RADIUS: dict[str, int] = {
     "reno":           2000,
     "spokane":        2000,
     "boise":          2000,
-    "salt_lake":      2000,
-    "colorado_springs": 2000,
+    "colorado_spr":   2000,
     "amarillo":       2000,
     "lubbock":        2000,
     "wichita":        2000,

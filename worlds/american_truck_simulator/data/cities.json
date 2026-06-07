@@ -1,14 +1,17 @@
 {
   "_notes": [
-    "Cities sourced from trucksimulator.wiki.gg — all entries verified against the wiki city list.",
-    "Cities are ordered: base game first (CA, NV), then free DLC (AZ), then paid DLC in release order.",
-    "Within each state cities are alphabetical; this order defines sequential location/item IDs.",
-    "Texarkana appears in both Texas (texarkana_tx) and Arkansas (texarkana_ar) as separate city IDs.",
-    "Kansas City appears in both Kansas (kansas_city_ks) and Missouri (kansas_city_mo).",
-    "Longview appears in both Texas (longview_tx) and Washington (longview_wa).",
-    "Burlington appears in both Colorado (burlington_co) and Iowa (burlington_ia).",
-    "Salina appears in both Kansas (salina_ks) and Utah (salina_ut).",
-    "Sidney appears in both Montana (sidney_mt) and Nebraska (sidney_ne)."
+    "City IDs match ATS internal game tokens exactly (verified against def.scs/dlc_*.scs extraction).",
+    "ATS truncates many tokens to 12 chars: colorado_spr, corpus_chris, fort_stockto, g_canyon_vlg,",
+    "  grand_juncti, huntsville, junction_cty, kansas_ci_ks, klamath_f, lake_havasu, oklahoma_cit,",
+    "  san_francisc, steamboat_sp, thompson_f, wichita_fall — these are the canonical game IDs.",
+    "Texarkana: TX side = 'texarkana', AR side = 'texarkana_ar'.",
+    "Kansas City: KS side = 'kansas_ci_ks'; MO side = 'kansas_city_mo' (unverified, MO DLC).",
+    "Longview: TX = 'longview_tx', WA = 'longview'.",
+    "Burlington: CO = 'burlington'; IA = 'burlington_ia' (unverified, IA DLC).",
+    "Salina: UT = 'salina', KS = 'salina_ks'.",
+    "Sidney: MT = 'sidney', NE = 'sidney_ne'.",
+    "Carlsbad: CA = 'carlsbad', NM = 'carlsbad_nm'.",
+    "Missouri/Iowa/Louisiana entries not yet verified (DLCs not extracted)."
   ],
   "states": [
     {
@@ -31,6 +34,10 @@
           "name": "Blythe"
         },
         {
+          "id": "carlsbad",
+          "name": "Carlsbad"
+        },
+        {
           "id": "el_centro",
           "name": "El Centro"
         },
@@ -45,6 +52,10 @@
         {
           "id": "hilt",
           "name": "Hilt"
+        },
+        {
+          "id": "hornbrook",
+          "name": "Hornbrook"
         },
         {
           "id": "huron",
@@ -67,12 +78,20 @@
           "name": "Mojave"
         },
         {
+          "id": "oakdale",
+          "name": "Oakdale"
+        },
+        {
           "id": "oakland",
           "name": "Oakland"
         },
         {
           "id": "oxnard",
           "name": "Oxnard"
+        },
+        {
+          "id": "pedro",
+          "name": "San Pedro"
         },
         {
           "id": "redding",
@@ -87,12 +106,16 @@
           "name": "San Diego"
         },
         {
-          "id": "san_francisco",
+          "id": "san_francisc",
           "name": "San Francisco"
         },
         {
           "id": "san_jose",
           "name": "San Jose"
+        },
+        {
+          "id": "san_rafael",
+          "name": "San Rafael"
         },
         {
           "id": "santa_cruz",
@@ -181,12 +204,20 @@
           "name": "Clifton"
         },
         {
+          "id": "ehrenberg",
+          "name": "Ehrenberg"
+        },
+        {
           "id": "flagstaff",
           "name": "Flagstaff"
         },
         {
-          "id": "grand_canyon",
+          "id": "g_canyon_vlg",
           "name": "Grand Canyon Village"
+        },
+        {
+          "id": "holbrook",
+          "name": "Holbrook"
         },
         {
           "id": "kayenta",
@@ -197,7 +228,7 @@
           "name": "Kingman"
         },
         {
-          "id": "lake_havasu_city",
+          "id": "lake_havasu",
           "name": "Lake Havasu City"
         },
         {
@@ -258,7 +289,7 @@
           "name": "Artesia"
         },
         {
-          "id": "carlsbad",
+          "id": "carlsbad_nm",
           "name": "Carlsbad"
         },
         {
@@ -280,6 +311,10 @@
         {
           "id": "las_cruces",
           "name": "Las Cruces"
+        },
+        {
+          "id": "pajarito",
+          "name": "Pajarito"
         },
         {
           "id": "raton",
@@ -331,7 +366,7 @@
           "name": "Eugene"
         },
         {
-          "id": "klamath_falls",
+          "id": "klamath_f",
           "name": "Klamath Falls"
         },
         {
@@ -347,7 +382,7 @@
           "name": "Newport"
         },
         {
-          "id": "ontario_or",
+          "id": "ontario",
           "name": "Ontario"
         },
         {
@@ -376,7 +411,7 @@
       "always_accessible": false,
       "cities": [
         {
-          "id": "aberdeen",
+          "id": "aberdeen_wa",
           "name": "Aberdeen"
         },
         {
@@ -400,7 +435,7 @@
           "name": "Kennewick"
         },
         {
-          "id": "longview_wa",
+          "id": "longview",
           "name": "Longview"
         },
         {
@@ -428,7 +463,7 @@
           "name": "Tacoma"
         },
         {
-          "id": "vancouver_wa",
+          "id": "vancouver",
           "name": "Vancouver"
         },
         {
@@ -473,7 +508,7 @@
           "name": "Provo"
         },
         {
-          "id": "salina_ut",
+          "id": "salina",
           "name": "Salina"
         },
         {
@@ -555,11 +590,11 @@
           "name": "Alamosa"
         },
         {
-          "id": "burlington_co",
+          "id": "burlington",
           "name": "Burlington"
         },
         {
-          "id": "colorado_springs",
+          "id": "colorado_spr",
           "name": "Colorado Springs"
         },
         {
@@ -575,7 +610,7 @@
           "name": "Fort Collins"
         },
         {
-          "id": "grand_junction",
+          "id": "grand_juncti",
           "name": "Grand Junction"
         },
         {
@@ -595,7 +630,7 @@
           "name": "Rangely"
         },
         {
-          "id": "steamboat_springs",
+          "id": "steamboat_sp",
           "name": "Steamboat Springs"
         },
         {
@@ -677,7 +712,7 @@
           "name": "Butte"
         },
         {
-          "id": "glasgow",
+          "id": "glasgow_mt",
           "name": "Glasgow"
         },
         {
@@ -717,11 +752,11 @@
           "name": "Missoula"
         },
         {
-          "id": "sidney_mt",
+          "id": "sidney",
           "name": "Sidney"
         },
         {
-          "id": "thompson_falls",
+          "id": "thompson_f",
           "name": "Thompson Falls"
         }
       ]
@@ -754,7 +789,7 @@
           "name": "Brownsville"
         },
         {
-          "id": "corpus_christi",
+          "id": "corpus_chris",
           "name": "Corpus Christi"
         },
         {
@@ -774,7 +809,7 @@
           "name": "El Paso"
         },
         {
-          "id": "fort_stockton",
+          "id": "fort_stockto",
           "name": "Fort Stockton"
         },
         {
@@ -790,7 +825,7 @@
           "name": "Houston"
         },
         {
-          "id": "huntsville_tx",
+          "id": "huntsville",
           "name": "Huntsville"
         },
         {
@@ -830,7 +865,7 @@
           "name": "San Antonio"
         },
         {
-          "id": "texarkana_tx",
+          "id": "texarkana",
           "name": "Texarkana"
         },
         {
@@ -850,7 +885,7 @@
           "name": "Waco"
         },
         {
-          "id": "wichita_falls",
+          "id": "wichita_fall",
           "name": "Wichita Falls"
         }
       ]
@@ -891,7 +926,7 @@
           "name": "McAlester"
         },
         {
-          "id": "oklahoma_city",
+          "id": "oklahoma_cit",
           "name": "Oklahoma City"
         },
         {
@@ -936,11 +971,11 @@
           "name": "Hutchinson"
         },
         {
-          "id": "junction_city",
+          "id": "junction_cty",
           "name": "Junction City"
         },
         {
-          "id": "kansas_city_ks",
+          "id": "kansas_ci_ks",
           "name": "Kansas City"
         },
         {
@@ -952,7 +987,7 @@
           "name": "Phillipsburg"
         },
         {
-          "id": "pittsburg_ks",
+          "id": "pittsburg",
           "name": "Pittsburg"
         },
         {
@@ -985,7 +1020,7 @@
           "name": "Chadron"
         },
         {
-          "id": "columbus_ne",
+          "id": "columbus",
           "name": "Columbus"
         },
         {
@@ -993,7 +1028,7 @@
           "name": "Grand Island"
         },
         {
-          "id": "lincoln_ne",
+          "id": "lincoln",
           "name": "Lincoln"
         },
         {
@@ -1001,7 +1036,7 @@
           "name": "McCook"
         },
         {
-          "id": "norfolk_ne",
+          "id": "norfolk",
           "name": "Norfolk"
         },
         {
