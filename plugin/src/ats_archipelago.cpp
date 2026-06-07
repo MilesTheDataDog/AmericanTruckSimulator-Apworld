@@ -67,7 +67,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.8.0";
+static const char* PLUGIN_VERSION = "2.9.0";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -538,7 +538,8 @@ static LONG WINAPI ats_veh(EXCEPTION_POINTERS* ep) {
             long long delta = (long long)g_items.total_money_granted - (long long)g_applied_money;
             if (delta > 0) {
                 ctx->Rcx = (DWORD64)((long long)ctx->Rcx + delta);
-                g_applied_money = g_items.total_money_granted;
+                g_applied_money      = g_items.total_money_granted;
+                g_last_written_money = (long long)ctx->Rcx;
                 g_applied_dirty.store(true, std::memory_order_relaxed);
                 log("Grant injected at capture: +$" + std::to_string(delta));
             }
@@ -556,7 +557,8 @@ static LONG WINAPI ats_veh(EXCEPTION_POINTERS* ep) {
             if (delta > 0) {
                 int32_t new_xp = (int32_t)(ctx->Rdi & 0xFFFFFFFF) + delta;
                 ctx->Rdi = (ctx->Rdi & 0xFFFFFFFF00000000ULL) | (uint32_t)new_xp;
-                g_applied_xp = g_items.total_xp_granted;
+                g_applied_xp      = g_items.total_xp_granted;
+                g_last_written_xp = new_xp;
                 g_applied_dirty.store(true, std::memory_order_relaxed);
                 log("Grant injected at capture: +" + std::to_string(delta) + " XP");
             }
@@ -628,7 +630,7 @@ static void apply_memory_grants(bool allow_paused) {
 
     // Money grant
     uintptr_t mp = g_money_ptr.load(std::memory_order_relaxed);
-    if (mp && g_items.total_money_granted > g_applied_money) {
+    if (mp) {
         long long current = safe_read_i64(mp + MONEY_OFFSET);
         // Sanity check: realistic money range 0–10 billion.
         // Values outside this range mean the pointer is stale (object moved after save load).
@@ -638,35 +640,51 @@ static void apply_memory_grants(bool allow_paused) {
             g_money_ptr.store(0, std::memory_order_relaxed);
             needs_rearm = true;
         } else {
-            long long delta  = g_items.total_money_granted - g_applied_money;
-            long long newval = current + delta;
-            // Skip if writing would produce the same value we last wrote — this means our
-            // previous write is still in effect and the game hasn't changed the value.
-            // Without this guard a rapid pause/resume cycle can re-apply the same delta.
-            if (newval == g_last_written_money) {
-                log("Grant skip (money): in-memory value matches last write ($" +
-                    std::to_string(newval) + ") — marking as applied");
-                g_applied_money = g_items.total_money_granted;
-            } else if (safe_write_i64(mp + MONEY_OFFSET, newval)) {
-                g_applied_money      = g_items.total_money_granted;
-                g_last_written_money = newval;
+            // Revert detection: if the game exited before saving our last grant, the
+            // in-memory value will be lower than what we wrote.  Reduce the applied
+            // counter by exactly the lost amount so the upcoming delta re-applies only
+            // what was lost — no over-grant is possible.
+            if (g_last_written_money != LLONG_MIN && current < g_last_written_money) {
+                long long lost = g_last_written_money - current;
+                log("Grant revert detected (money): in-memory $" + std::to_string(current) +
+                    " < last-written $" + std::to_string(g_last_written_money) +
+                    " — re-applying lost $" + std::to_string(lost));
+                g_applied_money      -= lost;
+                g_last_written_money  = LLONG_MIN;
                 g_applied_dirty.store(true, std::memory_order_relaxed);
-                // g_applied_dirty deferred to frame flush (≤2 s) — do NOT call
-                // save_applied_state() here; each per-write file-write can
-                // trigger an ATS directory-change scan and a game save.
-                log("Grant applied (money): +$" + std::to_string(delta) +
-                    " → balance $" + std::to_string(newval));
-            } else {
-                log("Grant failed: money write error — resetting pointer", SCS_LOG_TYPE_warning);
-                g_money_ptr.store(0, std::memory_order_relaxed);
-                needs_rearm = true;
+            }
+
+            if (g_items.total_money_granted > g_applied_money) {
+                long long delta  = g_items.total_money_granted - g_applied_money;
+                long long newval = current + delta;
+                // Skip if writing would produce the same value we last wrote — this means our
+                // previous write is still in effect and the game hasn't changed the value.
+                // Without this guard a rapid pause/resume cycle can re-apply the same delta.
+                if (newval == g_last_written_money) {
+                    log("Grant skip (money): in-memory value matches last write ($" +
+                        std::to_string(newval) + ") — marking as applied");
+                    g_applied_money = g_items.total_money_granted;
+                } else if (safe_write_i64(mp + MONEY_OFFSET, newval)) {
+                    g_applied_money      = g_items.total_money_granted;
+                    g_last_written_money = newval;
+                    g_applied_dirty.store(true, std::memory_order_relaxed);
+                    // g_applied_dirty deferred to frame flush (≤2 s) — do NOT call
+                    // save_applied_state() here; each per-write file-write can
+                    // trigger an ATS directory-change scan and a game save.
+                    log("Grant applied (money): +$" + std::to_string(delta) +
+                        " → balance $" + std::to_string(newval));
+                } else {
+                    log("Grant failed: money write error — resetting pointer", SCS_LOG_TYPE_warning);
+                    g_money_ptr.store(0, std::memory_order_relaxed);
+                    needs_rearm = true;
+                }
             }
         }
     }
 
     // XP grant
     uintptr_t xp = g_xp_ptr.load(std::memory_order_relaxed);
-    if (xp && g_items.total_xp_granted > g_applied_xp) {
+    if (xp) {
         int32_t current = safe_read_i32(xp + XP_OFFSET);
         // Sanity check: XP is 0–200000 (level 1 to max).
         if (current < 0 || current > 200000) {
@@ -675,23 +693,36 @@ static void apply_memory_grants(bool allow_paused) {
             g_xp_ptr.store(0, std::memory_order_relaxed);
             needs_rearm = true;
         } else {
-            int     delta  = g_items.total_xp_granted - g_applied_xp;
-            int32_t newval = current + (int32_t)delta;
-            if (newval == g_last_written_xp) {
-                log("Grant skip (XP): in-memory value matches last write (" +
-                    std::to_string(newval) + " XP) — marking as applied");
-                g_applied_xp = g_items.total_xp_granted;
-            } else if (safe_write_i32(xp + XP_OFFSET, newval)) {
-                g_applied_xp      = g_items.total_xp_granted;
-                g_last_written_xp = newval;
+            // Revert detection: mirror of the money check above.
+            if (g_last_written_xp != INT32_MIN && current < g_last_written_xp) {
+                int32_t lost = g_last_written_xp - current;
+                log("Grant revert detected (XP): in-memory " + std::to_string(current) +
+                    " XP < last-written " + std::to_string(g_last_written_xp) +
+                    " — re-applying lost " + std::to_string(lost) + " XP");
+                g_applied_xp      -= lost;
+                g_last_written_xp  = INT32_MIN;
                 g_applied_dirty.store(true, std::memory_order_relaxed);
-                // Deferred to frame flush — see money comment above.
-                log("Grant applied (XP): +" + std::to_string(delta) +
-                    " XP → total " + std::to_string(newval));
-            } else {
-                log("Grant failed: XP write error — resetting pointer", SCS_LOG_TYPE_warning);
-                g_xp_ptr.store(0, std::memory_order_relaxed);
-                needs_rearm = true;
+            }
+
+            if (g_items.total_xp_granted > g_applied_xp) {
+                int     delta  = g_items.total_xp_granted - g_applied_xp;
+                int32_t newval = current + (int32_t)delta;
+                if (newval == g_last_written_xp) {
+                    log("Grant skip (XP): in-memory value matches last write (" +
+                        std::to_string(newval) + " XP) — marking as applied");
+                    g_applied_xp = g_items.total_xp_granted;
+                } else if (safe_write_i32(xp + XP_OFFSET, newval)) {
+                    g_applied_xp      = g_items.total_xp_granted;
+                    g_last_written_xp = newval;
+                    g_applied_dirty.store(true, std::memory_order_relaxed);
+                    // Deferred to frame flush — see money comment above.
+                    log("Grant applied (XP): +" + std::to_string(delta) +
+                        " XP → total " + std::to_string(newval));
+                } else {
+                    log("Grant failed: XP write error — resetting pointer", SCS_LOG_TYPE_warning);
+                    g_xp_ptr.store(0, std::memory_order_relaxed);
+                    needs_rearm = true;
+                }
             }
         }
     }
@@ -767,9 +798,19 @@ static void load_applied_state() {
         g_applied_money = j.value("applied_money", (long long)0);
         g_applied_xp    = j.value("applied_xp",    0);
         g_current_seed  = j.value("seed",           std::string(""));
+        // Restore last-written values so the revert-detection backstop can fire
+        // on reconnect if the game exited before saving our previous grant.
+        if (j.contains("last_written_money"))
+            g_last_written_money = j["last_written_money"].get<long long>();
+        if (j.contains("last_written_xp"))
+            g_last_written_xp = j["last_written_xp"].get<int32_t>();
         log("Applied state restored: $" + std::to_string(g_applied_money) +
             ", " + std::to_string(g_applied_xp) + " XP" +
-            (g_current_seed.empty() ? "" : " (seed=" + g_current_seed + ")"));
+            (g_current_seed.empty() ? "" : " (seed=" + g_current_seed + ")") +
+            (g_last_written_money != LLONG_MIN
+                ? " last_written_money=$" + std::to_string(g_last_written_money) : "") +
+            (g_last_written_xp != INT32_MIN
+                ? " last_written_xp=" + std::to_string(g_last_written_xp) : ""));
     } catch (...) {}
 }
 
@@ -779,6 +820,10 @@ static void save_applied_state() {
         j["applied_money"] = g_applied_money;
         j["applied_xp"]    = g_applied_xp;
         j["seed"]          = g_current_seed;
+        // Persist last-written values for revert detection after an unsaved exit.
+        // Only written when a real value exists (sentinel means no write yet).
+        if (g_last_written_money != LLONG_MIN) j["last_written_money"] = g_last_written_money;
+        if (g_last_written_xp   != INT32_MIN)  j["last_written_xp"]   = g_last_written_xp;
         fs::path tmp = g_applied_file;
         tmp += ".tmp";
         std::ofstream f(tmp);
