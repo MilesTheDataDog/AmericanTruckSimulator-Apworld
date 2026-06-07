@@ -117,31 +117,47 @@ def _scan_data_section_zlib(path: Path, keyword: str) -> List[str]:
     data section that begins at start_offset (from the HashFS header).  Scan
     that section for every 0x78 zlib magic byte, decompress, and return text
     blocks that contain keyword.  This sidesteps hash-table parsing entirely.
+
+    Performance: uses bytes.find() to jump between 0x78 positions, and after
+    a successful decompress skips the entire compressed stream rather than
+    rescanning it byte-by-byte (critical for large DLC files like Texas).
     """
     with open(path, "rb") as f:
         header = f.read(32)
         if header[:4] != HASHFS_MAGIC:
             raise ValueError("Not a HashFS file")
         start_offset = struct.unpack_from("<I", header, 16)[0]
-        print(f"  Data section at offset {start_offset:,}")
+        file_size = path.stat().st_size
+        print(f"  Data section at offset {start_offset:,} "
+              f"({(file_size - start_offset) / 1024 / 1024:.1f} MB to scan)")
         f.seek(start_offset)
-        blob = f.read()          # entire data section into memory
+        blob = f.read()
 
     kw = keyword.encode("utf-8")
     results: List[str] = []
+    n = len(blob)
     pos = 0
     attempts = 0
-    n = len(blob)
-    while pos < n - 1:
-        if blob[pos] == 0x78 and blob[pos + 1] in _ZLIB_SECOND:
+
+    while pos < n:
+        # Jump to the next 0x78 byte (fast C-level search)
+        idx = blob.find(b'\x78', pos)
+        if idx == -1:
+            break
+        if idx + 1 < n and blob[idx + 1] in _ZLIB_SECOND:
             attempts += 1
             try:
-                dec = zlib.decompress(blob[pos:])
+                d = zlib.decompressobj()
+                dec = d.decompress(blob[idx:])
+                # Skip the entire compressed stream — don't rescan its interior
+                compressed_len = (n - idx) - len(d.unused_data)
                 if kw in dec:
                     results.append(dec.decode("utf-8", errors="replace"))
+                pos = idx + max(1, compressed_len)
             except zlib.error:
-                pass
-        pos += 1
+                pos = idx + 1
+        else:
+            pos = idx + 1
 
     print(f"  Tried {attempts:,} zlib positions → {len(results)} matching '{keyword}'")
     return results
