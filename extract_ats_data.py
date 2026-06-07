@@ -107,8 +107,58 @@ def _read_hashfs_entries(path: Path):
 # Extract text content from all readable entries
 # ---------------------------------------------------------------------------
 
+# zlib magic: byte 0x78 followed by one of these second bytes
+_ZLIB_SECOND = frozenset((0x01, 0x5E, 0x9C, 0xDA))
+
+
+def _scan_data_section_zlib(path: Path, keyword: str) -> List[str]:
+    """
+    Modern ATS def.scs stores SII files as inline zlib streams packed into a
+    data section that begins at start_offset (from the HashFS header).  Scan
+    that section for every 0x78 zlib magic byte, decompress, and return text
+    blocks that contain keyword.  This sidesteps hash-table parsing entirely.
+    """
+    with open(path, "rb") as f:
+        header = f.read(32)
+        if header[:4] != HASHFS_MAGIC:
+            raise ValueError("Not a HashFS file")
+        start_offset = struct.unpack_from("<I", header, 16)[0]
+        print(f"  Data section at offset {start_offset:,}")
+        f.seek(start_offset)
+        blob = f.read()          # entire data section into memory
+
+    kw = keyword.encode("utf-8")
+    results: List[str] = []
+    pos = 0
+    attempts = 0
+    n = len(blob)
+    while pos < n - 1:
+        if blob[pos] == 0x78 and blob[pos + 1] in _ZLIB_SECOND:
+            attempts += 1
+            try:
+                dec = zlib.decompress(blob[pos:])
+                if kw in dec:
+                    results.append(dec.decode("utf-8", errors="replace"))
+            except zlib.error:
+                pass
+        pos += 1
+
+    print(f"  Tried {attempts:,} zlib positions → {len(results)} matching '{keyword}'")
+    return results
+
+
 def _read_all_text(path: Path, keyword: str) -> List[str]:
-    """Read every non-encrypted entry; return text of those containing keyword."""
+    """Return text of every SCS entry whose decompressed content contains keyword."""
+    # Primary: zlib stream scan of the data section (works for modern ATS def.scs)
+    try:
+        results = _scan_data_section_zlib(path, keyword)
+        if results:
+            return results
+        print(f"  Zlib scan found 0 — trying legacy HashFS entry parse")
+    except Exception as e:
+        print(f"  [WARN] Zlib scan failed: {e} — trying legacy HashFS entry parse")
+
+    # Legacy: hash-table entry parsing (older SCS file versions)
     try:
         entries = _read_hashfs_entries(path)
     except Exception as e:
@@ -136,7 +186,7 @@ def _read_all_text(path: Path, keyword: str) -> List[str]:
                     data = zlib.decompress(data)
                 except zlib.error:
                     try:
-                        data = zlib.decompress(data, -15)  # raw deflate
+                        data = zlib.decompress(data, -15)
                     except zlib.error:
                         continue
             try:
