@@ -195,7 +195,7 @@ class ATSWorld(World):
         """
         o = self.options
         return {
-            "game_version": "1.1.0",
+            "game_version": "1.2.0",
             "win_condition": int(o.win_condition.value),
             "goal_level": int(o.goal_level.value),
             "goal_money": int(o.goal_money.value),  # in thousands
