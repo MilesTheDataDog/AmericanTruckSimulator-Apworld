@@ -78,6 +78,124 @@ SLOT_DATA_OVERRIDE_FILE = COMM_DIR / "slot_data_override.json"
 # Persisted user settings written by /setoptions. Read as fallback when server
 # slot_data is empty and YAML search also fails.
 CLIENT_OPTIONS_FILE = COMM_DIR / "ats_client_options.json"
+# Persistent city-coordinate table built from captured telemetry positions.
+# Survives across sessions; seeded at startup with 29 Koenvh1-verified entries.
+COORD_STORE_FILE = COMM_DIR / "coord_store.json"
+
+# ── City coordinate store ──────────────────────────────────────────────────────
+
+DEFAULT_CITY_RADIUS = 1500  # metres; default proximity trigger radius
+
+# Per-city radius overrides for sprawling cities (metres).
+# Tokens use the canonical ATS internal IDs (may be truncated to 12 chars).
+CITY_RADIUS_OVERRIDES: Dict[str, int] = {
+    # Tier 1 — multiple distinct mapped hubs / very wide footprint
+    "los_angeles":  4000,
+    "dallas":       3500,
+    "houston":      3500,
+    "phoenix":      3500,
+    # Tier 2 — single hub but large or sprawling
+    "san_antonio":  3000,
+    "austin":       2500,
+    "fort_worth":   2500,
+    "san_diego":    2500,
+    "seattle":      2500,
+    "portland":     2500,
+    "denver":       2500,
+    "las_vegas":    2500,
+    "salt_lake":    2500,
+    "kansas_ci_ks": 2500,
+    "kansas_city_mo": 2500,
+    "oklahoma_cit": 2500,
+    "el_paso":      2500,
+    "tulsa":        2500,
+    "omaha":        2500,
+    "st_louis":     2500,
+    "new_orleans":  2500,
+    # Tier 3 — medium-large
+    "san_francisc": 2000,
+    "san_jose":     2000,
+    "sacramento":   2000,
+    "albuquerque":  2000,
+    "tucson":       2000,
+    "fresno":       2000,
+    "reno":         2000,
+    "spokane":      2000,
+    "boise":        2000,
+    "colorado_spr": 2000,
+    "amarillo":     2000,
+    "lubbock":      2000,
+    "wichita":      2000,
+    "des_moines":   2000,
+    "little_rock":  2000,
+    "baton_rouge":  2000,
+    "shreveport":   2000,
+}
+
+# Koenvh1 telemetry-verified seed data — 29 original CA+NV cities (2015 launch).
+# Tokens are the canonical ATS-internal IDs confirmed by def.scs extraction.
+# (x, z) = world-space coordinates in metres.
+_KOENVH1_SEED: Dict[str, tuple] = {
+    "bakersfield":  (-52261.9,  20598.8),
+    "barstow":      (-47300.4,  21963.2),
+    "carson_city":  (-51957.3,   8904.9),
+    "el_centro":    (-41183.4,  29223.9),
+    "elko":         (-45027.1,   2043.1),
+    "ely":          (-43077.7,   7074.1),
+    "eureka":       (-68616.5,   3021.1),
+    "fresno":       (-54802.6,  16248.6),
+    "hilt":         (-63040.5,  -2368.5),
+    "huron":        (-56245.7,  18908.2),
+    "jackpot":      (-41684.1,  -1865.5),
+    "las_vegas":    (-41596.9,  17626.8),
+    "los_angeles":  (-52693.3,  24704.3),
+    "oakland":      (-58786.3,  14301.8),
+    "oxnard":       (-56628.7,  21492.7),
+    "pioche":       (-40938.4,  10214.7),
+    "primm":        (-43011.8,  20256.2),
+    "redding":      (-61340.0,   2201.1),
+    "reno":         (-55425.1,   5836.5),
+    "sacramento":   (-59012.1,  10440.7),
+    "san_diego":    (-46897.8,  29857.3),
+    "san_francisc": (-60374.2,  13271.0),
+    "santa_cruz":   (-58791.1,  18772.1),
+    "stockton":     (-57824.6,  12037.9),
+    "tonopah":      (-48104.3,  12496.8),
+    "truckee":      (-56640.5,   8566.7),
+    "winnemucca":   (-50540.7,   1847.2),
+}
+
+
+def _load_coord_store() -> Dict[str, Any]:
+    """Load the persistent coordinate store from disk, or return empty dict."""
+    try:
+        if COORD_STORE_FILE.is_file():
+            data = json.loads(COORD_STORE_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+    except Exception as e:
+        logger.debug(f"[ATS] Could not load coord store: {e}")
+    return {}
+
+
+def _seed_coord_store(store: Dict[str, Any]) -> int:
+    """Add Koenvh1 entries not already present. Returns count added."""
+    added = 0
+    for city_id, (x, z) in _KOENVH1_SEED.items():
+        if city_id not in store:
+            store[city_id] = {
+                "x": x,
+                "z": z,
+                "radius": CITY_RADIUS_OVERRIDES.get(city_id, DEFAULT_CITY_RADIUS),
+            }
+            added += 1
+    if added:
+        try:
+            _write_json(COORD_STORE_FILE, store)
+        except Exception:
+            pass
+    return added
+
 
 # ── Save file parsing ─────────────────────────────────────────────────────────
 
@@ -1070,6 +1188,10 @@ class ATSCommandProcessor(ClientCommandProcessor):
         logger.info(f"[ATS] Total XP granted:    {ctx._total_xp_granted:,}")
         logger.info(f"[ATS] Checks sent:         {len(ctx.checked_locations)}")
         logger.info(f"[ATS] Goal satisfied:      {ctx.goal_complete}")
+        logger.info(f"[ATS] Coord store:         {len(ctx._coord_store)} cities with coordinates")
+        pos = ctx._truck_pos
+        if pos:
+            logger.info(f"[ATS] Truck position:      ({pos[0]:.0f}, {pos[1]:.0f}, {pos[2]:.0f})")
         logger.info(f"[ATS] Raw slot_data keys:  {list(ctx.slot_data.keys())}")
         src = ctx._options_source or ("server" if ctx.slot_data.get("game_version") else "none — run /setoptions")
         yaml_hint = ctx._yaml_hint
@@ -1269,6 +1391,19 @@ class ATSContext(CommonContext):
         self._yaml_hint: Optional[Path] = None
         # Set to "YAML", "saved config (/setoptions)", etc. when options loaded from fallback
         self._options_source: Optional[str] = None
+
+        # ── Coordinate store (Option C proximity detection) ─────────────────
+        # Persistent map of city_id → {x, z, radius} built from live telemetry.
+        # Seeded at startup with Koenvh1 data; grows as the player visits cities.
+        self._coord_store: Dict[str, Any] = _load_coord_store()
+        added = _seed_coord_store(self._coord_store)
+        if added:
+            logger.info(f"[ATS] Coord store: {len(self._coord_store)} cities "
+                        f"({added} seeded from Koenvh1 verified data)")
+        else:
+            logger.info(f"[ATS] Coord store loaded: {len(self._coord_store)} cities with known coordinates")
+        # Last truck position reported by the DLL via events.json [x, y, z].
+        self._truck_pos: Optional[List[float]] = None
 
     # ── Archipelago callbacks ──────────────────────────────────────────────────
 
@@ -1486,6 +1621,13 @@ class ATSContext(CommonContext):
             self.current_xp = _evt_xp
             self.current_level = _xp_to_level(_evt_xp)
 
+        # Update truck position from DLL telemetry; run proximity checks each poll.
+        _pos = data.get("truck_position")
+        if isinstance(_pos, list) and len(_pos) >= 3:
+            self._truck_pos = _pos
+        if self._truck_pos and self.auth:
+            self._run_proximity_checks()
+
         # Log once per level-up so the player can see their progress toward the goal
         if self.current_level != self._last_logged_level and self.auth and self.slot_data:
             self._last_logged_level = self.current_level
@@ -1543,9 +1685,12 @@ class ATSContext(CommonContext):
 
             # Live city-arrival hint from the DLL (source city at job start, or
             # destination city at delivery).  Process immediately — no save poll needed.
+            # Also capture the truck's current coordinate to seed the proximity store.
             if event.get("type") == "city_arrival_hint":
                 hint_city = event.get("game_id", "")
                 if hint_city and self.auth:
+                    if self._truck_pos and hint_city not in self._coord_store:
+                        self._capture_coord(hint_city, self._truck_pos)
                     self._process_city_arrival_hint(hint_city, "DLL hint")
                 continue
 
@@ -1686,6 +1831,52 @@ class ATSContext(CommonContext):
             }]))
         else:
             logger.debug(f"[ATS] City arrival hint ({source_label}): {city_id} — no unchecked locations to send")
+
+    def _capture_coord(self, city_id: str, pos: List[float]) -> None:
+        """Record city_id → (x, z) into the persistent coordinate store.
+
+        Called when the DLL fires a city_arrival_hint and we have a current
+        truck position.  The position at that moment is at or near the city,
+        making it a reliable seed coordinate.  No-ops if the coord is already
+        in the store so established entries are never overwritten.
+        """
+        if city_id in self._coord_store:
+            return
+        x = round(pos[0], 1)
+        z = round(pos[2], 1)
+        r = CITY_RADIUS_OVERRIDES.get(city_id, DEFAULT_CITY_RADIUS)
+        self._coord_store[city_id] = {"x": x, "z": z, "radius": r}
+        logger.info(f"[ATS] Coordinate captured: {city_id} = ({x}, {z})")
+        try:
+            _write_json(COORD_STORE_FILE, self._coord_store)
+        except Exception as e:
+            logger.warning(f"[ATS] Could not persist coord store: {e}")
+
+    def _run_proximity_checks(self) -> None:
+        """Check truck position against the coordinate store for unvisited cities.
+
+        Called on every events.json read (~2 s interval when the DLL is running).
+        Cities without a stored coordinate are skipped — they will be caught by
+        the job-hint or city-count-backstop paths, and their coordinate will be
+        captured at that time so proximity works on future visits.
+        """
+        if not self._truck_pos:
+            return
+        tx = self._truck_pos[0]
+        tz = self._truck_pos[2]
+        for city_id, entry in self._coord_store.items():
+            if city_id in self._save_known_cities:
+                continue  # already marked visited — skip
+            cx = entry.get("x", 0.0)
+            cz = entry.get("z", 0.0)
+            r  = entry.get("radius", DEFAULT_CITY_RADIUS)
+            dist = ((tx - cx) ** 2 + (tz - cz) ** 2) ** 0.5
+            if dist <= r:
+                logger.info(
+                    f"[ATS] Proximity trigger: entering {city_id} "
+                    f"(dist={dist:.0f}m, limit={r}m)"
+                )
+                self._process_city_arrival_hint(city_id, f"proximity ({dist:.0f}m)")
 
     async def _poll_save_after_delivery(self) -> None:
         """
