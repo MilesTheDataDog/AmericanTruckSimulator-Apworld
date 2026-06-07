@@ -288,7 +288,10 @@ def _load_locale(locale_scs: Path) -> Dict[str, str]:
         return locale_map
     print(f"  Scanning locale.scs ...")
     try:
-        texts = _read_all_text(locale_scs, "cargo")
+        # locale.scs uses the same inline-zlib format; scan for "cn_" keys
+        texts = _scan_data_section_zlib(locale_scs, "cn_")
+        if not texts:
+            texts = _read_all_text(locale_scs, "cn_")
     except Exception as e:
         print(f"  [WARN] locale.scs failed: {e}")
         return locale_map
@@ -318,6 +321,36 @@ def find_ats_install() -> Optional[Path]:
 
 
 # ---------------------------------------------------------------------------
+# State .scs files — each state's city data lives in its own archive
+# ---------------------------------------------------------------------------
+
+# Cargo and base-game cities (CA) live in def.scs.
+# Each state DLC bundles its own city_data SII files.
+# Newer DLCs (MO/IA/LA) are included but silently skipped if absent.
+STATE_SCS_FILES = [
+    "def.scs",          # California (base game)
+    "dlc_nevada.scs",   # Nevada
+    "dlc_arizona.scs",  # Arizona
+    "dlc_nm.scs",       # New Mexico
+    "dlc_or.scs",       # Oregon
+    "dlc_wa.scs",       # Washington
+    "dlc_ut.scs",       # Utah
+    "dlc_id.scs",       # Idaho
+    "dlc_co.scs",       # Colorado
+    "dlc_wy.scs",       # Wyoming
+    "dlc_mt.scs",       # Montana
+    "dlc_tx.scs",       # Texas
+    "dlc_ok.scs",       # Oklahoma
+    "dlc_ks.scs",       # Kansas
+    "dlc_ne.scs",       # Nebraska
+    "dlc_ar.scs",       # Arkansas
+    "dlc_mo.scs",       # Missouri  (may not exist yet)
+    "dlc_ia.scs",       # Iowa      (may not exist yet)
+    "dlc_la.scs",       # Louisiana (may not exist yet)
+]
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -338,18 +371,19 @@ def main():
         print(f"ERROR: {def_scs} not found")
         sys.exit(1)
 
-    # ── Cargo ──────────────────────────────────────────────────────────────
+    # ── Locale ─────────────────────────────────────────────────────────────
     locale_map: Dict[str, str] = {}
     if locale_scs.exists():
         print(f"\nLoading locale ...")
         locale_map = _load_locale(locale_scs)
 
+    # ── Cargo (only in def.scs) ─────────────────────────────────────────────
     print(f"\n=== Extracting cargo IDs ===")
     print(f"Scanning {def_scs.name} ...")
     cargo_texts = _read_all_text(def_scs, "cargo_data")
 
     cargo_list = []
-    seen = set()
+    seen: set = set()
     for text in cargo_texts:
         token = _cargo_token(text)
         if not token or token in seen:
@@ -376,32 +410,44 @@ def main():
     for c in cargo_list[:30]:
         print(f"  {c['internal_id']:35s}  {c['display_name']}")
 
-    # ── Cities ─────────────────────────────────────────────────────────────
+    # ── Cities (def.scs + every state DLC) ─────────────────────────────────
     print(f"\n=== Extracting city IDs ===")
-    print(f"Scanning {def_scs.name} ...")
-    city_texts = _read_all_text(def_scs, "city_data")
-
     city_list = []
     seen = set()
-    no_pos = []
-    for text in city_texts:
-        token = _city_token(text)
-        if token and token not in seen:
-            seen.add(token)
-            pos_x, pos_z = _city_pos(text)
-            entry: Dict[str, object] = {"internal_id": token}
-            if pos_x is not None:
-                entry["pos_x"] = round(pos_x, 1)
-                entry["pos_z"] = round(pos_z, 1)
-            else:
-                no_pos.append(token)
-            city_list.append(entry)
+    no_pos: List[str] = []
+
+    for scs_name in STATE_SCS_FILES:
+        scs_path = ats_dir / scs_name
+        if not scs_path.exists():
+            continue
+        print(f"Scanning {scs_name} ...")
+        try:
+            city_texts = _read_all_text(scs_path, "city_data")
+        except Exception as e:
+            print(f"  [WARN] {scs_name}: {e}")
+            continue
+        file_new = 0
+        for text in city_texts:
+            token = _city_token(text)
+            if token and token not in seen:
+                seen.add(token)
+                pos_x, pos_z = _city_pos(text)
+                entry: Dict[str, object] = {"internal_id": token}
+                if pos_x is not None:
+                    entry["pos_x"] = round(pos_x, 1)
+                    entry["pos_z"] = round(pos_z, 1)
+                else:
+                    no_pos.append(token)
+                city_list.append(entry)
+                file_new += 1
+        print(f"  → {file_new} new cities (running total: {len(city_list)})")
+
     city_list.sort(key=lambda x: x["internal_id"])
 
     has_coords = sum(1 for c in city_list if "pos_x" in c)
-    print(f"Found {len(city_list)} cities ({has_coords} with pos coordinates).")
+    print(f"\nTotal: {len(city_list)} cities ({has_coords} with pos coordinates).")
     if no_pos:
-        print(f"  Cities missing pos: {', '.join(sorted(no_pos))}")
+        print(f"  Cities missing pos ({len(no_pos)}): {', '.join(sorted(no_pos))}")
     out = Path("ats_city_ids.json")
     with open(out, "w", encoding="utf-8") as f:
         json.dump(city_list, f, indent=2, ensure_ascii=False)
