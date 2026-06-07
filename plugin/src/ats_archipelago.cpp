@@ -67,7 +67,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.6.0";
+static const char* PLUGIN_VERSION = "2.7.0";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -92,6 +92,8 @@ struct GameState {
     float     truck_x = 0, truck_y = 0, truck_z = 0;
     std::string current_cargo_id;
     std::string current_cargo_name;
+    std::string current_source_city_id;   // set from job config; used for live arrival hint
+    std::string current_dest_city_id;     // set from job config; used for live arrival hint
     bool      job_active = false;
     bool      in_game    = false;
     bool      city_count_changed = false;
@@ -867,14 +869,21 @@ SCSAPI_VOID telemetry_gameplay_event(const scs_event_t event,
     const std::string event_name(gev->id);
 
     if (event_name == SCS_TELEMETRY_GAMEPLAY_EVENT_job_delivered) {
-        std::string delivery_id;
+        std::string delivery_id, dest_city;
         {
             std::lock_guard<std::mutex> lock(g_state_mutex);
             if (!g_state.current_cargo_id.empty()) {
                 json extra;
                 extra["cargo_name"] = g_state.current_cargo_name;
                 delivery_id = g_state.current_cargo_id;
+                dest_city   = g_state.current_dest_city_id;
                 queue_event("cargo_delivered", delivery_id, delivery_id, extra);
+                // Emit a live city-arrival hint for the destination city the moment the
+                // delivery completes — fires before the game's ks_visit_cities stat update.
+                if (!dest_city.empty()) {
+                    queue_event("city_arrival_hint", dest_city, dest_city);
+                    log("Live city arrival hint: " + dest_city + " (destination at delivery)");
+                }
             }
         }
         flush_events_file();
@@ -893,7 +902,9 @@ SCSAPI_VOID telemetry_gameplay_event(const scs_event_t event,
         // allow_paused=true because the delivery screen pauses the simulation.
         if (!delivery_id.empty() && delivery_id != g_applied_delivery_id) {
             g_applied_delivery_id = delivery_id;
-            log("Delivery complete: cargo=" + delivery_id + " — applying pending grant once");
+            log("Delivery complete: cargo=" + delivery_id
+                + (dest_city.empty() ? "" : " dest_city=" + dest_city)
+                + " — applying pending grant once");
             apply_memory_grants(/*allow_paused=*/true);
         } else if (!delivery_id.empty()) {
             log("Duplicate delivery event for cargo=" + delivery_id + " — skipped",
@@ -926,26 +937,54 @@ SCSAPI_VOID telemetry_configuration(const scs_event_t event,
     if (!cfg->id) return;
     if (std::string(cfg->id) != SCS_TELEMETRY_CONFIG_job) return;
 
-    std::lock_guard<std::mutex> lock(g_state_mutex);
-    g_state.current_cargo_id.clear();
-    g_state.current_cargo_name.clear();
-    g_state.job_active = false;
+    std::string new_cargo_id, new_source_city;
+    bool job_just_started = false;
+    {
+        std::lock_guard<std::mutex> lock(g_state_mutex);
+        g_state.current_cargo_id.clear();
+        g_state.current_cargo_name.clear();
+        g_state.current_source_city_id.clear();
+        g_state.current_dest_city_id.clear();
+        g_state.job_active = false;
 
-    for (const scs_named_value_t* attr = cfg->attributes; attr->name != nullptr; ++attr) {
-        const std::string attr_name(attr->name);
-        if (attr_name == SCS_TELEMETRY_CONFIG_ATTRIBUTE_cargo_id) {
-            if (attr->value.type == SCS_VALUE_TYPE_string && attr->value.value_string.value) {
-                g_state.current_cargo_id = attr->value.value_string.value;
-                g_state.job_active       = true;
+        for (const scs_named_value_t* attr = cfg->attributes; attr->name != nullptr; ++attr) {
+            const std::string attr_name(attr->name);
+            if (attr_name == SCS_TELEMETRY_CONFIG_ATTRIBUTE_cargo_id) {
+                if (attr->value.type == SCS_VALUE_TYPE_string && attr->value.value_string.value) {
+                    g_state.current_cargo_id = attr->value.value_string.value;
+                    g_state.job_active       = true;
+                }
+            } else if (attr_name == SCS_TELEMETRY_CONFIG_ATTRIBUTE_cargo) {
+                if (attr->value.type == SCS_VALUE_TYPE_string && attr->value.value_string.value)
+                    g_state.current_cargo_name = attr->value.value_string.value;
+            } else if (attr_name == SCS_TELEMETRY_CONFIG_ATTRIBUTE_source_city_id) {
+                if (attr->value.type == SCS_VALUE_TYPE_string && attr->value.value_string.value)
+                    g_state.current_source_city_id = attr->value.value_string.value;
+            } else if (attr_name == SCS_TELEMETRY_CONFIG_ATTRIBUTE_destination_city_id) {
+                if (attr->value.type == SCS_VALUE_TYPE_string && attr->value.value_string.value)
+                    g_state.current_dest_city_id = attr->value.value_string.value;
             }
-        } else if (attr_name == SCS_TELEMETRY_CONFIG_ATTRIBUTE_cargo) {
-            if (attr->value.type == SCS_VALUE_TYPE_string && attr->value.value_string.value)
-                g_state.current_cargo_name = attr->value.value_string.value;
+        }
+
+        if (g_state.job_active) {
+            job_just_started = true;
+            new_cargo_id    = g_state.current_cargo_id;
+            new_source_city = g_state.current_source_city_id;
         }
     }
 
-    if (g_state.job_active)
-        log("Job started: cargo=" + g_state.current_cargo_id);
+    if (job_just_started) {
+        log("Job started: cargo=" + new_cargo_id
+            + (new_source_city.empty() ? "" : " source_city=" + new_source_city));
+        // Emit a live city-arrival hint for the source city the moment the job starts.
+        // The player is already there; this fires immediately rather than waiting for
+        // the game's ks_visit_cities stat update (which can be minutes later).
+        if (!new_source_city.empty()) {
+            queue_event("city_arrival_hint", new_source_city, new_source_city);
+            log("Live city arrival hint: " + new_source_city + " (source city at job start)");
+            flush_events_file();
+        }
+    }
 }
 
 SCSAPI_VOID telemetry_paused(const scs_event_t event, const void* const event_info,

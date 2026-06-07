@@ -1523,8 +1523,11 @@ class ATSContext(CommonContext):
         # retries reading the save file until the game writes it (autosave or delivery).
         # This decouples city checks from deliveries: the check fires at the next save,
         # not at the next delivery.
+        # Backstop: the game's ks_visit_cities stat updated (may be minutes after entry).
+        # The live city_arrival_hint events are the primary trigger; this catches
+        # bobtail exploration where no job is active to provide a hint.
         if data.get("city_count_changed", False):
-            logger.info("[ATS] DLL signals new city visited — scheduling save poll for city arrival")
+            logger.info("[ATS] City count incremented (backstop) — scheduling save poll")
             if not self._city_arrival_poll_active:
                 self._city_arrival_poll_active = True
                 asyncio.create_task(self._poll_save_for_city_arrival())
@@ -1537,6 +1540,14 @@ class ATSContext(CommonContext):
                 continue  # silently skip already-processed events
             logger.debug(f"[ATS] New event: {event_id}")
             self._processed_event_ids.add(event_id)
+
+            # Live city-arrival hint from the DLL (source city at job start, or
+            # destination city at delivery).  Process immediately — no save poll needed.
+            if event.get("type") == "city_arrival_hint":
+                hint_city = event.get("game_id", "")
+                if hint_city and self.auth:
+                    self._process_city_arrival_hint(hint_city, "DLL hint")
+                continue
 
             # On delivery: clear local job-active state and flush any arrival grants
             # held during the delivery so they combine with the delivery grant in
@@ -1628,6 +1639,53 @@ class ATSContext(CommonContext):
         elif win_cond == WIN_LEVEL_OR_MONEY:
             return level_ok or money_ok
         return False
+
+    def _process_city_arrival_hint(self, city_id: str, source_label: str) -> None:
+        """Immediately process a live city-arrival hint from the DLL.
+
+        Fires the city/state location check at the instant the DLL signals the
+        arrival (job start or delivery) rather than waiting for the save file.
+        Idempotent: skipped if the city is already in _save_known_cities.
+        """
+        from worlds.american_truck_simulator.locations import (
+            CITY_ARRIVAL_LOCATIONS, STATE_ARRIVAL_LOCATIONS,
+        )
+        if city_id in self._save_known_cities:
+            logger.debug(f"[ATS] City arrival hint ({source_label}): {city_id} already known — skip")
+            return
+        logger.info(f"[ATS] Live city arrival: {city_id} ({source_label}) — new, signalling immediately")
+        self._save_known_cities.add(city_id)
+        new_checks: List[int] = []
+        for loc_data in CITY_ARRIVAL_LOCATIONS.values():
+            if loc_data.game_id == city_id:
+                _reward_tag = ("(reward held — delivery active)"
+                               if self._job_active else "(reward immediate — no active delivery)")
+                if loc_data.code not in self.checked_locations:
+                    new_checks.append(loc_data.code)
+                    if self._job_active and city_id not in self._held_arrival_labels:
+                        self._held_arrival_labels.append(city_id)
+                    logger.info(f"[ATS] City arrival check: {city_id} → {loc_data.code} {_reward_tag}")
+                state_name = loc_data.region
+                if state_name not in self._save_known_states:
+                    logger.info(f"[ATS] New state detected: {state_name}")
+                    self._save_known_states.add(state_name)
+                    for sa_data in STATE_ARRIVAL_LOCATIONS.values():
+                        if sa_data.region == state_name and sa_data.code not in self.checked_locations:
+                            new_checks.append(sa_data.code)
+                            _slabel = f"state:{state_name}"
+                            if self._job_active and _slabel not in self._held_arrival_labels:
+                                self._held_arrival_labels.append(_slabel)
+                            logger.info(f"[ATS] State arrival check: {state_name} → {sa_data.code} {_reward_tag}")
+                            break
+                break
+        if new_checks:
+            logger.info(f"[ATS] Sending {len(new_checks)} live arrival check(s) for {city_id}")
+            asyncio.create_task(self.send_msgs([{
+                "cmd": "LocationChecks",
+                "locations": new_checks,
+            }]))
+        else:
+            logger.debug(f"[ATS] City arrival hint ({source_label}): {city_id} — no unchecked locations to send")
 
     async def _poll_save_after_delivery(self) -> None:
         """
