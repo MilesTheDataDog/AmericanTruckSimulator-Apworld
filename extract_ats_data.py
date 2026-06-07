@@ -54,7 +54,7 @@ def _read_hashfs_entries(path: Path):
 
         # version(2) salt(2) hash_method(4) entry_count(4) start_offset(4)
         _ver, _salt, _hm, entry_count, _start = struct.unpack_from("<HHIII", header, 4)
-        print(f"  HashFS v2: {entry_count:,} hash table slots")
+        print(f"  HashFS v2: {entry_count:,} hash table slots, table at offset {_start}")
 
         # Read entire entry table — try 28-byte and 32-byte entry sizes
         # 28-byte: hash(8) offset(4) flags(4) crc(4) comp_size(4) size(4)
@@ -67,7 +67,7 @@ def _read_hashfs_entries(path: Path):
             (32, "<Q Q I I I I"),   # hash, offset(8), flags, crc, size, comp_size
         ]:
             table_bytes = entry_count * entry_size
-            f.seek(20)
+            f.seek(_start)
             table_data = f.read(table_bytes)
             candidate = []
             valid = 0
