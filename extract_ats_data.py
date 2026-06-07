@@ -217,6 +217,16 @@ def _city_token(text: str) -> Optional[str]:
     m = re.search(r'\bcity_data\s*:\s*(?:")?city\.(\w+)', text)
     return m.group(1) if m else None
 
+def _city_pos(text: str):
+    """Return (pos_x, pos_z) floats from a city_data block, or (None, None) if absent."""
+    m = re.search(
+        r'\bpos\s*:\s*\(\s*([-\d.eE+]+)\s*,\s*[-\d.eE+]+\s*,\s*([-\d.eE+]+)\s*\)',
+        text,
+    )
+    if m:
+        return float(m.group(1)), float(m.group(2))
+    return None, None
+
 
 # ---------------------------------------------------------------------------
 # Locale loading
@@ -323,21 +333,33 @@ def main():
 
     city_list = []
     seen = set()
+    no_pos = []
     for text in city_texts:
         token = _city_token(text)
         if token and token not in seen:
             seen.add(token)
-            city_list.append({"internal_id": token})
+            pos_x, pos_z = _city_pos(text)
+            entry: Dict[str, object] = {"internal_id": token}
+            if pos_x is not None:
+                entry["pos_x"] = round(pos_x, 1)
+                entry["pos_z"] = round(pos_z, 1)
+            else:
+                no_pos.append(token)
+            city_list.append(entry)
     city_list.sort(key=lambda x: x["internal_id"])
 
-    print(f"Found {len(city_list)} cities.")
+    has_coords = sum(1 for c in city_list if "pos_x" in c)
+    print(f"Found {len(city_list)} cities ({has_coords} with pos coordinates).")
+    if no_pos:
+        print(f"  Cities missing pos: {', '.join(sorted(no_pos))}")
     out = Path("ats_city_ids.json")
     with open(out, "w", encoding="utf-8") as f:
         json.dump(city_list, f, indent=2, ensure_ascii=False)
     print(f"Wrote {out.resolve()}")
     print("\nFirst 30:")
     for c in city_list[:30]:
-        print(f"  {c['internal_id']}")
+        coord = f"  pos=({c['pos_x']}, {c['pos_z']})" if "pos_x" in c else "  [no pos]"
+        print(f"  {c['internal_id']:35s}{coord}")
 
     print("\nDone! Share ats_cargo_ids.json and ats_city_ids.json.")
 
