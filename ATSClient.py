@@ -57,7 +57,7 @@ except Exception as _e:
 colorama.init()
 
 GAME_NAME = "American Truck Simulator"
-CLIENT_VERSION = "1.0.0"
+CLIENT_VERSION = "1.1.0"
 
 # ── Communication folder ───────────────────────────────────────────────────────
 def _get_comm_dir() -> Path:
@@ -196,6 +196,25 @@ def _seed_coord_store(store: Dict[str, Any]) -> int:
         except Exception:
             pass
     return added
+
+
+def _refresh_coord_radii(store: Dict[str, Any]) -> int:
+    """Refresh every stored coord entry's radius from the current override table.
+
+    Called at startup so that changes to DEFAULT_CITY_RADIUS or
+    CITY_RADIUS_OVERRIDES take effect immediately even for cities that were
+    already persisted in coord_store.json from a previous session.
+    Returns the count of entries whose radius changed.
+    """
+    updated = 0
+    for city_id, entry in store.items():
+        if not isinstance(entry, dict):
+            continue
+        new_r = CITY_RADIUS_OVERRIDES.get(city_id, DEFAULT_CITY_RADIUS)
+        if entry.get("radius") != new_r:
+            entry["radius"] = new_r
+            updated += 1
+    return updated
 
 
 # ── Save file parsing ─────────────────────────────────────────────────────────
@@ -1398,16 +1417,27 @@ class ATSContext(CommonContext):
         # Seeded at startup with Koenvh1 data; grows as the player visits cities.
         self._coord_store: Dict[str, Any] = _load_coord_store()
         added = _seed_coord_store(self._coord_store)
+        updated_r = _refresh_coord_radii(self._coord_store)
         if added:
             logger.info(f"[ATS] Coord store: {len(self._coord_store)} cities "
                         f"({added} seeded from Koenvh1 verified data)")
         else:
             logger.info(f"[ATS] Coord store loaded: {len(self._coord_store)} cities with known coordinates")
+        if updated_r:
+            logger.info(f"[ATS] Coord store: {updated_r} radius value(s) refreshed to current config")
+            try:
+                _write_json(COORD_STORE_FILE, self._coord_store)
+            except Exception:
+                pass
         # Last truck position reported by the DLL via events.json [x, y, z].
         self._truck_pos: Optional[List[float]] = None
         # True only when the game world is active (telemetry_started, not in menu).
         # Gates proximity checks so they don't fire during career-select or loading screens.
         self._in_game: bool = False
+        # Cities for which a city_arrival_hint has already been processed this session.
+        # Separate from _save_known_cities (which is pre-seeded from the save baseline)
+        # so that baseline cities still receive hint-triggered checks when delivered to.
+        self._hint_sent_cities: Set[str] = set()
 
     # ── Archipelago callbacks ──────────────────────────────────────────────────
 
@@ -1800,14 +1830,16 @@ class ATSContext(CommonContext):
 
         Fires the city/state location check at the instant the DLL signals the
         arrival (job start or delivery) rather than waiting for the save file.
-        Idempotent: skipped if the city is already in _save_known_cities.
+        Idempotent per-session via _hint_sent_cities (intentionally independent
+        of _save_known_cities so baseline cities still receive hint-triggered checks).
         """
         from worlds.american_truck_simulator.locations import (
             CITY_ARRIVAL_LOCATIONS, STATE_ARRIVAL_LOCATIONS,
         )
-        if city_id in self._save_known_cities:
-            logger.debug(f"[ATS] City arrival hint ({source_label}): {city_id} already known — skip")
+        if city_id in self._hint_sent_cities:
+            logger.debug(f"[ATS] City arrival hint ({source_label}): {city_id} already hint-processed — skip")
             return
+        self._hint_sent_cities.add(city_id)
         logger.info(f"[ATS] Live city arrival: {city_id} ({source_label}) — new, signalling immediately")
         self._save_known_cities.add(city_id)
         new_checks: List[int] = []
@@ -2030,7 +2062,7 @@ class ATSContext(CommonContext):
                 game_cities_raw.add(m.group(1))
             logger.info(
                 f"[ATS] Save poll (first read, fmt={fmt}): "
-                f"{len(save['visited_cities'])} cities — seeding as baseline, no checks fired "
+                f"{len(save['visited_cities'])} cities — seeding baseline, firing unchecked state arrivals "
                 f"(game.sii raw={len(game_cities_raw)})"
             )
             if len(game_cities_raw) == 0 and text:
@@ -2048,8 +2080,16 @@ class ATSContext(CommonContext):
             for loc_data in CITY_ARRIVAL_LOCATIONS.values():
                 if loc_data.game_id == city_id:
                     if is_first_read:
-                        # Seed known states from baseline cities so they don't re-fire next session
-                        self._save_known_states.add(loc_data.region)
+                        # Seed known states; fire check if server hasn't confirmed it yet.
+                        # This recovers state checks for states visited before the randomizer.
+                        state_name = loc_data.region
+                        if state_name not in self._save_known_states:
+                            self._save_known_states.add(state_name)
+                            for sa_data in STATE_ARRIVAL_LOCATIONS.values():
+                                if sa_data.region == state_name and sa_data.code not in self.checked_locations:
+                                    new_checks.append(sa_data.code)
+                                    logger.info(f"[ATS] State arrival check: {state_name} → {sa_data.code} (baseline recovery)")
+                                    break
                     else:
                         _reward_tag = "(reward held — delivery active)" if self._job_active else "(reward immediate — no active delivery)"
                         # City check — independent of state check below
