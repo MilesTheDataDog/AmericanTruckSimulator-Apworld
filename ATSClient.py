@@ -84,52 +84,53 @@ COORD_STORE_FILE = COMM_DIR / "coord_store.json"
 
 # ── City coordinate store ──────────────────────────────────────────────────────
 
-DEFAULT_CITY_RADIUS = 1500  # metres; default proximity trigger radius
+DEFAULT_CITY_RADIUS = 600  # metres; default proximity trigger radius
 
 # Per-city radius overrides for sprawling cities (metres).
 # Tokens use the canonical ATS internal IDs (may be truncated to 12 chars).
+# Existing coord_store.json entries keep their stored radius until deleted.
 CITY_RADIUS_OVERRIDES: Dict[str, int] = {
     # Tier 1 — multiple distinct mapped hubs / very wide footprint
-    "los_angeles":  4000,
-    "dallas":       3500,
-    "houston":      3500,
-    "phoenix":      3500,
+    "los_angeles":  1500,
+    "dallas":       1200,
+    "houston":      1200,
+    "phoenix":      1200,
     # Tier 2 — single hub but large or sprawling
-    "san_antonio":  3000,
-    "austin":       2500,
-    "fort_worth":   2500,
-    "san_diego":    2500,
-    "seattle":      2500,
-    "portland":     2500,
-    "denver":       2500,
-    "las_vegas":    2500,
-    "salt_lake":    2500,
-    "kansas_ci_ks": 2500,
-    "kansas_city_mo": 2500,
-    "oklahoma_cit": 2500,
-    "el_paso":      2500,
-    "tulsa":        2500,
-    "omaha":        2500,
-    "st_louis":     2500,
-    "new_orleans":  2500,
+    "san_antonio":  1000,
+    "austin":       900,
+    "fort_worth":   900,
+    "san_diego":    900,
+    "seattle":      900,
+    "portland":     900,
+    "denver":       900,
+    "las_vegas":    900,
+    "salt_lake":    900,
+    "kansas_ci_ks": 900,
+    "kansas_city_mo": 900,
+    "oklahoma_cit": 900,
+    "el_paso":      900,
+    "tulsa":        900,
+    "omaha":        900,
+    "st_louis":     900,
+    "new_orleans":  900,
     # Tier 3 — medium-large
-    "san_francisc": 2000,
-    "san_jose":     2000,
-    "sacramento":   2000,
-    "albuquerque":  2000,
-    "tucson":       2000,
-    "fresno":       2000,
-    "reno":         2000,
-    "spokane":      2000,
-    "boise":        2000,
-    "colorado_spr": 2000,
-    "amarillo":     2000,
-    "lubbock":      2000,
-    "wichita":      2000,
-    "des_moines":   2000,
-    "little_rock":  2000,
-    "baton_rouge":  2000,
-    "shreveport":   2000,
+    "san_francisc": 800,
+    "san_jose":     800,
+    "sacramento":   800,
+    "albuquerque":  800,
+    "tucson":       800,
+    "fresno":       800,
+    "reno":         800,
+    "spokane":      800,
+    "boise":        800,
+    "colorado_spr": 800,
+    "amarillo":     800,
+    "lubbock":      800,
+    "wichita":      800,
+    "des_moines":   800,
+    "little_rock":  800,
+    "baton_rouge":  800,
+    "shreveport":   800,
 }
 
 # Koenvh1 telemetry-verified seed data — 29 original CA+NV cities (2015 launch).
@@ -1404,6 +1405,9 @@ class ATSContext(CommonContext):
             logger.info(f"[ATS] Coord store loaded: {len(self._coord_store)} cities with known coordinates")
         # Last truck position reported by the DLL via events.json [x, y, z].
         self._truck_pos: Optional[List[float]] = None
+        # True only when the game world is active (telemetry_started, not in menu).
+        # Gates proximity checks so they don't fire during career-select or loading screens.
+        self._in_game: bool = False
 
     # ── Archipelago callbacks ──────────────────────────────────────────────────
 
@@ -1621,11 +1625,15 @@ class ATSContext(CommonContext):
             self.current_xp = _evt_xp
             self.current_level = _xp_to_level(_evt_xp)
 
+        # Track whether the game world is active (player driving, not in a menu).
+        # Proximity must not fire during career-select, loading screens, or pause menus.
+        self._in_game = data.get("in_game", False)
+
         # Update truck position from DLL telemetry; run proximity checks each poll.
         _pos = data.get("truck_position")
         if isinstance(_pos, list) and len(_pos) >= 3:
             self._truck_pos = _pos
-        if self._truck_pos and self.auth:
+        if self._truck_pos and self.auth and self._in_game:
             self._run_proximity_checks()
 
         # Log once per level-up so the player can see their progress toward the goal
@@ -1688,10 +1696,12 @@ class ATSContext(CommonContext):
             # Also capture the truck's current coordinate to seed the proximity store.
             if event.get("type") == "city_arrival_hint":
                 hint_city = event.get("game_id", "")
+                _hint_type = event.get("hint_type", "")  # "source" or "destination"
+                _hint_label = f"DLL hint: {_hint_type}" if _hint_type else "DLL hint"
                 if hint_city and self.auth:
                     if self._truck_pos and hint_city not in self._coord_store:
                         self._capture_coord(hint_city, self._truck_pos)
-                    self._process_city_arrival_hint(hint_city, "DLL hint")
+                    self._process_city_arrival_hint(hint_city, _hint_label)
                 continue
 
             # On delivery: clear local job-active state and flush any arrival grants

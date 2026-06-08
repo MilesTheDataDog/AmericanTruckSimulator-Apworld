@@ -374,21 +374,61 @@ for _state in _cities_data["states"]:
             game_id=_token,
         )
 
+# ── Stable state first-visit ID offsets ───────────────────────────────────────
+# Keyed by ATS internal state token (cities.json state id field).
+# IMPORTANT: Never renumber existing entries — doing so invalidates every
+# generated seed.  To add new DLC states, append at the END with the next
+# sequential offset (17+).  California and Nevada are omitted deliberately
+# (always accessible; no unlock gate).
+# Initial 0-16 assignment follows the cities.json state order at v1.2.
+_STATE_TOKEN_OFFSET: Dict[str, int] = {
+    "arizona":    0,
+    "new_mexico": 1,
+    "oregon":     2,
+    "washington": 3,
+    "utah":       4,
+    "idaho":      5,
+    "colorado":   6,
+    "wyoming":    7,
+    "montana":    8,
+    "texas":      9,
+    "oklahoma":   10,
+    "kansas":     11,
+    "nebraska":   12,
+    "arkansas":   13,
+    "missouri":   14,
+    "iowa":       15,
+    "louisiana":  16,
+    # ── Future DLC states: append here with offset 17, 18, ... ───────────────
+}
+
+# States excluded from arrival checks (always accessible, no DLC gate).
+_STATES_EXCLUDED = frozenset({"california", "nevada"})
+
 # ── State first visit locations ────────────────────────────────────────────────
-# One location per DLC state (California and Nevada excluded — always accessible).
-# Fires the first time the player arrives in any city within that state.
+# One location per DLC state; IDs stable via _STATE_TOKEN_OFFSET above.
+# Generated codes are identical to the previous positional scheme — no seed
+# regeneration is required when upgrading from any prior v1.2 apworld.
 STATE_ARRIVAL_LOCATIONS: Dict[str, ATSLocationData] = {}
-_state_arrival_index = 0
 for _state in _cities_data["states"]:
-    if _state["name"] in ("California", "Nevada"):
+    _sid = _state["id"]
+    if _sid in _STATES_EXCLUDED:
+        continue
+    _s_offset = _STATE_TOKEN_OFFSET.get(_sid)
+    if _s_offset is None:
+        import warnings
+        warnings.warn(
+            f"[ATS] State token '{_sid}' not in _STATE_TOKEN_OFFSET — "
+            "add it at the end of the dict with the next offset.",
+            stacklevel=2,
+        )
         continue
     STATE_ARRIVAL_LOCATIONS[f"First Visit - {_state['name']}"] = ATSLocationData(
-        code=ATS_BASE_ID + 15000 + _state_arrival_index,
+        code=ATS_BASE_ID + 15000 + _s_offset,
         region=_state["name"],
         category="state_arrival",
-        game_id=_state["id"],
+        game_id=_sid,
     )
-    _state_arrival_index += 1
 
 # ── Goal location (always exists, victory item placed here) ───────────────────
 GOAL_LOCATION_NAME = "Complete the Run"

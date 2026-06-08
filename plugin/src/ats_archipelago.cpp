@@ -67,7 +67,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.9.0";
+static const char* PLUGIN_VERSION = "2.10.0";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -926,7 +926,11 @@ SCSAPI_VOID telemetry_gameplay_event(const scs_event_t event,
                 // Emit a live city-arrival hint for the destination city the moment the
                 // delivery completes — fires before the game's ks_visit_cities stat update.
                 if (!dest_city.empty()) {
-                    queue_event("city_arrival_hint", dest_city, dest_city);
+                    {
+                        json extra_dest;
+                        extra_dest["hint_type"] = "destination";
+                        queue_event("city_arrival_hint", dest_city, dest_city, extra_dest);
+                    }
                     log("Live city arrival hint: " + dest_city + " (destination at delivery)");
                 }
             }
@@ -1025,7 +1029,11 @@ SCSAPI_VOID telemetry_configuration(const scs_event_t event,
         // The player is already there; this fires immediately rather than waiting for
         // the game's ks_visit_cities stat update (which can be minutes later).
         if (!new_source_city.empty()) {
-            queue_event("city_arrival_hint", new_source_city, new_source_city);
+            {
+                json extra_src;
+                extra_src["hint_type"] = "source";
+                queue_event("city_arrival_hint", new_source_city, new_source_city, extra_src);
+            }
             log("Live city arrival hint: " + new_source_city + " (source city at job start)");
             flush_events_file();
         }
