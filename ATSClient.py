@@ -57,7 +57,7 @@ except Exception as _e:
 colorama.init()
 
 GAME_NAME = "American Truck Simulator"
-CLIENT_VERSION = "1.8.0"
+CLIENT_VERSION = "1.9.0"
 
 # ── Communication folder ───────────────────────────────────────────────────────
 def _get_comm_dir() -> Path:
@@ -2156,6 +2156,20 @@ class ATSContext(CommonContext):
         directly to live memory by the DLL.
         """
         if not self.auth:
+            return
+
+        # If the DLL is connected but hasn't resolved a profile ID yet, hold off.
+        # An empty ID means "wait" — don't fall back to guessing across profiles.
+        # Once the DLL resolves the ID it flushes immediately; the next poll will
+        # proceed normally.  (If the DLL is not connected, plugin_connected=False
+        # and we fall through to the normal search below.)
+        if self.plugin_connected and not self._dll_profile_id:
+            if not self._save_not_found_warned:
+                self._save_not_found_warned = True
+                logger.info(
+                    "[ATS] DLL connected but profile ID not yet resolved — "
+                    "holding save-file search until profile is known"
+                )
             return
 
         # Re-run discovery only when needed — anchor to the cached path once found.

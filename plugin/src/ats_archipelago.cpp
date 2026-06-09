@@ -67,7 +67,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.15.0";
+static const char* PLUGIN_VERSION = "2.16.0";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -225,18 +225,19 @@ static std::string g_current_seed;
 static std::string g_active_profile_id;
 
 // Read the active profile ID from config.cfg and update g_active_profile_id.
-// Different ATS versions / installs use different cvar names; we try all known ones.
-// Called at init, telemetry_started, and telemetry_paused — so if init fires before
-// the player selects a profile (common), the later calls will pick it up.
+// Falls back to a profile-directory mtime scan if config.cfg has no usable key.
+// Called at init, telemetry_started, and telemetry_paused.
 static void refresh_active_profile_id() {
-    // Once resolved, only re-read on subsequent calls (to catch mid-session switches).
-    // Log the path on every attempt so mismatches are immediately visible in the log.
-    fs::path cfg = get_documents_path() / "American Truck Simulator" / "config.cfg";
-    log("config.cfg read attempt: " + cfg.string());
+    fs::path docs = get_documents_path() / "American Truck Simulator";
+    fs::path cfg  = docs / "config.cfg";
+
+    // Suppress the attempt log after the ID is resolved — it fires on every
+    // telemetry_started/paused and would spam the log when already known.
+    if (g_active_profile_id.empty())
+        log("config.cfg read attempt: " + cfg.string());
 
     // Known cvar names for the active profile in ATS/ETS2 config.cfg.
-    // Tried longest-first so a prefix match (g_last_select_profile) doesn't shadow
-    // the more-specific (g_last_select_profile_id) before the latter is attempted.
+    // Tried longest-first so a shorter key can't shadow a longer one.
     static const char* const PROFILE_KEYS[] = {
         "g_last_select_profile_id",
         "g_last_select_profile",
@@ -244,45 +245,91 @@ static void refresh_active_profile_id() {
         nullptr
     };
 
-    try {
-        std::ifstream f(cfg);
-        if (!f.is_open()) {
-            log("config.cfg: FAILED (could not open) — will retry on next event");
-            return;
-        }
-
-        std::string line;
-        while (std::getline(f, line)) {
-            for (int k = 0; PROFILE_KEYS[k]; ++k) {
-                size_t pos = line.find(PROFILE_KEYS[k]);
-                if (pos == std::string::npos) continue;
-                // Word-boundary guard: next char must not be alphanumeric or '_'.
-                size_t after = pos + strlen(PROFILE_KEYS[k]);
-                if (after < line.size() &&
-                    (isalnum((unsigned char)line[after]) || line[after] == '_'))
-                    continue;
-                size_t q1 = line.find('"', after);
-                if (q1 == std::string::npos) continue;
-                size_t q2 = line.find('"', q1 + 1);
-                if (q2 == std::string::npos) continue;
-                std::string pid = line.substr(q1 + 1, q2 - q1 - 1);
-                if (pid.empty()) {
-                    log(std::string("config.cfg: key '") + PROFILE_KEYS[k] +
-                        "' found but value is empty (player has not yet selected a profile)");
-                    return;
-                }
-                if (pid != g_active_profile_id) {
-                    g_active_profile_id = pid;
-                    log("config.cfg active profile resolved: " + g_active_profile_id +
-                        " (key=" + PROFILE_KEYS[k] + ")");
-                }
-                return;
+    // Try config.cfg first.  Returns true when the profile ID is resolved.
+    auto try_cfg = [&]() -> bool {
+        try {
+            std::ifstream f(cfg);
+            if (!f.is_open()) {
+                if (g_active_profile_id.empty())
+                    log("config.cfg: could not open — will try directory scan");
+                return false;
             }
+            std::string line;
+            while (std::getline(f, line)) {
+                for (int k = 0; PROFILE_KEYS[k]; ++k) {
+                    size_t pos = line.find(PROFILE_KEYS[k]);
+                    if (pos == std::string::npos) continue;
+                    // Word-boundary guard: next char must not be alphanumeric or '_'.
+                    size_t after = pos + strlen(PROFILE_KEYS[k]);
+                    if (after < line.size() &&
+                        (isalnum((unsigned char)line[after]) || line[after] == '_'))
+                        continue;
+                    size_t q1 = line.find('"', after);
+                    if (q1 == std::string::npos) continue;
+                    size_t q2 = line.find('"', q1 + 1);
+                    if (q2 == std::string::npos) continue;
+                    std::string pid = line.substr(q1 + 1, q2 - q1 - 1);
+                    if (pid.empty()) {
+                        if (g_active_profile_id.empty())
+                            log(std::string("config.cfg: key '") + PROFILE_KEYS[k] +
+                                "' found but value is empty — will try directory scan");
+                        return false;
+                    }
+                    if (pid != g_active_profile_id) {
+                        g_active_profile_id = pid;
+                        log("config.cfg active profile resolved: " + g_active_profile_id +
+                            " (key=" + PROFILE_KEYS[k] + ")");
+                    }
+                    return true;
+                }
+            }
+            if (g_active_profile_id.empty())
+                log("config.cfg: no profile key found "
+                    "(tried g_last_select_profile_id / g_last_select_profile / g_profile)"
+                    " — will try directory scan");
+            return false;
+        } catch (...) {
+            log("config.cfg: exception while reading — will try directory scan");
+            return false;
         }
-        log("config.cfg: no profile key found "
-            "(checked g_last_select_profile_id / g_last_select_profile / g_profile)");
-    } catch (...) {
-        log("config.cfg: exception while reading");
+    };
+
+    if (try_cfg()) return;
+
+    // Fallback: scan for the most recently modified profile directory in Documents.
+    // When ATS loads a profile it writes to that profile's directory (saves, metadata).
+    // A brand-new profile directory was just created and will have the newest mtime.
+    const fs::path scan_roots[] = {
+        docs / "profiles",
+        docs / "steam" / "profiles",
+    };
+
+    std::string newest_id;
+    fs::file_time_type newest_time;
+    bool have_newest = false;
+
+    for (const auto& root : scan_roots) {
+        try {
+            if (!fs::exists(root)) continue;
+            for (const auto& entry : fs::directory_iterator(root)) {
+                if (!entry.is_directory()) continue;
+                auto mtime = entry.last_write_time();
+                if (!have_newest || mtime > newest_time) {
+                    newest_time = mtime;
+                    newest_id   = entry.path().filename().string();
+                    have_newest = true;
+                }
+            }
+        } catch (...) {}
+    }
+
+    if (!newest_id.empty()) {
+        if (newest_id != g_active_profile_id) {
+            g_active_profile_id = newest_id;
+            log("Active profile from directory scan (newest mtime): " + g_active_profile_id);
+        }
+    } else if (g_active_profile_id.empty()) {
+        log("Directory scan: no profiles found in " + (docs / "profiles").string());
     }
 }
 
