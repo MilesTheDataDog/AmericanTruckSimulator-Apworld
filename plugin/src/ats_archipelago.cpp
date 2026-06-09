@@ -67,7 +67,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.16.0";
+static const char* PLUGIN_VERSION = "2.17.0";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -94,9 +94,10 @@ struct GameState {
     std::string current_cargo_name;
     std::string current_source_city_id;   // set from job config; used for live arrival hint
     std::string current_dest_city_id;     // set from job config; used for live arrival hint
-    bool      job_active = false;
-    bool      in_game    = false;
+    bool      job_active       = false;
+    bool      in_game          = false;
     bool      city_count_changed = false;
+    bool      dest_hint_sent   = false;   // true once nav-distance or delivery hint fires; reset per job
 };
 
 static GameState g_state;
@@ -1011,17 +1012,17 @@ SCSAPI_VOID telemetry_gameplay_event(const scs_event_t event,
                 extra["cargo_name"] = g_state.current_cargo_name;
                 delivery_id = g_state.current_cargo_id;
                 dest_city   = g_state.current_dest_city_id;
-                queue_event("cargo_delivered", delivery_id, delivery_id, extra);
-                // Emit a live city-arrival hint for the destination city the moment the
-                // delivery completes — fires before the game's ks_visit_cities stat update.
-                if (!dest_city.empty()) {
-                    {
-                        json extra_dest;
-                        extra_dest["hint_type"] = "destination";
-                        queue_event("city_arrival_hint", dest_city, dest_city, extra_dest);
-                    }
-                    log("Live city arrival hint: " + dest_city + " (destination at delivery)");
+                // Emit the destination city hint BEFORE cargo_delivered so the client
+                // can process it while job_active is still true (held until delivery flush).
+                // Skipped if on_nav_distance already fired it during approach.
+                if (!dest_city.empty() && !g_state.dest_hint_sent) {
+                    json extra_dest;
+                    extra_dest["hint_type"] = "destination";
+                    queue_event("city_arrival_hint", dest_city, dest_city, extra_dest);
+                    log("Live city arrival hint: " + dest_city + " (destination at delivery — nav hint not sent)");
                 }
+                g_state.dest_hint_sent = true;
+                queue_event("cargo_delivered", delivery_id, delivery_id, extra);
             }
         }
         flush_events_file();
@@ -1066,6 +1067,37 @@ SCSAPI_VOID on_truck_placement(const scs_string_t name, const scs_u32_t index,
     g_state.truck_z = static_cast<float>(value->value_dplacement.position.z);
 }
 
+// Fires the destination city arrival hint when the navigation distance to the
+// delivery drops below DEST_HINT_DISTANCE metres.  This lets the client show
+// the city/state grant as the player enters the city rather than only after
+// the delivery completes.  Falls back to the delivery-time hint if the player
+// has navigation disabled.
+SCSAPI_VOID on_nav_distance(const scs_string_t name, const scs_u32_t index,
+                             const scs_value_t* const value,
+                             const scs_context_t context) {
+    if (!value || value->type != SCS_VALUE_TYPE_float) return;
+    const float dist = value->value_float.value;
+
+    static constexpr float DEST_HINT_DISTANCE = 1500.0f;
+    if (dist > DEST_HINT_DISTANCE) return;
+
+    std::string dest_city;
+    {
+        std::lock_guard<std::mutex> lock(g_state_mutex);
+        if (!g_state.job_active || g_state.current_dest_city_id.empty() || g_state.dest_hint_sent)
+            return;
+        dest_city = g_state.current_dest_city_id;
+        g_state.dest_hint_sent = true;
+    }
+    // Telemetry callbacks run on the game thread; queue_event is safe without the mutex here.
+    json extra;
+    extra["hint_type"] = "destination";
+    queue_event("city_arrival_hint", dest_city, dest_city, extra);
+    log("Live city arrival hint: " + dest_city
+        + " (destination at nav_distance=" + std::to_string(static_cast<int>(dist)) + "m)");
+    flush_events_file();
+}
+
 SCSAPI_VOID telemetry_configuration(const scs_event_t event,
                                      const void* const event_info,
                                      const scs_context_t context) {
@@ -1083,7 +1115,8 @@ SCSAPI_VOID telemetry_configuration(const scs_event_t event,
         g_state.current_cargo_name.clear();
         g_state.current_source_city_id.clear();
         g_state.current_dest_city_id.clear();
-        g_state.job_active = false;
+        g_state.job_active      = false;
+        g_state.dest_hint_sent  = false;
 
         for (const scs_named_value_t* attr = cfg->attributes; attr->name != nullptr; ++attr) {
             const std::string attr_name(attr->name);
@@ -1247,6 +1280,12 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
         SCS_U32_NIL, SCS_VALUE_TYPE_dplacement,
         SCS_TELEMETRY_CHANNEL_FLAG_none,
         on_truck_placement, nullptr
+    );
+    p->register_for_channel(
+        SCS_TELEMETRY_TRUCK_CHANNEL_navigation_distance,
+        SCS_U32_NIL, SCS_VALUE_TYPE_float,
+        SCS_TELEMETRY_CHANNEL_FLAG_none,
+        on_nav_distance, nullptr
     );
 
     {

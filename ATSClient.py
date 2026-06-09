@@ -57,7 +57,7 @@ except Exception as _e:
 colorama.init()
 
 GAME_NAME = "American Truck Simulator"
-CLIENT_VERSION = "1.9.0"
+CLIENT_VERSION = "1.10.0"
 
 # ── Communication folder ───────────────────────────────────────────────────────
 def _get_comm_dir() -> Path:
@@ -200,7 +200,7 @@ def _seed_coord_store(store: Dict[str, Any]) -> int:
 
 # City IDs confirmed to have bad coordinates captured from incorrect telemetry.
 # Purged at startup so they are re-captured from live position on next visit.
-_COORD_PURGE_IDS: frozenset = frozenset({"boise"})
+_COORD_PURGE_IDS: frozenset = frozenset({"boise", "cheyenne"})
 
 
 def _purge_bad_coords(store: Dict[str, Any]) -> int:
