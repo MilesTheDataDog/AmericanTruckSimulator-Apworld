@@ -67,7 +67,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.12.0";
+static const char* PLUGIN_VERSION = "2.13.0";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -228,9 +228,13 @@ static std::string g_active_profile_id;
 // Called at init and on telemetry_paused so mid-session profile switches are caught.
 static void refresh_active_profile_id() {
     fs::path cfg = get_documents_path() / "American Truck Simulator" / "config.cfg";
+    log("config.cfg path: " + cfg.string());
     try {
         std::ifstream f(cfg);
-        if (!f.is_open()) return;
+        if (!f.is_open()) {
+            log("config.cfg: could not open file");
+            return;
+        }
         std::string line;
         while (std::getline(f, line)) {
             size_t pos = line.find("g_last_select_profile_id");
@@ -240,13 +244,16 @@ static void refresh_active_profile_id() {
             size_t q2 = line.find('"', q1 + 1);
             if (q2 == std::string::npos) continue;
             std::string pid = line.substr(q1 + 1, q2 - q1 - 1);
+            log("config.cfg active profile: " + (pid.empty() ? std::string("(empty)") : pid));
             if (!pid.empty() && pid != g_active_profile_id) {
                 g_active_profile_id = pid;
-                log("Active profile ID: " + g_active_profile_id);
             }
             return;
         }
-    } catch (...) {}
+        log("config.cfg: g_last_select_profile_id key not found");
+    } catch (...) {
+        log("config.cfg: exception while reading");
+    }
 }
 
 // Previous city count — detects increases without keeping the breakpoint live.

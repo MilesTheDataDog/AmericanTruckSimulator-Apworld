@@ -57,7 +57,7 @@ except Exception as _e:
 colorama.init()
 
 GAME_NAME = "American Truck Simulator"
-CLIENT_VERSION = "1.4.0"
+CLIENT_VERSION = "1.5.0"
 
 # ── Communication folder ───────────────────────────────────────────────────────
 def _get_comm_dir() -> Path:
@@ -400,6 +400,9 @@ def _profile_id_from_config(docs: Path) -> "Optional[str]":
 def _find_ats_save_file(forced_profile_id: Optional[str] = None) -> Optional[Path]:
     """Return the most-recently-modified READABLE game.sii for the active profile.
 
+    Searches only Documents-based ATS profile directories. Steam userdata remote
+    paths are stale cloud storage and are intentionally excluded.
+
     forced_profile_id — profile hex ID supplied by the DLL (from events.json) or
     derived from config.cfg.  When present, ONLY saves under that profile are
     considered; the function returns None rather than falling back to a different
@@ -407,9 +410,9 @@ def _find_ats_save_file(forced_profile_id: Optional[str] = None) -> Optional[Pat
     the player has loaded a new/empty profile that has no game.sii yet.
 
     If no profile ID is available at all (config.cfg missing AND DLL not yet
-    connected), a full cross-profile scan is used as a last resort — this only
-    fires on first launch before any DLL or config data exists.
+    connected), a full Documents scan is used as a last resort.
     """
+    logger.info(f"[ATS] Save search entry: forced_profile_id={forced_profile_id!r}")
     docs = Path(os.environ.get("USERPROFILE", Path.home())) / "Documents" / "American Truck Simulator"
 
     candidates: "list[tuple[float, Path]]" = []
@@ -423,11 +426,9 @@ def _find_ats_save_file(forced_profile_id: Optional[str] = None) -> Optional[Pat
             docs / "profiles" / profile_id,
             docs / "steam" / "profiles" / profile_id,
         ]
-        for remote in _steam_userdata_roots():
-            profile_dirs.append(remote / "steam" / "profiles" / profile_id)
-            profile_dirs.append(remote / "profiles" / profile_id)
 
-        for profile_dir in profile_dirs:
+        for idx, profile_dir in enumerate(profile_dirs, 1):
+            logger.info(f"[ATS] Save search root [{idx}]: {profile_dir}")
             save_dir = profile_dir / "save"
             if not save_dir.is_dir():
                 continue
@@ -440,14 +441,16 @@ def _find_ats_save_file(forced_profile_id: Optional[str] = None) -> Optional[Pat
                 if not game_sii.exists():
                     continue
                 try:
-                    candidates.append((game_sii.stat().st_mtime, game_sii))
+                    mtime = game_sii.stat().st_mtime
+                    candidates.append((mtime, game_sii))
+                    logger.info(f"[ATS] Candidate: {game_sii} (profile={profile_dir.name}, mtime={mtime:.0f})")
                 except OSError:
                     pass
 
         # Profile ID is known — never fall back to other profiles.
         # A new/empty profile has no saves yet; return None and wait.
         if not candidates:
-            logger.debug(
+            logger.info(
                 f"[ATS] Profile {profile_id} has no saves yet — "
                 "waiting for first autosave (will not read other profiles)"
             )
@@ -455,14 +458,15 @@ def _find_ats_save_file(forced_profile_id: Optional[str] = None) -> Optional[Pat
 
     else:
         # No profile ID available at all (config.cfg missing AND DLL not yet
-        # connected).  Last-resort: scan all profiles and pick the newest save.
-        # This fires only on fresh installs or unusual setups.
-        logger.debug("[ATS] No profile ID available — falling back to full profile scan")
-        for remote in _steam_userdata_roots():
-            _scan_profiles_dir(remote / "steam" / "profiles", candidates)
-            _scan_profiles_dir(remote / "profiles", candidates)
-        _scan_profiles_dir(docs / "profiles", candidates)
-        _scan_profiles_dir(docs / "steam" / "profiles", candidates)
+        # connected).  Last-resort: scan Documents profiles and pick the newest.
+        logger.info("[ATS] No profile ID available — falling back to full Documents profile scan")
+        scan_roots = [
+            docs / "profiles",
+            docs / "steam" / "profiles",
+        ]
+        for idx, root in enumerate(scan_roots, 1):
+            logger.info(f"[ATS] Save search root [{idx}]: {root}")
+            _scan_profiles_dir(root, candidates)
 
     # Return the newest readable save from the candidate set.
     for _mtime, path in sorted(candidates, key=lambda x: x[0], reverse=True):
@@ -473,7 +477,7 @@ def _find_ats_save_file(forced_profile_id: Optional[str] = None) -> Optional[Pat
             logger.debug(f"[ATS] Save scan: could not open {path}")
             continue
         if magic in (_SIIN_MAGIC, _BSII_MAGIC, _SCSC_MAGIC):
-            logger.debug(f"[ATS] Save scan: accepted {path} (magic={magic!r})")
+            logger.info(f"[ATS] Selected: {path} (magic={magic!r})")
             return path
         logger.info(f"[ATS] Save scan: skipped {path} (magic={magic!r}, unrecognised format)")
 
@@ -1779,13 +1783,16 @@ class ATSContext(CommonContext):
 
         # Active profile ID from DLL — locks save discovery to the correct profile.
         _dll_pid = data.get("active_profile_id", "")
-        if _dll_pid and _dll_pid != self._dll_profile_id:
-            logger.info(f"[ATS] Active profile ID (from DLL): {_dll_pid}")
-            self._dll_profile_id = _dll_pid
-            # Profile changed mid-session — reset save-path tracking so the
-            # correct profile's save is picked up on the next poll.
-            self._save_path_logged = False
-            self._save_not_found_warned = False
+        if _dll_pid:
+            logger.info(f"[ATS] Active profile ID from DLL: {_dll_pid}")
+            if _dll_pid != self._dll_profile_id:
+                self._dll_profile_id = _dll_pid
+                # Profile changed mid-session — reset save-path tracking so the
+                # correct profile's save is picked up on the next poll.
+                self._save_path_logged = False
+                self._save_not_found_warned = False
+        else:
+            logger.info("[ATS] Active profile ID from DLL: NONE (key absent from events.json)")
 
         # DLL pointer status
         self._ptr_money_ready = data.get("ptr_money_ready", False)
