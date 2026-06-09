@@ -57,7 +57,7 @@ except Exception as _e:
 colorama.init()
 
 GAME_NAME = "American Truck Simulator"
-CLIENT_VERSION = "1.5.0"
+CLIENT_VERSION = "1.6.0"
 
 # ── Communication folder ───────────────────────────────────────────────────────
 def _get_comm_dir() -> Path:
@@ -400,88 +400,122 @@ def _profile_id_from_config(docs: Path) -> "Optional[str]":
 def _find_ats_save_file(forced_profile_id: Optional[str] = None) -> Optional[Path]:
     """Return the most-recently-modified READABLE game.sii for the active profile.
 
-    Searches only Documents-based ATS profile directories. Steam userdata remote
-    paths are stale cloud storage and are intentionally excluded.
+    Selection uses a two-tier strategy so that stale Steam Cloud remote copies
+    never override the live Documents save:
+
+    Tier 1 — Documents roots: searched first.  If any saves are found for the
+      active profile here, they are used and userdata is never consulted.
+    Tier 2 — Steam userdata roots: searched only when the active profile is
+      absent from Documents (i.e. the player uses Steam Cloud sync and their
+      live save lives in userdata/remote/).
+
+    Mtime is a tiebreaker only within the same tier (e.g. autosave vs slot1 of
+    the same profile).  It never determines which tier wins, so a stale cloud
+    copy cannot steal selection from the live Documents save.
 
     forced_profile_id — profile hex ID supplied by the DLL (from events.json) or
     derived from config.cfg.  When present, ONLY saves under that profile are
     considered; the function returns None rather than falling back to a different
     profile.  This prevents an established profile's save from being read when
     the player has loaded a new/empty profile that has no game.sii yet.
-
-    If no profile ID is available at all (config.cfg missing AND DLL not yet
-    connected), a full Documents scan is used as a last resort.
     """
     logger.info(f"[ATS] Save search entry: forced_profile_id={forced_profile_id!r}")
     docs = Path(os.environ.get("USERPROFILE", Path.home())) / "Documents" / "American Truck Simulator"
 
-    candidates: "list[tuple[float, Path]]" = []
-
     # Resolve profile ID: caller-supplied (DLL) > config.cfg.
     profile_id = forced_profile_id or _profile_id_from_config(docs)
 
+    def _collect(profile_dir: Path) -> "list[tuple[float, Path]]":
+        found: "list[tuple[float, Path]]" = []
+        save_dir = profile_dir / "save"
+        if not save_dir.is_dir():
+            return found
+        for slot in save_dir.iterdir():
+            if not slot.is_dir() or slot.name == "quicksave":
+                continue
+            game_sii = slot / "game.sii"
+            if not game_sii.exists():
+                continue
+            try:
+                mtime = game_sii.stat().st_mtime
+                found.append((mtime, game_sii))
+                logger.info(f"[ATS] Candidate: {game_sii} (profile={profile_dir.name}, mtime={mtime:.0f})")
+            except OSError:
+                pass
+        return found
+
+    def _pick(candidates: "list[tuple[float, Path]]") -> "Optional[Path]":
+        for _mtime, path in sorted(candidates, key=lambda x: x[0], reverse=True):
+            try:
+                with path.open("rb") as _f:
+                    magic = _f.read(4)
+            except OSError:
+                logger.debug(f"[ATS] Save scan: could not open {path}")
+                continue
+            if magic in (_SIIN_MAGIC, _BSII_MAGIC, _SCSC_MAGIC):
+                logger.info(f"[ATS] Selected: {path} (magic={magic!r})")
+                return path
+            logger.info(f"[ATS] Save scan: skipped {path} (magic={magic!r}, unrecognised format)")
+        return None
+
     if profile_id:
         logger.debug(f"[ATS] Save scan: active profile {profile_id}")
-        profile_dirs = [
+
+        # Tier 1: Documents.  Use exclusively if the active profile has any save here.
+        docs_candidates: "list[tuple[float, Path]]" = []
+        for idx, d in enumerate([
             docs / "profiles" / profile_id,
             docs / "steam" / "profiles" / profile_id,
-        ]
+        ], 1):
+            logger.info(f"[ATS] Save search root [{idx}] (Documents): {d}")
+            docs_candidates.extend(_collect(d))
 
-        for idx, profile_dir in enumerate(profile_dirs, 1):
-            logger.info(f"[ATS] Save search root [{idx}]: {profile_dir}")
-            save_dir = profile_dir / "save"
-            if not save_dir.is_dir():
-                continue
-            for slot in save_dir.iterdir():
-                if not slot.is_dir():
-                    continue
-                if slot.name == "quicksave":
-                    continue  # client writes here; reading it back causes stale-state loops
-                game_sii = slot / "game.sii"
-                if not game_sii.exists():
-                    continue
-                try:
-                    mtime = game_sii.stat().st_mtime
-                    candidates.append((mtime, game_sii))
-                    logger.info(f"[ATS] Candidate: {game_sii} (profile={profile_dir.name}, mtime={mtime:.0f})")
-                except OSError:
-                    pass
+        if docs_candidates:
+            return _pick(docs_candidates)
 
-        # Profile ID is known — never fall back to other profiles.
-        # A new/empty profile has no saves yet; return None and wait.
-        if not candidates:
+        # Tier 2: Steam userdata.  Only reached when the active profile has no
+        # Documents save — covers cloud-sync users whose live save is in remote/.
+        ud_candidates: "list[tuple[float, Path]]" = []
+        ud_idx = 2
+        for remote in _steam_userdata_roots():
+            for sub in (remote / "steam" / "profiles" / profile_id,
+                        remote / "profiles" / profile_id):
+                ud_idx += 1
+                logger.info(f"[ATS] Save search root [{ud_idx}] (userdata): {sub}")
+                ud_candidates.extend(_collect(sub))
+
+        if not ud_candidates:
             logger.info(
                 f"[ATS] Profile {profile_id} has no saves yet — "
                 "waiting for first autosave (will not read other profiles)"
             )
             return None
 
+        return _pick(ud_candidates)
+
     else:
-        # No profile ID available at all (config.cfg missing AND DLL not yet
-        # connected).  Last-resort: scan Documents profiles and pick the newest.
-        logger.info("[ATS] No profile ID available — falling back to full Documents profile scan")
-        scan_roots = [
-            docs / "profiles",
-            docs / "steam" / "profiles",
-        ]
-        for idx, root in enumerate(scan_roots, 1):
-            logger.info(f"[ATS] Save search root [{idx}]: {root}")
-            _scan_profiles_dir(root, candidates)
+        # No profile ID — scan Documents first; userdata only if Documents is empty.
+        # This prevents stale userdata profiles from being selected over live
+        # Documents profiles when no profile ID is available.
+        logger.info("[ATS] No profile ID — scanning Documents profiles")
+        docs_candidates = []
+        for idx, root in enumerate([docs / "profiles", docs / "steam" / "profiles"], 1):
+            logger.info(f"[ATS] Save search root [{idx}] (Documents): {root}")
+            _scan_profiles_dir(root, docs_candidates)
 
-    # Return the newest readable save from the candidate set.
-    for _mtime, path in sorted(candidates, key=lambda x: x[0], reverse=True):
-        try:
-            with path.open("rb") as _f:
-                magic = _f.read(4)
-        except OSError:
-            logger.debug(f"[ATS] Save scan: could not open {path}")
-            continue
-        if magic in (_SIIN_MAGIC, _BSII_MAGIC, _SCSC_MAGIC):
-            logger.info(f"[ATS] Selected: {path} (magic={magic!r})")
-            return path
-        logger.info(f"[ATS] Save scan: skipped {path} (magic={magic!r}, unrecognised format)")
+        if docs_candidates:
+            return _pick(docs_candidates)
 
-    return None
+        logger.info("[ATS] No saves in Documents — trying Steam userdata as last resort")
+        ud_candidates = []
+        ud_idx = 2
+        for remote in _steam_userdata_roots():
+            for sub in (remote / "steam" / "profiles", remote / "profiles"):
+                ud_idx += 1
+                logger.info(f"[ATS] Save search root [{ud_idx}] (userdata): {sub}")
+                _scan_profiles_dir(sub, ud_candidates)
+
+        return _pick(ud_candidates)
 
 
 
