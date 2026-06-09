@@ -57,7 +57,7 @@ except Exception as _e:
 colorama.init()
 
 GAME_NAME = "American Truck Simulator"
-CLIENT_VERSION = "1.2.0"
+CLIENT_VERSION = "1.3.0"
 
 # ── Communication folder ───────────────────────────────────────────────────────
 def _get_comm_dir() -> Path:
@@ -196,6 +196,24 @@ def _seed_coord_store(store: Dict[str, Any]) -> int:
         except Exception:
             pass
     return added
+
+
+# City IDs confirmed to have bad coordinates captured from incorrect telemetry.
+# Purged at startup so they are re-captured from live position on next visit.
+_COORD_PURGE_IDS: frozenset = frozenset({"boise"})
+
+
+def _purge_bad_coords(store: Dict[str, Any]) -> int:
+    """Remove entries in _COORD_PURGE_IDS from the coordinate store.
+
+    Returns the count of entries removed.
+    """
+    removed = 0
+    for city_id in _COORD_PURGE_IDS:
+        if city_id in store:
+            del store[city_id]
+            removed += 1
+    return removed
 
 
 def _refresh_coord_radii(store: Dict[str, Any]) -> int:
@@ -1481,6 +1499,13 @@ class ATSContext(CommonContext):
         # Persistent map of city_id → {x, z, radius} built from live telemetry.
         # Seeded at startup with Koenvh1 data; grows as the player visits cities.
         self._coord_store: Dict[str, Any] = _load_coord_store()
+        _purged = _purge_bad_coords(self._coord_store)
+        if _purged:
+            logger.info(f"[ATS] Coord store: purged {_purged} bad coordinate(s) — will re-capture on next visit")
+            try:
+                _write_json(COORD_STORE_FILE, self._coord_store)
+            except Exception:
+                pass
         added = _seed_coord_store(self._coord_store)
         updated_r = _refresh_coord_radii(self._coord_store)
         if added:
@@ -1587,11 +1612,7 @@ class ATSContext(CommonContext):
             self._applied_item_count += 1
             applied_any = True
         if applied_any:
-            if self._job_active:
-                logger.debug("[ATS] Item write deferred — delivery in progress")
-                self._items_write_deferred = True
-            else:
-                self._write_items_file()
+            self._write_items_file()
 
     def _apply_item(self, item_name: str) -> None:
         if item_name.endswith("Money Grant"):
@@ -1653,16 +1674,12 @@ class ATSContext(CommonContext):
         _write_json(ITEMS_FILE, payload)
 
     def _flush_held_grants(self, reason: str) -> None:
-        """Write items.json now, combining all arrival grants held during a delivery."""
-        if self._items_write_deferred:
-            labels = self._held_arrival_labels[:]
-            logger.info(
-                f"[ATS] Flushing held arrival grants ({reason})"
-                + (f" — arrivals: {labels}" if labels else "")
-            )
-            self._items_write_deferred = False
-            self._write_items_file()
+        """Log city/state arrivals that occurred during the delivery, then clear."""
+        labels = self._held_arrival_labels[:]
+        if labels:
+            logger.info(f"[ATS] Delivery arrivals during job ({reason}): {labels}")
         self._held_arrival_labels.clear()
+        self._items_write_deferred = False
 
     # ── Events file (plugin → client) ─────────────────────────────────────────
 

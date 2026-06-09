@@ -67,7 +67,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.10.0";
+static const char* PLUGIN_VERSION = "2.11.0";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -620,8 +620,10 @@ static void apply_memory_grants(bool allow_paused) {
                 " (was: $" + std::to_string(g_applied_money) +
                 ", " + std::to_string(g_applied_xp) + " XP)");
             if (seed_changed) g_current_seed = g_items.seed;
-            g_applied_money = 0;
-            g_applied_xp    = 0;
+            g_applied_money      = 0;
+            g_applied_xp         = 0;
+            g_last_written_money = LLONG_MIN;
+            g_last_written_xp    = INT32_MIN;
             save_applied_state();
         }
     }
@@ -640,20 +642,6 @@ static void apply_memory_grants(bool allow_paused) {
             g_money_ptr.store(0, std::memory_order_relaxed);
             needs_rearm = true;
         } else {
-            // Revert detection: if the game exited before saving our last grant, the
-            // in-memory value will be lower than what we wrote.  Reduce the applied
-            // counter by exactly the lost amount so the upcoming delta re-applies only
-            // what was lost — no over-grant is possible.
-            if (g_last_written_money != LLONG_MIN && current < g_last_written_money) {
-                long long lost = g_last_written_money - current;
-                log("Grant revert detected (money): in-memory $" + std::to_string(current) +
-                    " < last-written $" + std::to_string(g_last_written_money) +
-                    " — re-applying lost $" + std::to_string(lost));
-                g_applied_money      -= lost;
-                g_last_written_money  = LLONG_MIN;
-                g_applied_dirty.store(true, std::memory_order_relaxed);
-            }
-
             if (g_items.total_money_granted > g_applied_money) {
                 long long delta  = g_items.total_money_granted - g_applied_money;
                 long long newval = current + delta;
@@ -693,17 +681,6 @@ static void apply_memory_grants(bool allow_paused) {
             g_xp_ptr.store(0, std::memory_order_relaxed);
             needs_rearm = true;
         } else {
-            // Revert detection: mirror of the money check above.
-            if (g_last_written_xp != INT32_MIN && current < g_last_written_xp) {
-                int32_t lost = g_last_written_xp - current;
-                log("Grant revert detected (XP): in-memory " + std::to_string(current) +
-                    " XP < last-written " + std::to_string(g_last_written_xp) +
-                    " — re-applying lost " + std::to_string(lost) + " XP");
-                g_applied_xp      -= lost;
-                g_last_written_xp  = INT32_MIN;
-                g_applied_dirty.store(true, std::memory_order_relaxed);
-            }
-
             if (g_items.total_xp_granted > g_applied_xp) {
                 int     delta  = g_items.total_xp_granted - g_applied_xp;
                 int32_t newval = current + (int32_t)delta;
@@ -798,19 +775,9 @@ static void load_applied_state() {
         g_applied_money = j.value("applied_money", (long long)0);
         g_applied_xp    = j.value("applied_xp",    0);
         g_current_seed  = j.value("seed",           std::string(""));
-        // Restore last-written values so the revert-detection backstop can fire
-        // on reconnect if the game exited before saving our previous grant.
-        if (j.contains("last_written_money"))
-            g_last_written_money = j["last_written_money"].get<long long>();
-        if (j.contains("last_written_xp"))
-            g_last_written_xp = j["last_written_xp"].get<int32_t>();
         log("Applied state restored: $" + std::to_string(g_applied_money) +
             ", " + std::to_string(g_applied_xp) + " XP" +
-            (g_current_seed.empty() ? "" : " (seed=" + g_current_seed + ")") +
-            (g_last_written_money != LLONG_MIN
-                ? " last_written_money=$" + std::to_string(g_last_written_money) : "") +
-            (g_last_written_xp != INT32_MIN
-                ? " last_written_xp=" + std::to_string(g_last_written_xp) : ""));
+            (g_current_seed.empty() ? "" : " (seed=" + g_current_seed + ")"));
     } catch (...) {}
 }
 
@@ -820,10 +787,6 @@ static void save_applied_state() {
         j["applied_money"] = g_applied_money;
         j["applied_xp"]    = g_applied_xp;
         j["seed"]          = g_current_seed;
-        // Persist last-written values for revert detection after an unsaved exit.
-        // Only written when a real value exists (sentinel means no write yet).
-        if (g_last_written_money != LLONG_MIN) j["last_written_money"] = g_last_written_money;
-        if (g_last_written_xp   != INT32_MIN)  j["last_written_xp"]   = g_last_written_xp;
         fs::path tmp = g_applied_file;
         tmp += ".tmp";
         std::ofstream f(tmp);
