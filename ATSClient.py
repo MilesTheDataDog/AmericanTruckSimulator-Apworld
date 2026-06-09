@@ -57,7 +57,7 @@ except Exception as _e:
 colorama.init()
 
 GAME_NAME = "American Truck Simulator"
-CLIENT_VERSION = "1.7.0"
+CLIENT_VERSION = "1.8.0"
 
 # ── Communication folder ───────────────────────────────────────────────────────
 def _get_comm_dir() -> Path:
@@ -1539,6 +1539,9 @@ class ATSContext(CommonContext):
         # back to other profiles (prevents reading an established profile's save when
         # the player has loaded a new empty profile that has no game.sii yet).
         self._dll_profile_id: Optional[str] = None
+        # Last state seen from events.json — used to suppress per-flush log spam.
+        # Tracks the raw value so we log only when the state actually changes.
+        self._dll_pid_last_raw: object = object()  # sentinel: never matches any str/None
 
         # Save file polling state
         self._save_last_mtime: float = 0.0
@@ -1832,25 +1835,27 @@ class ATSContext(CommonContext):
                 )
 
         # Active profile ID from DLL — locks save discovery to the correct profile.
-        # Distinguish absent (DLL too old / events.json not yet written) from empty
-        # (DLL wrote it but config.cfg hasn't been read yet at init time).
+        # Log only on state change to avoid per-flush spam.
         _dll_pid_raw = data.get("active_profile_id")  # None=key absent, ""=empty, str=value
-        if _dll_pid_raw is None:
-            logger.info("[ATS] Active profile ID from DLL: NONE (key absent from events.json)")
-        elif not _dll_pid_raw:
-            logger.info(
-                "[ATS] Active profile ID from DLL: NONE "
-                "(key present but empty — DLL has not yet read config.cfg)"
-            )
-        else:
-            logger.info(f"[ATS] Active profile ID from DLL: {_dll_pid_raw}")
-            if _dll_pid_raw != self._dll_profile_id:
-                self._dll_profile_id = _dll_pid_raw
-                # Profile changed mid-session — reset save-path tracking so the
-                # correct profile's save is picked up on the next poll.
-                self._save_path_logged = False
-                self._save_not_found_warned = False
-                self._cached_save_path = None
+        if _dll_pid_raw is not self._dll_pid_last_raw and _dll_pid_raw != self._dll_pid_last_raw:
+            self._dll_pid_last_raw = _dll_pid_raw
+            if _dll_pid_raw is None:
+                logger.info("[ATS] Active profile ID from DLL: NONE (key absent — DLL version too old?)")
+            elif not _dll_pid_raw:
+                logger.info(
+                    "[ATS] Active profile ID from DLL: NONE "
+                    "(key present but empty — DLL has not yet read config.cfg)"
+                )
+            else:
+                logger.info(f"[ATS] Active profile ID from DLL: {_dll_pid_raw}")
+
+        if _dll_pid_raw and _dll_pid_raw != self._dll_profile_id:
+            self._dll_profile_id = _dll_pid_raw
+            # Profile changed — reset save-path tracking so the correct profile's
+            # save is picked up on the next poll.
+            self._save_path_logged = False
+            self._save_not_found_warned = False
+            self._cached_save_path = None
 
         # DLL pointer status
         self._ptr_money_ready = data.get("ptr_money_ready", False)

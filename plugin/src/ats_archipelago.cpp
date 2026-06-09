@@ -67,7 +67,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.14.0";
+static const char* PLUGIN_VERSION = "2.15.0";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -224,33 +224,63 @@ static std::string g_current_seed;
 // correct profile and never fall back to reading a different profile's save.
 static std::string g_active_profile_id;
 
-// Read g_last_select_profile_id from config.cfg and update g_active_profile_id.
-// Called at init and on telemetry_paused so mid-session profile switches are caught.
+// Read the active profile ID from config.cfg and update g_active_profile_id.
+// Different ATS versions / installs use different cvar names; we try all known ones.
+// Called at init, telemetry_started, and telemetry_paused — so if init fires before
+// the player selects a profile (common), the later calls will pick it up.
 static void refresh_active_profile_id() {
+    // Once resolved, only re-read on subsequent calls (to catch mid-session switches).
+    // Log the path on every attempt so mismatches are immediately visible in the log.
     fs::path cfg = get_documents_path() / "American Truck Simulator" / "config.cfg";
-    log("config.cfg path: " + cfg.string());
+    log("config.cfg read attempt: " + cfg.string());
+
+    // Known cvar names for the active profile in ATS/ETS2 config.cfg.
+    // Tried longest-first so a prefix match (g_last_select_profile) doesn't shadow
+    // the more-specific (g_last_select_profile_id) before the latter is attempted.
+    static const char* const PROFILE_KEYS[] = {
+        "g_last_select_profile_id",
+        "g_last_select_profile",
+        "g_profile",
+        nullptr
+    };
+
     try {
         std::ifstream f(cfg);
         if (!f.is_open()) {
-            log("config.cfg: could not open file");
+            log("config.cfg: FAILED (could not open) — will retry on next event");
             return;
         }
+
         std::string line;
         while (std::getline(f, line)) {
-            size_t pos = line.find("g_last_select_profile_id");
-            if (pos == std::string::npos) continue;
-            size_t q1 = line.find('"', pos);
-            if (q1 == std::string::npos) continue;
-            size_t q2 = line.find('"', q1 + 1);
-            if (q2 == std::string::npos) continue;
-            std::string pid = line.substr(q1 + 1, q2 - q1 - 1);
-            log("config.cfg active profile: " + (pid.empty() ? std::string("(empty)") : pid));
-            if (!pid.empty() && pid != g_active_profile_id) {
-                g_active_profile_id = pid;
+            for (int k = 0; PROFILE_KEYS[k]; ++k) {
+                size_t pos = line.find(PROFILE_KEYS[k]);
+                if (pos == std::string::npos) continue;
+                // Word-boundary guard: next char must not be alphanumeric or '_'.
+                size_t after = pos + strlen(PROFILE_KEYS[k]);
+                if (after < line.size() &&
+                    (isalnum((unsigned char)line[after]) || line[after] == '_'))
+                    continue;
+                size_t q1 = line.find('"', after);
+                if (q1 == std::string::npos) continue;
+                size_t q2 = line.find('"', q1 + 1);
+                if (q2 == std::string::npos) continue;
+                std::string pid = line.substr(q1 + 1, q2 - q1 - 1);
+                if (pid.empty()) {
+                    log(std::string("config.cfg: key '") + PROFILE_KEYS[k] +
+                        "' found but value is empty (player has not yet selected a profile)");
+                    return;
+                }
+                if (pid != g_active_profile_id) {
+                    g_active_profile_id = pid;
+                    log("config.cfg active profile resolved: " + g_active_profile_id +
+                        " (key=" + PROFILE_KEYS[k] + ")");
+                }
+                return;
             }
-            return;
         }
-        log("config.cfg: g_last_select_profile_id key not found");
+        log("config.cfg: no profile key found "
+            "(checked g_last_select_profile_id / g_last_select_profile / g_profile)");
     } catch (...) {
         log("config.cfg: exception while reading");
     }
