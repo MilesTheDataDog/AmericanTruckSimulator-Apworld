@@ -57,7 +57,7 @@ except Exception as _e:
 colorama.init()
 
 GAME_NAME = "American Truck Simulator"
-CLIENT_VERSION = "1.1.0"
+CLIENT_VERSION = "1.2.0"
 
 # ── Communication folder ───────────────────────────────────────────────────────
 def _get_comm_dir() -> Path:
@@ -885,6 +885,29 @@ def _find_xp_block(text: str) -> "Optional[re.Match]":
     return re.search(r'\bplayer\s*:\s*\S+\s*\{', text)
 
 
+def _find_block_end(text: str, brace_pos: int, max_search: int = 1_000_000) -> int:
+    """Return the index just past the closing '}' matching the '{' at brace_pos.
+
+    Counts nesting depth so inner blocks are skipped correctly.
+    If no matching brace is found within max_search characters, returns the
+    end of the search window.
+    """
+    depth = 0
+    segment = text[brace_pos:brace_pos + max_search]
+    for i, c in enumerate(segment):
+        if c == '{':
+            depth += 1
+        elif c == '}':
+            depth -= 1
+            if depth == 0:
+                return brace_pos + i + 1
+    return brace_pos + len(segment)
+
+
+# ATS city token format: lowercase, starts with a letter, letters/digits/underscores only.
+_CITY_TOKEN_RE = re.compile(r'^[a-z][a-z0-9_]{1,29}$')
+
+
 def _parse_sii_save(text: str) -> Dict[str, Any]:
     """
     Extract gameplay fields from SiiNunit save text.
@@ -912,9 +935,51 @@ def _parse_sii_save(text: str) -> Dict[str, Any]:
     if money_m:
         result["money"] = int(money_m.group(1))
 
+    # ── Visited cities ────────────────────────────────────────────────────────
+    # Constrain the search to the main economy/player entity block.
+    #
+    # ATS saves contain multiple entity types — hired drivers each have their own
+    # visited_cities array.  Searching the full file would conflate those with the
+    # player's own visits, producing spurious city counts on fresh profiles.
+    #
+    # _find_xp_block() already locates the economy entity that owns
+    # experience_points.  We find its closing brace and restrict the search to
+    # that block only.
+    #
+    # If the block is not found (edge case) we fall back to the full text, with
+    # the declared-count guard as a safety net.
+    _vc_region = text      # fallback
+    _vc_block_found = False
+    if _econ_m:
+        _brace_pos = _econ_m.end() - 1   # regex ends with \{, last matched char is '{'
+        if 0 <= _brace_pos < len(text) and text[_brace_pos] == '{':
+            _block_end   = _find_block_end(text, _brace_pos)
+            _vc_region   = text[_brace_pos:_block_end]
+            _vc_block_found = True
+
     # ATS 1.49+ format: visited_cities[N]: <city_id>  (plural key, no "city." prefix)
-    for m in re.finditer(r"\bvisited_cities\[\d+\]\s*:\s*(\w+)", text):
-        result["visited_cities"].add(m.group(1))
+    for m in re.finditer(r"\bvisited_cities\[\d+\]\s*:\s*(\w+)", _vc_region):
+        tok = m.group(1)
+        if _CITY_TOKEN_RE.match(tok):      # discard malformed tokens
+            result["visited_cities"].add(tok)
+
+    # ── Declared-count validation ────────────────────────────────────────────
+    # The save format stores visited_cities: N (no index) as the array length.
+    # If that field explicitly says 0, enforce an empty result regardless of
+    # what the regex found — this is the critical guard for new/empty profiles.
+    # If the declared count is > 0 but the bounded search found nothing (unusual
+    # layout), fall back to a full-text search as a last resort.
+    _vc_count_m = re.search(r"\bvisited_cities\s*:\s*(\d+)", _vc_region)
+    if _vc_count_m:
+        _vc_declared = int(_vc_count_m.group(1))
+        if _vc_declared == 0:
+            result["visited_cities"] = set()          # explicit zero — trust it
+        elif _vc_declared > 0 and not result["visited_cities"] and _vc_block_found:
+            # Block found but no entries inside — unexpected layout; try full text.
+            for m in re.finditer(r"\bvisited_cities\[\d+\]\s*:\s*(\w+)", text):
+                tok = m.group(1)
+                if _CITY_TOKEN_RE.match(tok):
+                    result["visited_cities"].add(tok)
 
     # garage : garage.<city_id> { ... status: 2 ... }
     for block_m in re.finditer(
@@ -2057,20 +2122,12 @@ class ATSContext(CommonContext):
         is_first_read = not self._save_first_city_log
         if not self._save_first_city_log:
             self._save_first_city_log = True
-            game_cities_raw = set()
-            for m in re.finditer(r"\bvisited_city\s*\[\d+\]\s*:\s*(\S+)", text):
-                game_cities_raw.add(m.group(1))
+            _n = len(save["visited_cities"])
             logger.info(
                 f"[ATS] Save poll (first read, fmt={fmt}): "
-                f"{len(save['visited_cities'])} cities — seeding baseline, firing unchecked state arrivals "
-                f"(game.sii raw={len(game_cities_raw)})"
+                f"{_n} visited {'city' if _n == 1 else 'cities'} — "
+                f"seeding baseline, firing unchecked state arrivals"
             )
-            if len(game_cities_raw) == 0 and text:
-                idx = text.lower().find("visited")
-                if idx >= 0:
-                    logger.info(f"[ATS] Save 'visited' context: {text[max(0,idx-20):idx+200]!r}")
-                else:
-                    logger.info(f"[ATS] Save file has no 'visited' keyword. First 400 chars: {text[:400]!r}")
 
         new_cities = save["visited_cities"] - self._save_known_cities
         if new_cities and not is_first_read:
