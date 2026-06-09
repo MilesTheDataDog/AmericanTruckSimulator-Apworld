@@ -67,7 +67,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.17.0";
+static const char* PLUGIN_VERSION = "2.18.0";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -353,7 +353,8 @@ static int32_t   g_last_written_xp    = INT32_MIN;
 // application.  Prevents duplicate job_delivered events from applying the same grant twice.
 static std::string g_applied_delivery_id;
 
-static PVOID g_veh_handle = nullptr;
+static PVOID   g_veh_handle   = nullptr;
+static HANDLE  g_apply_timer  = nullptr;  // paused-grant timer; see pause_grant_timer_cb
 
 static bool all_ptrs_captured() {
     return g_money_ptr.load(std::memory_order_relaxed) != 0 &&
@@ -789,8 +790,10 @@ static void apply_memory_grants(bool allow_paused) {
     uintptr_t xp = g_xp_ptr.load(std::memory_order_relaxed);
     if (xp) {
         int32_t current = safe_read_i32(xp + XP_OFFSET);
-        // Sanity check: XP is 0–200000 (level 1 to max).
-        if (current < 0 || current > 200000) {
+        // Sanity check: XP must be non-negative and below 2 million.
+        // AP grants can push XP well above the normal in-game max, so the bound
+        // is intentionally generous — it only needs to catch true garbage reads.
+        if (current < 0 || current > 2000000) {
             log("XP pointer stale (read " + std::to_string(current) +
                 ") — resetting and re-arming", SCS_LOG_TYPE_warning);
             g_xp_ptr.store(0, std::memory_order_relaxed);
@@ -1079,7 +1082,10 @@ SCSAPI_VOID on_nav_distance(const scs_string_t name, const scs_u32_t index,
     const float dist = value->value_float.value;
 
     static constexpr float DEST_HINT_DISTANCE = 1500.0f;
-    if (dist > DEST_HINT_DISTANCE) return;
+    // Ignore dist==0 (nav not yet computed at job start) and dist near 0
+    // (essentially at the parking spot — delivery-time fallback handles that).
+    static constexpr float DEST_HINT_MIN_DISTANCE = 50.0f;
+    if (dist < DEST_HINT_MIN_DISTANCE || dist > DEST_HINT_DISTANCE) return;
 
     std::string dest_city;
     {
@@ -1162,6 +1168,17 @@ SCSAPI_VOID telemetry_configuration(const scs_event_t event,
     }
 }
 
+// Fires on the Windows thread pool while the simulation is paused (delivery screen).
+// frame_start stops during a pause, so this timer bridges the gap between when the
+// AP client writes the delivery grant to items.json and when telemetry_started fires
+// (the player selects the next job).  g_apply_mutex serialises against any concurrent
+// call from telemetry_started.
+static VOID CALLBACK pause_grant_timer_cb(PVOID, BOOLEAN) {
+    if (g_applying_grant.load(std::memory_order_acquire)) return;
+    read_items_file();
+    apply_memory_grants(/*allow_paused=*/true);
+}
+
 SCSAPI_VOID telemetry_paused(const scs_event_t event, const void* const event_info,
                               const scs_context_t context) {
     // Re-read config.cfg so a mid-session profile switch (main menu → new profile)
@@ -1179,12 +1196,30 @@ SCSAPI_VOID telemetry_paused(const scs_event_t event, const void* const event_in
         read_items_file();
         apply_memory_grants();
     }
+
+    // Start a periodic timer that retries items.json + grant application while
+    // the delivery screen is shown.  2 s initial delay gives the AP client time
+    // to process the delivery event and write items.json; 1 s period thereafter.
+    // Cancelled in telemetry_started.
+    if (!g_apply_timer) {
+        CreateTimerQueueTimer(&g_apply_timer, NULL,
+                              pause_grant_timer_cb, nullptr,
+                              2000, 1000,
+                              WT_EXECUTEDEFAULT);
+    }
+
     std::lock_guard<std::mutex> lock(g_state_mutex);
     g_state.in_game = false;
 }
 
 SCSAPI_VOID telemetry_started(const scs_event_t event, const void* const event_info,
                                const scs_context_t context) {
+    // Cancel the paused-grant timer.  g_apply_mutex inside apply_memory_grants
+    // serialises against any callback that may already be in flight.
+    if (g_apply_timer) {
+        DeleteTimerQueueTimer(NULL, g_apply_timer, NULL);
+        g_apply_timer = nullptr;
+    }
     {
         std::lock_guard<std::mutex> lock(g_state_mutex);
         g_state.in_game = true;
@@ -1304,6 +1339,10 @@ SCSAPI_VOID scs_telemetry_shutdown() {
     {
         std::lock_guard<std::mutex> lock(g_state_mutex);
         g_state.plugin_alive = false;
+    }
+    if (g_apply_timer) {
+        DeleteTimerQueueTimer(NULL, g_apply_timer, NULL);
+        g_apply_timer = nullptr;
     }
     if (g_applied_dirty.exchange(false, std::memory_order_relaxed))
         save_applied_state();
