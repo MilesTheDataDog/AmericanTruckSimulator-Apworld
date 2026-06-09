@@ -67,7 +67,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.11.0";
+static const char* PLUGIN_VERSION = "2.12.0";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -218,6 +218,36 @@ static std::atomic<bool> g_applied_dirty{false};
 // Seed identifier written by the AP client into items.json.
 // When this changes, applied counters are reset so new-seed grants start from zero.
 static std::string g_current_seed;
+
+// Active ATS profile ID parsed from config.cfg (hex string, e.g. "4D696C6573").
+// Written to events.json so the client can restrict save-file discovery to the
+// correct profile and never fall back to reading a different profile's save.
+static std::string g_active_profile_id;
+
+// Read g_last_select_profile_id from config.cfg and update g_active_profile_id.
+// Called at init and on telemetry_paused so mid-session profile switches are caught.
+static void refresh_active_profile_id() {
+    fs::path cfg = get_documents_path() / "American Truck Simulator" / "config.cfg";
+    try {
+        std::ifstream f(cfg);
+        if (!f.is_open()) return;
+        std::string line;
+        while (std::getline(f, line)) {
+            size_t pos = line.find("g_last_select_profile_id");
+            if (pos == std::string::npos) continue;
+            size_t q1 = line.find('"', pos);
+            if (q1 == std::string::npos) continue;
+            size_t q2 = line.find('"', q1 + 1);
+            if (q2 == std::string::npos) continue;
+            std::string pid = line.substr(q1 + 1, q2 - q1 - 1);
+            if (!pid.empty() && pid != g_active_profile_id) {
+                g_active_profile_id = pid;
+                log("Active profile ID: " + g_active_profile_id);
+            }
+            return;
+        }
+    } catch (...) {}
+}
 
 // Previous city count — detects increases without keeping the breakpoint live.
 static uint64_t g_prev_city_count = UINT64_MAX; // UINT64_MAX = uninitialized
@@ -829,6 +859,10 @@ static void flush_events_file() {
     j["applied_money_total"] = g_applied_money;
     j["applied_xp_total"]   = g_applied_xp;
 
+    // Active profile ID (from config.cfg) — client uses this to lock save discovery
+    // to the correct profile and never fall back to reading a different profile.
+    j["active_profile_id"] = g_active_profile_id;
+
     // City count change signal (reset after writing so client gets exactly one pulse)
     j["city_count_changed"] = g_state.city_count_changed;
     g_state.city_count_changed = false;
@@ -1005,6 +1039,10 @@ SCSAPI_VOID telemetry_configuration(const scs_event_t event,
 
 SCSAPI_VOID telemetry_paused(const scs_event_t event, const void* const event_info,
                               const scs_context_t context) {
+    // Re-read config.cfg so a mid-session profile switch (main menu → new profile)
+    // updates active_profile_id before the next events.json flush.
+    refresh_active_profile_id();
+
     // Attempt grant application while in_game is still true (set false below).
     // The re-entrancy guard ensures the job_delivered apply_memory_grants call (which
     // runs synchronously on this same thread just before the pause event) isn't
@@ -1077,6 +1115,9 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
     g_applied_file = g_comm_dir / "applied.json";
     if (!fs::exists(g_comm_dir)) fs::create_directories(g_comm_dir);
     log("Comm folder: " + g_comm_dir.string());
+
+    // Read active profile ID from config.cfg so the client can lock save discovery.
+    refresh_active_profile_id();
 
     // Resolve instruction addresses from module base + RVA (with AOB fallback for XP).
     resolve_addresses();

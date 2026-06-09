@@ -57,7 +57,7 @@ except Exception as _e:
 colorama.init()
 
 GAME_NAME = "American Truck Simulator"
-CLIENT_VERSION = "1.3.0"
+CLIENT_VERSION = "1.4.0"
 
 # ── Communication folder ───────────────────────────────────────────────────────
 def _get_comm_dir() -> Path:
@@ -397,24 +397,28 @@ def _profile_id_from_config(docs: Path) -> "Optional[str]":
     return None
 
 
-def _find_ats_save_file() -> Optional[Path]:
+def _find_ats_save_file(forced_profile_id: Optional[str] = None) -> Optional[Path]:
     """Return the most-recently-modified READABLE game.sii for the active profile.
 
-    Strategy 1 (preferred): read g_last_select_profile_id from config.cfg and
-    scan only that profile's save directory.  This avoids picking up stale saves
-    from old profiles before the player loads their current session.
+    forced_profile_id — profile hex ID supplied by the DLL (from events.json) or
+    derived from config.cfg.  When present, ONLY saves under that profile are
+    considered; the function returns None rather than falling back to a different
+    profile.  This prevents an established profile's save from being read when
+    the player has loaded a new/empty profile that has no game.sii yet.
 
-    Strategy 2 (fallback): scan every profile across all known locations, sorted
-    newest-first.  Used when config.cfg is missing or its profile ID has no saves.
+    If no profile ID is available at all (config.cfg missing AND DLL not yet
+    connected), a full cross-profile scan is used as a last resort — this only
+    fires on first launch before any DLL or config data exists.
     """
     docs = Path(os.environ.get("USERPROFILE", Path.home())) / "Documents" / "American Truck Simulator"
 
     candidates: "list[tuple[float, Path]]" = []
 
-    # Strategy 1: config.cfg tells us exactly which profile is active.
-    profile_id = _profile_id_from_config(docs)
+    # Resolve profile ID: caller-supplied (DLL) > config.cfg.
+    profile_id = forced_profile_id or _profile_id_from_config(docs)
+
     if profile_id:
-        logger.debug(f"[ATS] config.cfg last profile: {profile_id}")
+        logger.debug(f"[ATS] Save scan: active profile {profile_id}")
         profile_dirs = [
             docs / "profiles" / profile_id,
             docs / "steam" / "profiles" / profile_id,
@@ -440,20 +444,27 @@ def _find_ats_save_file() -> Optional[Path]:
                 except OSError:
                     pass
 
-    # Strategy 2: fall back to scanning all profiles if config gave us nothing.
-    if not candidates:
-        if profile_id:
+        # Profile ID is known — never fall back to other profiles.
+        # A new/empty profile has no saves yet; return None and wait.
+        if not candidates:
             logger.debug(
-                f"[ATS] Profile {profile_id} from config.cfg has no saves on disk — "
-                "falling back to full profile scan"
+                f"[ATS] Profile {profile_id} has no saves yet — "
+                "waiting for first autosave (will not read other profiles)"
             )
+            return None
+
+    else:
+        # No profile ID available at all (config.cfg missing AND DLL not yet
+        # connected).  Last-resort: scan all profiles and pick the newest save.
+        # This fires only on fresh installs or unusual setups.
+        logger.debug("[ATS] No profile ID available — falling back to full profile scan")
         for remote in _steam_userdata_roots():
             _scan_profiles_dir(remote / "steam" / "profiles", candidates)
             _scan_profiles_dir(remote / "profiles", candidates)
         _scan_profiles_dir(docs / "profiles", candidates)
         _scan_profiles_dir(docs / "steam" / "profiles", candidates)
 
-    # Pick the newest readable save from whichever strategy produced candidates.
+    # Return the newest readable save from the candidate set.
     for _mtime, path in sorted(candidates, key=lambda x: x[0], reverse=True):
         try:
             with path.open("rb") as _f:
@@ -1473,6 +1484,12 @@ class ATSContext(CommonContext):
         self._notifications: List[Dict] = []
         self._notification_counter: int = 0
 
+        # Active profile ID supplied by the DLL via events.json ("active_profile_id").
+        # When set, save-file discovery searches only this profile and never falls
+        # back to other profiles (prevents reading an established profile's save when
+        # the player has loaded a new empty profile that has no game.sii yet).
+        self._dll_profile_id: Optional[str] = None
+
         # Save file polling state
         self._save_last_mtime: float = 0.0
         self._save_known_cities: Set[str] = set()
@@ -1759,6 +1776,16 @@ class ATSContext(CommonContext):
                     f"[ATS] Level up: {self.current_level} "
                     f"(goal_level={gl} — {'GOAL MET' if l_ok else 'not yet met'})"
                 )
+
+        # Active profile ID from DLL — locks save discovery to the correct profile.
+        _dll_pid = data.get("active_profile_id", "")
+        if _dll_pid and _dll_pid != self._dll_profile_id:
+            logger.info(f"[ATS] Active profile ID (from DLL): {_dll_pid}")
+            self._dll_profile_id = _dll_pid
+            # Profile changed mid-session — reset save-path tracking so the
+            # correct profile's save is picked up on the next poll.
+            self._save_path_logged = False
+            self._save_not_found_warned = False
 
         # DLL pointer status
         self._ptr_money_ready = data.get("ptr_money_ready", False)
@@ -2061,15 +2088,21 @@ class ATSContext(CommonContext):
         if not self.auth:
             return
 
-        save_path = _find_ats_save_file()
+        save_path = _find_ats_save_file(forced_profile_id=self._dll_profile_id)
         if not save_path:
             if not self._save_not_found_warned:
                 self._save_not_found_warned = True
-                logger.warning(
-                    "[ATS] No ATS save file (game.sii) found. "
-                    "City/state checks will not fire until a save is found. "
-                    "Make sure ATS has been saved at least once."
-                )
+                if self._dll_profile_id:
+                    logger.info(
+                        f"[ATS] Profile {self._dll_profile_id} has no save file yet — "
+                        "waiting for first autosave. City/state checks will fire normally once saved."
+                    )
+                else:
+                    logger.warning(
+                        "[ATS] No ATS save file (game.sii) found. "
+                        "City/state checks will not fire until a save is found. "
+                        "Make sure ATS has been saved at least once."
+                    )
             return
 
         if not self._save_path_logged:
