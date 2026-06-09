@@ -67,7 +67,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.13.0";
+static const char* PLUGIN_VERSION = "2.14.0";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -868,6 +868,14 @@ static void flush_events_file() {
 
     // Active profile ID (from config.cfg) — client uses this to lock save discovery
     // to the correct profile and never fall back to reading a different profile.
+    {
+        static std::string s_flushed_pid;
+        if (g_active_profile_id != s_flushed_pid) {
+            s_flushed_pid = g_active_profile_id;
+            log("events.json: active_profile_id=" +
+                (g_active_profile_id.empty() ? std::string("(empty)") : g_active_profile_id));
+        }
+    }
     j["active_profile_id"] = g_active_profile_id;
 
     // City count change signal (reset after writing so client gets exactly one pulse)
@@ -1048,7 +1056,10 @@ SCSAPI_VOID telemetry_paused(const scs_event_t event, const void* const event_in
                               const scs_context_t context) {
     // Re-read config.cfg so a mid-session profile switch (main menu → new profile)
     // updates active_profile_id before the next events.json flush.
+    // Flush immediately: frame events stop firing while paused, so without this
+    // the updated profile ID would never reach the client until the game resumes.
     refresh_active_profile_id();
+    flush_events_file();
 
     // Attempt grant application while in_game is still true (set false below).
     // The re-entrancy guard ensures the job_delivered apply_memory_grants call (which
@@ -1068,6 +1079,12 @@ SCSAPI_VOID telemetry_started(const scs_event_t event, const void* const event_i
         std::lock_guard<std::mutex> lock(g_state_mutex);
         g_state.in_game = true;
     }
+    // Re-read config.cfg here: the player may have just selected a new profile
+    // from the profile screen, and config.cfg is now updated with the new ID.
+    // Flush immediately so the client receives the ID before the first save poll.
+    refresh_active_profile_id();
+    flush_events_file();
+
     // Apply any grants that arrived while the game was paused (delivery screen, etc.)
     // and that couldn't be written without the pointer being ready.
     if (!g_applying_grant.load(std::memory_order_acquire)) {

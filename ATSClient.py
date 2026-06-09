@@ -57,7 +57,7 @@ except Exception as _e:
 colorama.init()
 
 GAME_NAME = "American Truck Simulator"
-CLIENT_VERSION = "1.6.0"
+CLIENT_VERSION = "1.7.0"
 
 # ── Communication folder ───────────────────────────────────────────────────────
 def _get_comm_dir() -> Path:
@@ -515,7 +515,19 @@ def _find_ats_save_file(forced_profile_id: Optional[str] = None) -> Optional[Pat
                 logger.info(f"[ATS] Save search root [{ud_idx}] (userdata): {sub}")
                 _scan_profiles_dir(sub, ud_candidates)
 
-        return _pick(ud_candidates)
+        # Stale guard: never select a userdata profile whose most-recent save is
+        # older than 6 months — protects against grabbing abandoned cloud backups.
+        _SIX_MONTHS = 180 * 24 * 3600
+        cutoff = time.time() - _SIX_MONTHS
+        fresh_ud = [(mt, p) for mt, p in ud_candidates if mt >= cutoff]
+        if not fresh_ud:
+            if ud_candidates:
+                logger.warning(
+                    "[ATS] All userdata saves are stale (>6 months old) — "
+                    "skipping to avoid reading abandoned cloud backups"
+                )
+            return None
+        return _pick(fresh_ud)
 
 
 
@@ -1536,6 +1548,10 @@ class ATSContext(CommonContext):
         self._save_first_city_log: bool = False  # True after first city-count log
         self.current_xp: int = 0
         self._save_not_found_warned: bool = False
+        # Cached save path — re-run discovery only when this becomes invalid or
+        # the active profile changes.  Prevents flip-flopping between profiles
+        # across polls when no stable profile ID is yet available from the DLL.
+        self._cached_save_path: Optional[Path] = None
 
         # Delivery-state tracking for arrival reward coalescing.
         # While a delivery is active, items.json writes from item receipts are
@@ -1816,17 +1832,25 @@ class ATSContext(CommonContext):
                 )
 
         # Active profile ID from DLL — locks save discovery to the correct profile.
-        _dll_pid = data.get("active_profile_id", "")
-        if _dll_pid:
-            logger.info(f"[ATS] Active profile ID from DLL: {_dll_pid}")
-            if _dll_pid != self._dll_profile_id:
-                self._dll_profile_id = _dll_pid
+        # Distinguish absent (DLL too old / events.json not yet written) from empty
+        # (DLL wrote it but config.cfg hasn't been read yet at init time).
+        _dll_pid_raw = data.get("active_profile_id")  # None=key absent, ""=empty, str=value
+        if _dll_pid_raw is None:
+            logger.info("[ATS] Active profile ID from DLL: NONE (key absent from events.json)")
+        elif not _dll_pid_raw:
+            logger.info(
+                "[ATS] Active profile ID from DLL: NONE "
+                "(key present but empty — DLL has not yet read config.cfg)"
+            )
+        else:
+            logger.info(f"[ATS] Active profile ID from DLL: {_dll_pid_raw}")
+            if _dll_pid_raw != self._dll_profile_id:
+                self._dll_profile_id = _dll_pid_raw
                 # Profile changed mid-session — reset save-path tracking so the
                 # correct profile's save is picked up on the next poll.
                 self._save_path_logged = False
                 self._save_not_found_warned = False
-        else:
-            logger.info("[ATS] Active profile ID from DLL: NONE (key absent from events.json)")
+                self._cached_save_path = None
 
         # DLL pointer status
         self._ptr_money_ready = data.get("ptr_money_ready", False)
@@ -2129,22 +2153,30 @@ class ATSContext(CommonContext):
         if not self.auth:
             return
 
-        save_path = _find_ats_save_file(forced_profile_id=self._dll_profile_id)
-        if not save_path:
-            if not self._save_not_found_warned:
-                self._save_not_found_warned = True
-                if self._dll_profile_id:
-                    logger.info(
-                        f"[ATS] Profile {self._dll_profile_id} has no save file yet — "
-                        "waiting for first autosave. City/state checks will fire normally once saved."
-                    )
-                else:
-                    logger.warning(
-                        "[ATS] No ATS save file (game.sii) found. "
-                        "City/state checks will not fire until a save is found. "
-                        "Make sure ATS has been saved at least once."
-                    )
-            return
+        # Re-run discovery only when needed — anchor to the cached path once found.
+        # This prevents flipping between profiles across polls when the DLL profile
+        # ID is not yet available or changes transiently.
+        if self._cached_save_path is None or not self._cached_save_path.exists():
+            self._cached_save_path = None
+            save_path = _find_ats_save_file(forced_profile_id=self._dll_profile_id)
+            if not save_path:
+                if not self._save_not_found_warned:
+                    self._save_not_found_warned = True
+                    if self._dll_profile_id:
+                        logger.info(
+                            f"[ATS] Profile {self._dll_profile_id} has no save file yet — "
+                            "waiting for first autosave. City/state checks will fire normally once saved."
+                        )
+                    else:
+                        logger.warning(
+                            "[ATS] No ATS save file (game.sii) found. "
+                            "City/state checks will not fire until a save is found. "
+                            "Make sure ATS has been saved at least once."
+                        )
+                return
+            self._cached_save_path = save_path
+
+        save_path = self._cached_save_path
 
         if not self._save_path_logged:
             self._save_not_found_warned = False
@@ -2154,6 +2186,9 @@ class ATSContext(CommonContext):
         try:
             mtime = save_path.stat().st_mtime
         except OSError:
+            # File was deleted — force re-discovery on next poll.
+            self._cached_save_path = None
+            self._save_path_logged = False
             return
 
         if not self._force_save_poll and mtime <= self._save_last_mtime:
