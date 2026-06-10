@@ -57,7 +57,7 @@ except Exception as _e:
 colorama.init()
 
 GAME_NAME = "American Truck Simulator"
-CLIENT_VERSION = "1.10.0"
+CLIENT_VERSION = "1.11.0"
 
 # ── Communication folder ───────────────────────────────────────────────────────
 def _get_comm_dir() -> Path:
@@ -199,8 +199,14 @@ def _seed_coord_store(store: Dict[str, Any]) -> int:
 
 
 # City IDs confirmed to have bad coordinates captured from incorrect telemetry.
-# Purged at startup so they are re-captured from live position on next visit.
-_COORD_PURGE_IDS: frozenset = frozenset({"boise", "cheyenne"})
+# Purged at startup; coords will be re-captured on next delivery to that city.
+_COORD_PURGE_IDS: frozenset = frozenset({
+    "boise",       # bad coords from previous session
+    "cheyenne",    # captured at Ogden delivery position (stale _truck_pos)
+    "salt_lake",   # captured at world origin (0,0) — zeroed telemetry at startup
+    "seattle",     # captured at Sidney NE delivery position (stale _truck_pos)
+    "little_rock", # captured at Laramie position (stale _truck_pos)
+})
 
 
 def _purge_bad_coords(store: Dict[str, Any]) -> int:
@@ -1908,7 +1914,9 @@ class ATSContext(CommonContext):
                 _hint_type = event.get("hint_type", "")  # "source" or "destination"
                 _hint_label = f"DLL hint: {_hint_type}" if _hint_type else "DLL hint"
                 if hint_city and self.auth:
-                    if self._truck_pos and hint_city not in self._coord_store:
+                    if (_hint_type == "destination"
+                            and self._truck_pos
+                            and hint_city not in self._coord_store):
                         self._capture_coord(hint_city, self._truck_pos)
                     self._process_city_arrival_hint(hint_city, _hint_label)
                 continue
