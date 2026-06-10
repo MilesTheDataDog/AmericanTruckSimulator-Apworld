@@ -67,7 +67,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.19.0";
+static const char* PLUGIN_VERSION = "2.20.0";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -213,8 +213,12 @@ static std::atomic<uintptr_t> g_city_ptr{0};
 
 // Cumulative grant amounts written to the player's save across all sessions.
 // Loaded from applied.json on startup so restarts don't re-apply old grants.
-static long long g_applied_money = 0;
-static int       g_applied_xp    = 0;
+static long long g_applied_money  = 0;
+static int       g_applied_xp     = 0;
+// When a fine exceeds the current balance (clamped to $0), the uncollected
+// portion is stored here.  Future grants pay off this debt first so that
+// delivery income isn't permanently lost to the clamp.
+static long long g_clamped_debt   = 0;
 static std::atomic<bool> g_applied_dirty{false};
 
 // Seed identifier written by the AP client into items.json.
@@ -656,16 +660,33 @@ static LONG WINAPI ats_veh(EXCEPTION_POINTERS* ep) {
             long long net_money = g_items.total_money_granted - g_items.total_money_deducted;
             long long delta = net_money - (long long)g_applied_money;
             if (delta != 0) {
-                long long new_rcx = (long long)ctx->Rcx + delta;
-                if (new_rcx < 0) new_rcx = 0;
-                ctx->Rcx = (DWORD64)new_rcx;
-                g_applied_money      = net_money;
-                g_last_written_money = new_rcx;
+                // Grants: pay off outstanding clamp-debt first so delivery income is
+                // not permanently lost to a fine that exceeded the previous balance.
+                long long effective_delta = delta;
+                if (delta > 0 && g_clamped_debt > 0) {
+                    long long debt_paid = std::min(g_clamped_debt, delta);
+                    effective_delta -= debt_paid;
+                    g_clamped_debt  -= debt_paid;
+                }
+                if (effective_delta != 0) {
+                    long long new_rcx = (long long)ctx->Rcx + effective_delta;
+                    if (new_rcx < 0) {
+                        g_clamped_debt += (long long)(-new_rcx);
+                        new_rcx = 0;
+                    }
+                    ctx->Rcx = (DWORD64)new_rcx;
+                    g_last_written_money = new_rcx;
+                    if (effective_delta > 0)
+                        log("Grant injected at capture: +$" + std::to_string(effective_delta));
+                    else
+                        log("Fine injected at capture: -$" + std::to_string(-effective_delta) +
+                            (g_clamped_debt > 0 ? " (debt: $" + std::to_string(g_clamped_debt) + ")" : ""));
+                } else {
+                    log("Debt offset at capture: $" + std::to_string(delta) +
+                        " grant consumed by debt (remaining: $" + std::to_string(g_clamped_debt) + ")");
+                }
+                g_applied_money = net_money;
                 g_applied_dirty.store(true, std::memory_order_relaxed);
-                if (delta > 0)
-                    log("Grant injected at capture: +$" + std::to_string(delta));
-                else
-                    log("Fine injected at capture: -$" + std::to_string(-delta));
             }
         }
         ctx->Dr0 = 0;
@@ -746,6 +767,7 @@ static void apply_memory_grants(bool allow_paused) {
             if (seed_changed) g_current_seed = g_items.seed;
             g_applied_money      = 0;
             g_applied_xp         = 0;
+            g_clamped_debt       = 0;
             g_last_written_money = LLONG_MIN;
             g_last_written_xp    = INT32_MIN;
             save_applied_state();
@@ -770,32 +792,58 @@ static void apply_memory_grants(bool allow_paused) {
             long long net_money = g_items.total_money_granted - g_items.total_money_deducted;
             long long delta = net_money - g_applied_money;
             if (delta != 0) {
-                long long newval = current + delta;
-                if (newval < 0) newval = 0;
-                // Skip if writing would produce the same value we last wrote — this means our
-                // previous write is still in effect and the game hasn't changed the value.
-                // Without this guard a rapid pause/resume cycle can re-apply the same delta.
-                if (newval == g_last_written_money) {
-                    log("Grant skip (money): in-memory value matches last write ($" +
-                        std::to_string(newval) + ") — marking as applied");
-                    g_applied_money = net_money;
-                } else if (safe_write_i64(mp + MONEY_OFFSET, newval)) {
-                    g_applied_money      = net_money;
-                    g_last_written_money = newval;
-                    g_applied_dirty.store(true, std::memory_order_relaxed);
-                    // g_applied_dirty deferred to frame flush (≤2 s) — do NOT call
-                    // save_applied_state() here; each per-write file-write can
-                    // trigger an ATS directory-change scan and a game save.
-                    if (delta > 0)
-                        log("Grant applied (money): +$" + std::to_string(delta) +
-                            " → balance $" + std::to_string(newval));
-                    else
-                        log("Fine applied (money): -$" + std::to_string(-delta) +
-                            " → balance $" + std::to_string(newval));
+                // Grants: pay off outstanding clamp-debt first so delivery income is
+                // not permanently lost to a fine that exceeded the previous balance.
+                long long effective_delta = delta;
+                long long new_debt = g_clamped_debt;
+                if (delta > 0 && new_debt > 0) {
+                    long long debt_paid = std::min(new_debt, delta);
+                    effective_delta -= debt_paid;
+                    new_debt        -= debt_paid;
+                }
+                bool applied = false;
+                if (effective_delta != 0) {
+                    long long newval = current + effective_delta;
+                    if (newval < 0) {
+                        new_debt += (long long)(-newval);
+                        newval = 0;
+                    }
+                    // Skip if writing would produce the same value we last wrote — this means our
+                    // previous write is still in effect and the game hasn't changed the value.
+                    // Without this guard a rapid pause/resume cycle can re-apply the same delta.
+                    if (newval == g_last_written_money) {
+                        log("Grant skip (money): in-memory value matches last write ($" +
+                            std::to_string(newval) + ") — marking as applied");
+                        applied = true;
+                    } else if (safe_write_i64(mp + MONEY_OFFSET, newval)) {
+                        g_last_written_money = newval;
+                        // g_applied_dirty deferred to frame flush (≤2 s) — do NOT call
+                        // save_applied_state() here; each per-write file-write can
+                        // trigger an ATS directory-change scan and a game save.
+                        g_applied_dirty.store(true, std::memory_order_relaxed);
+                        applied = true;
+                        if (effective_delta > 0)
+                            log("Grant applied (money): +$" + std::to_string(effective_delta) +
+                                " → balance $" + std::to_string(newval));
+                        else
+                            log("Fine applied (money): -$" + std::to_string(-effective_delta) +
+                                " → balance $" + std::to_string(newval) +
+                                (new_debt > 0 ? " (debt: $" + std::to_string(new_debt) + ")" : ""));
+                    } else {
+                        log("Grant failed: money write error — resetting pointer", SCS_LOG_TYPE_warning);
+                        g_money_ptr.store(0, std::memory_order_relaxed);
+                        needs_rearm = true;
+                    }
                 } else {
-                    log("Grant failed: money write error — resetting pointer", SCS_LOG_TYPE_warning);
-                    g_money_ptr.store(0, std::memory_order_relaxed);
-                    needs_rearm = true;
+                    // Grant fully consumed by debt — no balance change, debt reduced.
+                    log("Debt offset (money): $" + std::to_string(delta) +
+                        " grant consumed by debt (remaining: $" + std::to_string(new_debt) + ")");
+                    applied = true;
+                }
+                if (applied) {
+                    g_clamped_debt  = new_debt;
+                    g_applied_money = net_money;
+                    g_applied_dirty.store(true, std::memory_order_relaxed);
                 }
             }
         }
@@ -908,9 +956,11 @@ static void load_applied_state() {
         json j = json::parse(f);
         g_applied_money = j.value("applied_money", (long long)0);
         g_applied_xp    = j.value("applied_xp",    0);
+        g_clamped_debt  = j.value("clamped_debt",  (long long)0);
         g_current_seed  = j.value("seed",           std::string(""));
         log("Applied state restored: $" + std::to_string(g_applied_money) +
             ", " + std::to_string(g_applied_xp) + " XP" +
+            (g_clamped_debt > 0 ? ", debt $" + std::to_string(g_clamped_debt) : "") +
             (g_current_seed.empty() ? "" : " (seed=" + g_current_seed + ")"));
     } catch (...) {}
 }
@@ -920,6 +970,7 @@ static void save_applied_state() {
         json j;
         j["applied_money"] = g_applied_money;
         j["applied_xp"]    = g_applied_xp;
+        j["clamped_debt"]  = g_clamped_debt;
         j["seed"]          = g_current_seed;
         fs::path tmp = g_applied_file;
         tmp += ".tmp";
