@@ -131,6 +131,27 @@ American Truck Simulator:
     'false': 0
     'true': 50
 
+  # ── Trap Percentage ───────────────────────────────────────────────────────────
+  # What percentage of filler item slots are replaced with money trap items
+  # (traffic fines). When a trap is received, the fine amount is deducted from
+  # your in-game money balance. The balance cannot drop below $0.
+  #
+  # Fine amounts: $500  $1,000  $2,500  $5,000  $10,000  $25,000  $50,000
+  #
+  # You can define additional values between the minimum and maximum values.
+  # Minimum value is 0 (no traps)
+  # Maximum value is 100 (all filler slots become traps)
+  trap_percentage:
+    0: 50
+    10: 0
+    20: 0
+    25: 0
+    50: 0
+    random: 0
+    random-low: 0
+    random-high: 0
+    random-range-0-100: 0
+
   # ── Death Link ────────────────────────────────────────────────────────────────
   # When enabled, crashing your truck sends a "death" event to all Death Link
   # players in the session. Receiving a death from them causes a truck breakdown.

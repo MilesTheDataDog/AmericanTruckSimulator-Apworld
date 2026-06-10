@@ -48,6 +48,7 @@ from .items import (
     ATSItemData,
     ITEM_NAME_TO_ID,
     FILLER_ITEMS,
+    MONEY_TRAP_ITEMS,
     VICTORY_ITEM_NAME,
     VICTORY_ITEM,
     get_items_for_options,
@@ -107,6 +108,7 @@ class ATSWorld(World):
     item_name_groups = {
         "Money Grants": {name for name in ALL_ITEMS if name.endswith("Money Grant")},
         "XP Grants": {name for name in ALL_ITEMS if name.endswith("XP Grant")},
+        "Money Traps": set(MONEY_TRAP_ITEMS.keys()),
     }
 
     def create_item(self, name: str) -> ATSItem:
@@ -126,12 +128,17 @@ class ATSWorld(World):
         # Create items; track how many we have
         items: List[ATSItem] = [self.create_item(name) for name in pool_names]
 
-        # Pad with filler to match location count
+        # Pad with filler (and traps, per trap_percentage option) to match location count
         filler_names = list(FILLER_ITEMS.keys())
+        trap_names = list(MONEY_TRAP_ITEMS.keys())
+        trap_pct = self.options.trap_percentage.value
         filler_idx = 0
         while len(items) < real_loc_count:
-            items.append(self.create_item(filler_names[filler_idx % len(filler_names)]))
-            filler_idx += 1
+            if trap_pct > 0 and trap_names and self.random.randint(1, 100) <= trap_pct:
+                items.append(self.create_item(self.random.choice(trap_names)))
+            else:
+                items.append(self.create_item(filler_names[filler_idx % len(filler_names)]))
+                filler_idx += 1
 
         # If we have more items than locations, trim lowest-priority filler
         while len(items) > real_loc_count:

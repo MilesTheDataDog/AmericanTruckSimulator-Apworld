@@ -8,6 +8,7 @@ ATS_BASE_ID = 17_000_000
 # ── Item ID offsets ────────────────────────────────────────────────────────────
 # Money grant items:      ATS_BASE_ID + 3000  (slots 3000–3002)
 # XP grant items:         ATS_BASE_ID + 3100  (slots 3100–3102)
+# Money trap items:       ATS_BASE_ID + 4000  (slots 4000–4006)
 # Filler items:           ATS_BASE_ID + 9000  (slots 9000–9099)
 
 
@@ -100,6 +101,54 @@ XP_GRANT_ITEMS: Dict[str, ATSItemData] = {
     ),
 }
 
+# ── Money trap items ──────────────────────────────────────────────────────────
+# Received as Archipelago trap items; client deducts the fine amount from the
+# player's running money total, which the DLL subtracts from live in-game money.
+MONEY_TRAP_ITEMS: Dict[str, ATSItemData] = {
+    "Fine ($500)": ATSItemData(
+        code=ATS_BASE_ID + 4000,
+        classification=ItemClassification.trap,
+        category="money_trap",
+        game_id="money_trap_500",
+    ),
+    "Fine ($1,000)": ATSItemData(
+        code=ATS_BASE_ID + 4001,
+        classification=ItemClassification.trap,
+        category="money_trap",
+        game_id="money_trap_1000",
+    ),
+    "Fine ($2,500)": ATSItemData(
+        code=ATS_BASE_ID + 4002,
+        classification=ItemClassification.trap,
+        category="money_trap",
+        game_id="money_trap_2500",
+    ),
+    "Fine ($5,000)": ATSItemData(
+        code=ATS_BASE_ID + 4003,
+        classification=ItemClassification.trap,
+        category="money_trap",
+        game_id="money_trap_5000",
+    ),
+    "Fine ($10,000)": ATSItemData(
+        code=ATS_BASE_ID + 4004,
+        classification=ItemClassification.trap,
+        category="money_trap",
+        game_id="money_trap_10000",
+    ),
+    "Fine ($25,000)": ATSItemData(
+        code=ATS_BASE_ID + 4005,
+        classification=ItemClassification.trap,
+        category="money_trap",
+        game_id="money_trap_25000",
+    ),
+    "Fine ($50,000)": ATSItemData(
+        code=ATS_BASE_ID + 4006,
+        classification=ItemClassification.trap,
+        category="money_trap",
+        game_id="money_trap_50000",
+    ),
+}
+
 # ── Filler items ───────────────────────────────────────────────────────────────
 FILLER_ITEMS: Dict[str, ATSItemData] = {
     **MONEY_GRANT_ITEMS,
@@ -125,6 +174,7 @@ VICTORY_ITEM = ATSItemData(
 ALL_ITEMS: Dict[str, ATSItemData] = {
     **MONEY_GRANT_ITEMS,
     **XP_GRANT_ITEMS,
+    **MONEY_TRAP_ITEMS,
     **FILLER_ITEMS,
     VICTORY_ITEM_NAME: VICTORY_ITEM,
 }

@@ -67,7 +67,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.18.0";
+static const char* PLUGIN_VERSION = "2.19.0";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -104,12 +104,13 @@ static GameState g_state;
 
 // ── Item state (read from items.json) ─────────────────────────────────────────
 struct ItemState {
-    long long total_money_granted = 0;
-    int       total_xp_granted    = 0;
-    int       win_condition       = 0;
-    int       goal_level          = 35;
-    long long goal_money          = 1000000;
-    double    last_read_time      = 0.0;
+    long long total_money_granted  = 0;
+    long long total_money_deducted = 0;
+    int       total_xp_granted     = 0;
+    int       win_condition        = 0;
+    int       goal_level           = 35;
+    long long goal_money           = 1000000;
+    double    last_read_time       = 0.0;
     std::string seed;  // AP seed name; used to detect new-seed transitions
 };
 
@@ -649,15 +650,22 @@ static LONG WINAPI ats_veh(EXCEPTION_POINTERS* ep) {
             g_money_ptr.store(ctx->Rdi, std::memory_order_relaxed);
             log("Memory: money pointer captured " + hex_addr(ctx->Rdi));
             // The instruction (MOV [RDI+0x10], RCX) hasn't executed yet; RCX holds
-            // the new balance the game is about to write.  Inject our grant delta
+            // the new balance the game is about to write.  Inject our net grant delta
             // into RCX now so the game's own instruction commits the combined value.
-            long long delta = (long long)g_items.total_money_granted - (long long)g_applied_money;
-            if (delta > 0) {
-                ctx->Rcx = (DWORD64)((long long)ctx->Rcx + delta);
-                g_applied_money      = g_items.total_money_granted;
-                g_last_written_money = (long long)ctx->Rcx;
+            // net_money = granted - deducted (traps); delta can be negative (fine).
+            long long net_money = g_items.total_money_granted - g_items.total_money_deducted;
+            long long delta = net_money - (long long)g_applied_money;
+            if (delta != 0) {
+                long long new_rcx = (long long)ctx->Rcx + delta;
+                if (new_rcx < 0) new_rcx = 0;
+                ctx->Rcx = (DWORD64)new_rcx;
+                g_applied_money      = net_money;
+                g_last_written_money = new_rcx;
                 g_applied_dirty.store(true, std::memory_order_relaxed);
-                log("Grant injected at capture: +$" + std::to_string(delta));
+                if (delta > 0)
+                    log("Grant injected at capture: +$" + std::to_string(delta));
+                else
+                    log("Fine injected at capture: -$" + std::to_string(-delta));
             }
         }
         ctx->Dr0 = 0;
@@ -758,25 +766,32 @@ static void apply_memory_grants(bool allow_paused) {
             g_money_ptr.store(0, std::memory_order_relaxed);
             needs_rearm = true;
         } else {
-            if (g_items.total_money_granted > g_applied_money) {
-                long long delta  = g_items.total_money_granted - g_applied_money;
+            // net_money = granted - deducted (traps); delta may be negative (fine).
+            long long net_money = g_items.total_money_granted - g_items.total_money_deducted;
+            long long delta = net_money - g_applied_money;
+            if (delta != 0) {
                 long long newval = current + delta;
+                if (newval < 0) newval = 0;
                 // Skip if writing would produce the same value we last wrote — this means our
                 // previous write is still in effect and the game hasn't changed the value.
                 // Without this guard a rapid pause/resume cycle can re-apply the same delta.
                 if (newval == g_last_written_money) {
                     log("Grant skip (money): in-memory value matches last write ($" +
                         std::to_string(newval) + ") — marking as applied");
-                    g_applied_money = g_items.total_money_granted;
+                    g_applied_money = net_money;
                 } else if (safe_write_i64(mp + MONEY_OFFSET, newval)) {
-                    g_applied_money      = g_items.total_money_granted;
+                    g_applied_money      = net_money;
                     g_last_written_money = newval;
                     g_applied_dirty.store(true, std::memory_order_relaxed);
                     // g_applied_dirty deferred to frame flush (≤2 s) — do NOT call
                     // save_applied_state() here; each per-write file-write can
                     // trigger an ATS directory-change scan and a game save.
-                    log("Grant applied (money): +$" + std::to_string(delta) +
-                        " → balance $" + std::to_string(newval));
+                    if (delta > 0)
+                        log("Grant applied (money): +$" + std::to_string(delta) +
+                            " → balance $" + std::to_string(newval));
+                    else
+                        log("Fine applied (money): -$" + std::to_string(-delta) +
+                            " → balance $" + std::to_string(newval));
                 } else {
                     log("Grant failed: money write error — resetting pointer", SCS_LOG_TYPE_warning);
                     g_money_ptr.store(0, std::memory_order_relaxed);
@@ -872,8 +887,9 @@ static void read_items_file() {
         std::ifstream f(g_items_file);
         json j = json::parse(f);
 
-        g_items.total_money_granted = (long long)j.value("total_money_granted", 0);
-        g_items.total_xp_granted    = j.value("total_xp_granted", 0);
+        g_items.total_money_granted  = (long long)j.value("total_money_granted",  0);
+        g_items.total_money_deducted = (long long)j.value("total_money_deducted", 0);
+        g_items.total_xp_granted     = j.value("total_xp_granted", 0);
         g_items.win_condition       = j.value("win_condition", 0);
         g_items.goal_level          = j.value("goal_level", 35);
         g_items.goal_money          = (long long)(j.value("goal_money_thousands", 1000)) * 1000;

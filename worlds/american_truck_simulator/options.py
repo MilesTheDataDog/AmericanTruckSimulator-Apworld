@@ -122,6 +122,20 @@ class StateArrivalChecks(Toggle):
     default = 1
 
 
+class TrapPercentage(Range):
+    """
+    Percentage of filler item slots that will be replaced with money trap items
+    (fines). When a trap is received, the fine amount is deducted from the
+    player's in-game money. The fine cannot reduce the balance below $0.
+
+    Fine amounts: $500, $1,000, $2,500, $5,000, $10,000, $25,000, $50,000.
+    """
+    display_name = "Trap Percentage"
+    range_start = 0
+    range_end = 100
+    default = 0
+
+
 @dataclass
 class ATSOptions(PerGameCommonOptions):
     win_condition: WinCondition
@@ -132,4 +146,5 @@ class ATSOptions(PerGameCommonOptions):
     cargo_delivery_checks: CargoDeliveryChecks
     city_arrival_checks: CityArrivalChecks
     state_arrival_checks: StateArrivalChecks
+    trap_percentage: TrapPercentage
     death_link: DeathLink

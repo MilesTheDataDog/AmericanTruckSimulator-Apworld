@@ -57,7 +57,7 @@ except Exception as _e:
 colorama.init()
 
 GAME_NAME = "American Truck Simulator"
-CLIENT_VERSION = "1.11.0"
+CLIENT_VERSION = "1.12.0"
 
 # ── Communication folder ───────────────────────────────────────────────────────
 def _get_comm_dir() -> Path:
@@ -1354,8 +1354,10 @@ class ATSCommandProcessor(ClientCommandProcessor):
         logger.info(f"[ATS] City ptr ready:      {ctx._ptr_city_ready}")
         logger.info(f"[ATS] Current level:       {ctx.current_level}")
         logger.info(f"[ATS] Current money:       ${ctx.current_money:,}")
-        logger.info(f"[ATS] Total money granted: ${ctx._total_money_granted:,}")
-        logger.info(f"[ATS] Total XP granted:    {ctx._total_xp_granted:,}")
+        logger.info(f"[ATS] Total money granted:   ${ctx._total_money_granted:,}")
+        logger.info(f"[ATS] Total money deducted:  ${ctx._total_money_deducted:,}")
+        logger.info(f"[ATS] Net money effect:      ${ctx._total_money_granted - ctx._total_money_deducted:,}")
+        logger.info(f"[ATS] Total XP granted:      {ctx._total_xp_granted:,}")
         logger.info(f"[ATS] Checks sent:         {len(ctx.checked_locations)}")
         logger.info(f"[ATS] Goal satisfied:      {ctx.goal_complete}")
         logger.info(f"[ATS] Coord store:         {len(ctx._coord_store)} cities with coordinates")
@@ -1520,6 +1522,7 @@ class ATSContext(CommonContext):
 
         # Memory grant tracking — DLL applies grants directly to live memory
         self._total_money_granted: int = 0
+        self._total_money_deducted: int = 0
         self._total_xp_granted: int = 0
         self._applied_item_count: int = 0
 
@@ -1676,9 +1679,12 @@ class ATSContext(CommonContext):
                 display_text = f"{item_name} (from {sender_name})"
             logger.info(f"[ATS] Received item #{global_index}: {display_text}")
             try:
-                self._apply_item(item_name)
+                trap_amount = self._apply_item(item_name)
+                if trap_amount is not None:
+                    display_text = f"Money Trap: -${trap_amount:,}"
             except Exception:
                 logger.error(f"[ATS] Error applying item {item_name!r}:\n{traceback.format_exc()}")
+                trap_amount = None
             # Queue in-game notification popup (plugin reads item_notifications from items.json)
             self._notifications.append({
                 "id": self._notification_counter,
@@ -1694,28 +1700,38 @@ class ATSContext(CommonContext):
         if applied_any:
             self._write_items_file()
 
-    def _apply_item(self, item_name: str) -> None:
-        if item_name.endswith("Money Grant"):
-            from worlds.american_truck_simulator.items import ALL_ITEMS
-            item_data = ALL_ITEMS.get(item_name)
-            if item_data:
-                amount = int(item_data.game_id.split("_")[1])
-                self._total_money_granted += amount
-                logger.info(f"[ATS] Money grant: +${amount:,} (total: ${self._total_money_granted:,})")
+    def _apply_item(self, item_name: str) -> Optional[int]:
+        """Apply a received item to game state. Returns the fine amount for traps, else None."""
+        from worlds.american_truck_simulator.items import ALL_ITEMS
+        item_data = ALL_ITEMS.get(item_name)
 
-        elif item_name.endswith("XP Grant"):
-            from worlds.american_truck_simulator.items import ALL_ITEMS
-            item_data = ALL_ITEMS.get(item_name)
-            if item_data:
-                amount = int(item_data.game_id.split("_")[1])
-                self._total_xp_granted += amount
-                logger.info(f"[ATS] XP grant: +{amount:,} XP (total: {self._total_xp_granted:,})")
+        if item_data and item_data.category == "money_grant":
+            amount = int(item_data.game_id.split("_")[1])
+            self._total_money_granted += amount
+            logger.info(f"[ATS] Money grant: +${amount:,} (total: ${self._total_money_granted:,})")
+            return None
+
+        elif item_data and item_data.category == "xp_grant":
+            amount = int(item_data.game_id.split("_")[1])
+            self._total_xp_granted += amount
+            logger.info(f"[ATS] XP grant: +{amount:,} XP (total: {self._total_xp_granted:,})")
+            return None
+
+        elif item_data and item_data.category == "money_trap":
+            amount = int(item_data.game_id.split("_")[2])
+            self._total_money_deducted += amount
+            logger.info(
+                f"[ATS] Money trap: -${amount:,} fine "
+                f"(total deducted: ${self._total_money_deducted:,})"
+            )
+            return amount
 
         elif item_name not in ("Victory", "Trucking Permit"):
             logger.warning(
                 f"[ATS] Received unknown item {item_name!r} — no in-game effect. "
                 "This item is from an older game seed; regenerate with the current apworld."
             )
+        return None
 
 
     # ── Items file (client → plugin) ───────────────────────────────────────────
@@ -1745,6 +1761,7 @@ class ATSContext(CommonContext):
             # preventing stale carryover from a previous seed from blocking new grants.
             "seed": self._seed_id(),
             "total_money_granted": self._total_money_granted,
+            "total_money_deducted": self._total_money_deducted,
             "total_xp_granted": self._total_xp_granted,
             "win_condition": self.slot_data.get("win_condition", 0),
             "goal_level": self.slot_data.get("goal_level", 35),
