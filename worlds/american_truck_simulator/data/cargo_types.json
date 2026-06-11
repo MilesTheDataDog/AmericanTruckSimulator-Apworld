@@ -2,6 +2,7 @@
   "_notes": [
     "Cargo names sourced from trucksimulator.wiki.gg/wiki/Cargo_types/American_Truck_Simulator",
     "Excluded: Heavy Cargo Pack, Special Transport, Farm Machinery, JCB Equipment Pack, Volvo Construction Equipment, Forest Machinery, Bobcat Cargo Pack, KRONE Agriculture Equipment",
+    "IMPORTANT: Cargo IDs are positional (index → location code). New cargoes MUST be appended at the END of the array. Never reorder or delete entries.",
     "required_dlc null = base game or free version patch; state_id = only active when that DLC state is enabled",
     "trailer_types use snake_case normalized names matching ATS trailer categories"
   ],
@@ -2063,6 +2064,59 @@
         "drop_deck"
       ],
       "dlc_introduced": "1.0",
+      "required_dlc": null
+    },
+    {
+      "id": "chem_gran",
+      "name": "Chemical Granules",
+      "trailer_types": [
+        "container_carrier",
+        "dry_van",
+        "insulated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "1.59",
+      "required_dlc": null
+    },
+    {
+      "id": "geo_membrane",
+      "name": "Geo Membranes Rolls",
+      "trailer_types": [
+        "drop_deck",
+        "flatbed"
+      ],
+      "dlc_introduced": "1.59",
+      "required_dlc": null
+    },
+    {
+      "id": "mat_handler",
+      "name": "Material Handler",
+      "trailer_types": [
+        "lowboy"
+      ],
+      "dlc_introduced": "1.59",
+      "required_dlc": null
+    },
+    {
+      "id": "motor_grader",
+      "name": "Motor Grader",
+      "trailer_types": [
+        "drop_deck",
+        "lowboy"
+      ],
+      "dlc_introduced": "1.59",
+      "required_dlc": null
+    },
+    {
+      "id": "sulphur",
+      "name": "Sulphur",
+      "trailer_types": [
+        "container_carrier",
+        "dry_van",
+        "insulated",
+        "sliding_tarp"
+      ],
+      "dlc_introduced": "1.59",
       "required_dlc": null
     }
   ]

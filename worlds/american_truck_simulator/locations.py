@@ -6,7 +6,7 @@ from BaseClasses import LocationProgressType
 from .items import ATS_BASE_ID
 
 # ── Location ID offsets ────────────────────────────────────────────────────────
-# Cargo deliveries:       ATS_BASE_ID + 10000   (slots 10000–10499)
+# Cargo deliveries:       ATS_BASE_ID + 10000   (slots 10000–10209)
 # City first arrivals:    ATS_BASE_ID + 11000   (slots 11000–11272)
 # Level milestones:       ATS_BASE_ID + 12000   (slots 12000–12009)
 # State first visit:      ATS_BASE_ID + 15000   (slots 15000–15049)
