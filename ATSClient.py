@@ -1533,8 +1533,10 @@ class ATSContext(CommonContext):
 
         # Force a save poll on the next watcher cycle (used at startup and after delivery)
         self._force_save_poll: bool = False
-        # True while a _poll_save_for_city_arrival task is running, prevents stacking tasks.
-        self._city_arrival_poll_active: bool = False
+        # Set when city_count_changed fires; cleared when the save file reflects the new visit.
+        # Unlike the old timed retry, this persists indefinitely and resolves on the next
+        # save write (hotel sleep, game close, or any other save event).
+        self._city_arrival_pending: bool = False
 
         # Last level value for which we logged a win-condition progress line
         self._last_logged_level: int = 0
@@ -1909,10 +1911,9 @@ class ATSContext(CommonContext):
         # The live city_arrival_hint events are the primary trigger; this catches
         # bobtail exploration where no job is active to provide a hint.
         if data.get("city_count_changed", False):
-            logger.info("[ATS] City count incremented (backstop) — scheduling save poll")
-            if not self._city_arrival_poll_active:
-                self._city_arrival_poll_active = True
-                asyncio.create_task(self._poll_save_for_city_arrival())
+            logger.info("[ATS] City count incremented — pending city check until save reflects new visit")
+            self._city_arrival_pending = True
+            self._force_save_poll = True  # read immediately in case the game just wrote the save
 
         new_checks: List[int] = []
 
@@ -2135,44 +2136,6 @@ class ATSContext(CommonContext):
         logger.info("[ATS] Post-delivery poll: forcing save read for delivery-city checks")
         self._force_save_poll = True
 
-    async def _poll_save_for_city_arrival(self) -> None:
-        """
-        Poll game.sii with retries after the DLL reports city_count_changed.
-        ATS writes the save file on delivery, hotel sleep, or periodic autosave
-        (~every 60-120 s).  We retry up to ~120 s so the check fires at the
-        next autosave without requiring a delivery.
-
-        City checks are sent immediately when the save file reflects the new
-        visit — no delivery is needed.  This coroutine is idempotent: only one
-        instance runs at a time (guarded by _city_arrival_poll_active).
-        """
-        # Delays between retries: 5 s, then 10 s × 11 = ~115 s total
-        RETRY_DELAYS = [5] + [10] * 11
-        known_before = len(self._save_known_cities)
-        try:
-            for delay in RETRY_DELAYS:
-                await asyncio.sleep(delay)
-                if not self.auth:
-                    return
-                self._force_save_poll = True
-                self._poll_save_file()
-                if len(self._save_known_cities) > known_before:
-                    logger.info(
-                        f"[ATS] City arrival poll: new city confirmed in save "
-                        f"({len(self._save_known_cities) - known_before} new)"
-                    )
-                    return
-                logger.debug(
-                    f"[ATS] City arrival poll: save not yet updated "
-                    f"(known={len(self._save_known_cities)})"
-                )
-            logger.warning(
-                "[ATS] City arrival poll: gave up after ~120 s — "
-                "city will appear on next save read (delivery or autosave)"
-            )
-        finally:
-            self._city_arrival_poll_active = False
-
     def _poll_save_file(self) -> None:
         """
         Read the most recent ATS game.sii to detect new city/state visits and
@@ -2339,6 +2302,19 @@ class ATSContext(CommonContext):
                                     logger.info(f"[ATS] State arrival check: {state_name} → {sa_data.code} {_reward_tag}")
                                     break
                     break
+
+        if self._city_arrival_pending and not is_first_read:
+            if new_cities:
+                logger.info(
+                    f"[ATS] City arrival pending resolved — "
+                    f"{len(new_cities)} new city/cities now in save file"
+                )
+                self._city_arrival_pending = False
+            else:
+                logger.debug(
+                    "[ATS] City arrival pending: save written but visited_cities "
+                    "not yet updated — will check again on next save write"
+                )
 
         if new_checks:
             logger.info(f"[ATS] Save poll: sending {len(new_checks)} check(s).")

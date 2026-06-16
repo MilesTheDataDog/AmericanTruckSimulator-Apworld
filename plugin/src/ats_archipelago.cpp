@@ -95,6 +95,7 @@ struct GameState {
     std::string current_source_city_id;   // set from job config; used for live arrival hint
     std::string current_dest_city_id;     // set from job config; used for live arrival hint
     bool      job_active       = false;
+    bool      cargo_loaded     = false;   // false until SCS confirms cargo is on the trailer
     bool      in_game          = false;
     bool      city_count_changed = false;
     bool      dest_hint_sent   = false;   // true once nav-distance or delivery hint fires; reset per job
@@ -1077,7 +1078,7 @@ SCSAPI_VOID telemetry_gameplay_event(const scs_event_t event,
         std::string delivery_id, dest_city;
         {
             std::lock_guard<std::mutex> lock(g_state_mutex);
-            if (!g_state.current_cargo_id.empty()) {
+            if (!g_state.current_cargo_id.empty() && g_state.cargo_loaded) {
                 json extra;
                 extra["cargo_name"] = g_state.current_cargo_name;
                 delivery_id = g_state.current_cargo_id;
@@ -1093,6 +1094,14 @@ SCSAPI_VOID telemetry_gameplay_event(const scs_event_t event,
                 }
                 g_state.dest_hint_sent = true;
                 queue_event("cargo_delivered", delivery_id, delivery_id, extra);
+            } else if (!g_state.current_cargo_id.empty()) {
+                // job.delivered fired while cargo is not yet loaded — this is the SCS
+                // "drive to pickup" phase completion for owned-truck jobs.  Suppress the
+                // AP check; it will fire correctly when job.delivered fires after the
+                // actual delivery (by which point a new config with cargo_loaded=true
+                // will have been received from the game).
+                log("job.delivered with cargo not loaded — pickup-entrance phase, skipping AP check"
+                    " (cargo=" + g_state.current_cargo_id + ")");
             }
         }
         flush_events_file();
@@ -1189,6 +1198,7 @@ SCSAPI_VOID telemetry_configuration(const scs_event_t event,
         g_state.current_source_city_id.clear();
         g_state.current_dest_city_id.clear();
         g_state.job_active      = false;
+        g_state.cargo_loaded    = false;
         g_state.dest_hint_sent  = false;
 
         for (const scs_named_value_t* attr = cfg->attributes; attr->name != nullptr; ++attr) {
@@ -1207,6 +1217,9 @@ SCSAPI_VOID telemetry_configuration(const scs_event_t event,
             } else if (attr_name == SCS_TELEMETRY_CONFIG_ATTRIBUTE_destination_city_id) {
                 if (attr->value.type == SCS_VALUE_TYPE_string && attr->value.value_string.value)
                     g_state.current_dest_city_id = attr->value.value_string.value;
+            } else if (attr_name == SCS_TELEMETRY_CONFIG_ATTRIBUTE_is_cargo_loaded) {
+                if (attr->value.type == SCS_VALUE_TYPE_bool)
+                    g_state.cargo_loaded = attr->value.value_bool.value;
             }
         }
 
