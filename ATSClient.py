@@ -2275,8 +2275,10 @@ class ATSContext(CommonContext):
             self._save_patch_seed     = current_seed
             self._persist_client_grants()
             logger.info(
-                f"[ATS] Save fallback: OK — "
-                f"save_applied now money=${self._save_applied_money:,} xp={self._save_applied_xp:,}"
+                f"[ATS] Save fallback: grants written to save "
+                f"(money +${money_delta:,}, XP +{xp_delta:,}). "
+                "Reload your save (ESC → Load Game) to receive them in-game immediately, "
+                "or they will appear automatically on your next game launch."
             )
         else:
             logger.error("[ATS] Save fallback: write failed — grants not persisted to save")
