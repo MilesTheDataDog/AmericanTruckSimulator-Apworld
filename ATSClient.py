@@ -81,6 +81,9 @@ CLIENT_OPTIONS_FILE = COMM_DIR / "ats_client_options.json"
 # Persistent city-coordinate table built from captured telemetry positions.
 # Survives across sessions; seeded at startup with 29 Koenvh1-verified entries.
 COORD_STORE_FILE = COMM_DIR / "coord_store.json"
+# Tracks how much the client has injected directly into the save file (fallback when
+# DLL memory addresses break after a game update). Persisted so restarts don't re-apply.
+CLIENT_GRANTS_FILE = COMM_DIR / "client_grants.json"
 
 # ── City coordinate store ──────────────────────────────────────────────────────
 
@@ -403,7 +406,8 @@ def _profile_id_from_config(docs: Path) -> "Optional[str]":
     return None
 
 
-def _find_ats_save_file(forced_profile_id: Optional[str] = None) -> Optional[Path]:
+def _find_ats_save_file(forced_profile_id: Optional[str] = None,
+                        slot_name_hint: Optional[str] = None) -> Optional[Path]:
     """Return the most-recently-modified READABLE game.sii for the active profile.
 
     Selection uses a two-tier strategy so that stale Steam Cloud remote copies
@@ -500,6 +504,23 @@ def _find_ats_save_file(forced_profile_id: Optional[str] = None) -> Optional[Pat
         return _pick(ud_candidates)
 
     else:
+        # No profile ID — if the caller knows the AP slot name, try to derive the
+        # ATS profile folder from it first.  ATS names profile folders as the
+        # uppercase hex of the UTF-8 display name (e.g. "Miles" → "4D696C6573").
+        # Players who follow the convention of naming their ATS profile exactly
+        # matching their YAML slot name benefit from direct, reliable discovery.
+        if slot_name_hint:
+            hint_hex = slot_name_hint.encode("utf-8").hex().upper()
+            hint_candidates: "list[tuple[float, Path]]" = []
+            for d in [docs / "profiles" / hint_hex,
+                      docs / "steam" / "profiles" / hint_hex]:
+                hint_candidates.extend(_collect(d))
+            if hint_candidates:
+                result = _pick(hint_candidates)
+                if result:
+                    logger.info(f"[ATS] Profile found via slot-name hint {slot_name_hint!r} → {hint_hex}")
+                    return result
+
         # No profile ID — scan Documents first; userdata only if Documents is empty.
         # This prevents stale userdata profiles from being selected over live
         # Documents profiles when no profile ID is available.
@@ -1538,6 +1559,26 @@ class ATSContext(CommonContext):
         # save write (hotel sleep, game close, or any other save event).
         self._city_arrival_pending: bool = False
 
+        # Save-file grant fallback — used when DLL memory injection is unavailable (e.g.
+        # after a game update that broke the hardcoded instruction addresses).
+        # _dll_applied_money/xp: what the DLL has injected this seed (from events.json).
+        # _save_applied_money/xp: what we have written directly into the save file.
+        # Together they account for all applied grants so we never double-apply.
+        self._dll_applied_money: int = 0
+        self._dll_applied_xp: int = 0
+        self._save_applied_money: int = 0
+        self._save_applied_xp: int = 0
+        self._save_patch_seed: str = ""  # seed active when _save_applied_* were last persisted
+        # Load persisted save-patch counters from disk (survive client restarts).
+        try:
+            _cg = _read_json(CLIENT_GRANTS_FILE)
+            if isinstance(_cg, dict):
+                self._save_applied_money = int(_cg.get("save_applied_money", 0))
+                self._save_applied_xp    = int(_cg.get("save_applied_xp", 0))
+                self._save_patch_seed    = str(_cg.get("seed", ""))
+        except Exception:
+            pass
+
         # Last level value for which we logged a win-condition progress line
         self._last_logged_level: int = 0
 
@@ -1887,11 +1928,11 @@ class ATSContext(CommonContext):
         self._ptr_xp_ready    = data.get("ptr_xp_ready", False)
         self._ptr_city_ready  = data.get("ptr_city_ready", False)
 
-        # Log when DLL confirms grants applied
-        _applied_money = data.get("applied_money_total", 0)
-        _applied_xp    = data.get("applied_xp_total", 0)
-        if _applied_money > 0 or _applied_xp > 0:
-            logger.debug(f"[ATS] DLL applied grants: money=${_applied_money:,} xp={_applied_xp:,}")
+        # Track how much the DLL has injected via memory (for save-fallback accounting).
+        self._dll_applied_money = data.get("applied_money_total", 0)
+        self._dll_applied_xp    = data.get("applied_xp_total", 0)
+        if self._dll_applied_money > 0 or self._dll_applied_xp > 0:
+            logger.debug(f"[ATS] DLL applied grants: money=${self._dll_applied_money:,} xp={self._dll_applied_xp:,}")
 
         # Track delivery state for arrival-reward coalescing.
         # job_active stays true in the plugin after delivery (until next job config);
@@ -2136,12 +2177,116 @@ class ATSContext(CommonContext):
         logger.info("[ATS] Post-delivery poll: forcing save read for delivery-city checks")
         self._force_save_poll = True
 
+    def _persist_client_grants(self) -> None:
+        """Write save-patch counters to CLIENT_GRANTS_FILE so they survive client restarts."""
+        try:
+            _write_json(CLIENT_GRANTS_FILE, {
+                "seed": self._save_patch_seed,
+                "save_applied_money": self._save_applied_money,
+                "save_applied_xp": self._save_applied_xp,
+            })
+        except Exception:
+            pass
+
+    def _patch_save_with_grants(self, save_path: Path, text: str,
+                                 fmt: str, scsc_meta: Optional[dict]) -> None:
+        """Apply pending AP grants directly to the save file.
+
+        Called when DLL memory addresses are unavailable (ptr_money_ready / ptr_xp_ready
+        are False), typically after a game update shifts the binary layout.  Reads current
+        values from the save text, adds the delta, writes back in the original format.
+
+        Accounting uses three independent tallies to avoid double-applying:
+          total granted  = all AP items received this seed
+          dll_applied    = injected via DLL memory writes (from events.json)
+          save_applied   = injected via this method (persisted in CLIENT_GRANTS_FILE)
+        Delta = total - dll_applied - save_applied.
+        """
+        current_seed = self._seed_id()
+        if current_seed != self._save_patch_seed and current_seed:
+            logger.info(
+                f"[ATS] Save fallback: new seed detected "
+                f"({self._save_patch_seed!r} → {current_seed!r}) — resetting save-patch counters"
+            )
+            self._save_applied_money = 0
+            self._save_applied_xp    = 0
+            self._save_patch_seed    = current_seed
+
+        need_money = not self._ptr_money_ready
+        need_xp    = not self._ptr_xp_ready
+
+        net_money   = self._total_money_granted - self._total_money_deducted
+        money_delta = max(0, net_money - self._save_applied_money - self._dll_applied_money) if need_money else 0
+        xp_delta    = max(0, self._total_xp_granted - self._save_applied_xp - self._dll_applied_xp) if need_xp else 0
+
+        if money_delta == 0 and xp_delta == 0:
+            return
+
+        logger.info(
+            f"[ATS] Save fallback: patching {save_path.name} "
+            f"money_delta=${money_delta:,} xp_delta={xp_delta:,} "
+            f"(dll: ${self._dll_applied_money:,}/{self._dll_applied_xp:,} "
+            f"save: ${self._save_applied_money:,}/{self._save_applied_xp:,})"
+        )
+
+        # Patch money_account (full-text search — only one instance per save)
+        patched = text
+        if money_delta:
+            patched, n = re.subn(
+                r'(\bmoney_account\s*:\s*)(-?\d+)',
+                lambda m: m.group(1) + str(int(m.group(2)) + money_delta),
+                patched, count=1,
+            )
+            if not n:
+                logger.warning("[ATS] Save fallback: money_account field not found — skipping money patch")
+                money_delta = 0
+
+        # Patch experience_points within the economy block only (hired drivers have their own)
+        if xp_delta:
+            econ_m = _find_xp_block(patched)
+            region_start = econ_m.end() if econ_m else 0
+            region = patched[region_start:region_start + 100_000]
+            new_region, n = re.subn(
+                r'(\bexperience_points\s*:\s*)(\d+)',
+                lambda m: m.group(1) + str(int(m.group(2)) + xp_delta),
+                region, count=1,
+            )
+            if not n:
+                logger.warning("[ATS] Save fallback: experience_points field not found — skipping XP patch")
+                xp_delta = 0
+            else:
+                patched = patched[:region_start] + new_region + patched[region_start + len(region):]
+
+        if money_delta == 0 and xp_delta == 0:
+            return
+
+        # Write back in the same encryption format we read.
+        # ScsC (ATS 1.49+) is re-encrypted; everything else written as plain text
+        # (ATS accepts SiiNunit plain saves regardless of g_save_format setting).
+        ok: bool
+        if scsc_meta is not None:
+            ok = _write_scsc(save_path, patched, {})
+        else:
+            ok = _write_sii_plain(save_path, patched)
+
+        if ok:
+            self._save_applied_money += money_delta
+            self._save_applied_xp    += xp_delta
+            self._save_patch_seed     = current_seed
+            self._persist_client_grants()
+            logger.info(
+                f"[ATS] Save fallback: OK — "
+                f"save_applied now money=${self._save_applied_money:,} xp={self._save_applied_xp:,}"
+            )
+        else:
+            logger.error("[ATS] Save fallback: write failed — grants not persisted to save")
+
     def _poll_save_file(self) -> None:
         """
         Read the most recent ATS game.sii to detect new city/state visits and
-        update level/money as a fallback when DLL memory pointers are not yet
-        captured.  No save-file patching occurs here — grants are applied
-        directly to live memory by the DLL.
+        update level/money.  When DLL memory pointers are unavailable (addresses
+        broke after a game update), also patches money_account and experience_points
+        directly in the save so AP grants still land even without working injection.
         """
         if not self.auth:
             return
@@ -2165,7 +2310,10 @@ class ATSContext(CommonContext):
         # ID is not yet available or changes transiently.
         if self._cached_save_path is None or not self._cached_save_path.exists():
             self._cached_save_path = None
-            save_path = _find_ats_save_file(forced_profile_id=self._dll_profile_id)
+            _slot_name = (self.player_names.get(self.slot)
+                          if self.auth and getattr(self, "slot", None) is not None else None)
+            save_path = _find_ats_save_file(forced_profile_id=self._dll_profile_id,
+                                             slot_name_hint=_slot_name)
             if not save_path:
                 if not self._save_not_found_warned:
                     self._save_not_found_warned = True
@@ -2203,10 +2351,22 @@ class ATSContext(CommonContext):
         self._force_save_poll = False
         self._save_last_mtime = mtime
 
-        text, fmt, _ = _read_sii_text(save_path)
+        text, fmt, scsc_meta = _read_sii_text(save_path)
         if text is None:
             logger.debug(f"[ATS] Save file unreadable (format: {fmt}) — skipping poll")
             return
+
+        # Save-file grant fallback: apply pending AP grants directly to game.sii when
+        # the DLL's memory injection addresses failed (e.g. after a game update).
+        # Only runs when at least one ptr is broken; skipped when injection is working.
+        if (not self._ptr_money_ready or not self._ptr_xp_ready) and self.auth:
+            self._patch_save_with_grants(save_path, text, fmt, scsc_meta)
+            # Re-read so _parse_sii_save sees the patched values (atomic write may have
+            # updated the file; re-read is lightweight because fmt is already known).
+            if not self._ptr_money_ready or not self._ptr_xp_ready:
+                text2, _, _ = _read_sii_text(save_path)
+                if text2 is not None:
+                    text = text2
 
         save = _parse_sii_save(text)
 
