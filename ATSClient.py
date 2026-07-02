@@ -87,6 +87,11 @@ COORD_STORE_FILE = COMM_DIR / "coord_store.json"
 # it delivers grants by patching the save file while the game is closed.  Both
 # sides read it so a grant is never delivered twice.
 APPLIED_FILE = COMM_DIR / "applied.json"
+# LEGACY (pre-v1.13): tracked client save-patches separately from the DLL's
+# ledger.  Read once at fallback time and folded into applied.json, because the
+# DLL never saw this file and would double-apply those grants once its memory
+# pointers work again.  Deleted after migration.
+CLIENT_GRANTS_FILE = COMM_DIR / "client_grants.json"
 
 # ── City coordinate store ──────────────────────────────────────────────────────
 
@@ -409,7 +414,8 @@ def _profile_id_from_config(docs: Path) -> "Optional[str]":
     return None
 
 
-def _find_ats_save_file(forced_profile_id: Optional[str] = None) -> Optional[Path]:
+def _find_ats_save_file(forced_profile_id: Optional[str] = None,
+                        slot_name_hint: Optional[str] = None) -> Optional[Path]:
     """Return the most-recently-modified READABLE game.sii for the active profile.
 
     Selection uses a two-tier strategy so that stale Steam Cloud remote copies
@@ -506,6 +512,23 @@ def _find_ats_save_file(forced_profile_id: Optional[str] = None) -> Optional[Pat
         return _pick(ud_candidates)
 
     else:
+        # No profile ID — if the caller knows the AP slot name, try to derive the
+        # ATS profile folder from it first.  ATS names profile folders as the
+        # uppercase hex of the UTF-8 display name (e.g. "Miles" → "4D696C6573").
+        # Players who follow the convention of naming their ATS profile exactly
+        # matching their YAML slot name benefit from direct, reliable discovery.
+        if slot_name_hint:
+            hint_hex = slot_name_hint.encode("utf-8").hex().upper()
+            hint_candidates: "list[tuple[float, Path]]" = []
+            for d in [docs / "profiles" / hint_hex,
+                      docs / "steam" / "profiles" / hint_hex]:
+                hint_candidates.extend(_collect(d))
+            if hint_candidates:
+                result = _pick(hint_candidates)
+                if result:
+                    logger.info(f"[ATS] Profile found via slot-name hint {slot_name_hint!r} → {hint_hex}")
+                    return result
+
         # No profile ID — scan Documents first; userdata only if Documents is empty.
         # This prevents stale userdata profiles from being selected over live
         # Documents profiles when no profile ID is available.
@@ -1657,6 +1680,12 @@ class ATSContext(CommonContext):
         # save write (hotel sleep, game close, or any other save event).
         self._city_arrival_pending: bool = False
 
+        # What the DLL reports it has injected this session (from events.json).
+        # Informational only — delivery accounting lives in applied.json, which
+        # both the DLL and the save-grant fallback share.
+        self._dll_applied_money: int = 0
+        self._dll_applied_xp: int = 0
+
         # Last level value for which we logged a win-condition progress line
         self._last_logged_level: int = 0
 
@@ -2068,11 +2097,11 @@ class ATSContext(CommonContext):
         self._ptr_xp_ready    = data.get("ptr_xp_ready", False)
         self._ptr_city_ready  = data.get("ptr_city_ready", False)
 
-        # Log when DLL confirms grants applied
-        _applied_money = data.get("applied_money_total", 0)
-        _applied_xp    = data.get("applied_xp_total", 0)
-        if _applied_money > 0 or _applied_xp > 0:
-            logger.debug(f"[ATS] DLL applied grants: money=${_applied_money:,} xp={_applied_xp:,}")
+        # Track how much the DLL has injected via memory (for save-fallback accounting).
+        self._dll_applied_money = data.get("applied_money_total", 0)
+        self._dll_applied_xp    = data.get("applied_xp_total", 0)
+        if self._dll_applied_money > 0 or self._dll_applied_xp > 0:
+            logger.debug(f"[ATS] DLL applied grants: money=${self._dll_applied_money:,} xp={self._dll_applied_xp:,}")
 
         # Track delivery state for arrival-reward coalescing.
         # job_active stays true in the plugin after delivery (until next job config);
@@ -2338,7 +2367,41 @@ class ATSContext(CommonContext):
         if not self.auth:
             return
 
+        running = _is_ats_running()
+        if running is None:
+            # Can't check the process list — use events.json freshness as a
+            # conservative proxy (the DLL flushes every 2 s while simulating).
+            try:
+                running = (time.time() - EVENTS_FILE.stat().st_mtime) < 300
+            except OSError:
+                running = False
+
         seed = self._seed_id()
+
+        # Migrate the legacy pre-v1.13 client_grants.json ledger: those save
+        # patches were invisible to the DLL, which would re-inject the same
+        # grants once its pointers work again.  Fold them into the shared
+        # applied.json ledger (only while the game is closed — the DLL owns
+        # applied.json while running) and delete the legacy file.
+        if not running and CLIENT_GRANTS_FILE.is_file():
+            try:
+                cg = _read_json(CLIENT_GRANTS_FILE)
+                if isinstance(cg, dict) and str(cg.get("seed", "")) == seed:
+                    prior = _read_applied_state(seed)
+                    _write_json(APPLIED_FILE, {
+                        "applied_money": prior["applied_money"] + int(cg.get("save_applied_money", 0)),
+                        "applied_xp":    prior["applied_xp"] + int(cg.get("save_applied_xp", 0)),
+                        "clamped_debt":  prior["clamped_debt"],
+                        "seed": seed,
+                    })
+                    logger.info(
+                        "[ATS] Migrated legacy client_grants.json into the shared "
+                        "applied.json ledger (prevents double-delivery by the DLL)"
+                    )
+                CLIENT_GRANTS_FILE.unlink()
+            except Exception:
+                logger.error(f"[ATS] client_grants.json migration failed:\n{traceback.format_exc()}")
+
         applied = _read_applied_state(seed)
         net_money = self._total_money_granted - self._total_money_deducted
         delta_money = net_money - applied["applied_money"]
@@ -2360,14 +2423,6 @@ class ATSContext(CommonContext):
         # Never patch while ATS is running: the game would overwrite the patch
         # on its next autosave and the grant would be lost.  While running, the
         # DLL delivers grants — or reports why it can't.
-        running = _is_ats_running()
-        if running is None:
-            # Can't check the process list — use events.json freshness as a
-            # conservative proxy (the DLL flushes every 2 s while simulating).
-            try:
-                running = (time.time() - EVENTS_FILE.stat().st_mtime) < 300
-            except OSError:
-                running = False
         if running:
             money_live_ok = self._ptr_money_ready or delta_money == 0
             xp_live_ok = self._ptr_xp_ready or delta_xp == 0
@@ -2391,7 +2446,10 @@ class ATSContext(CommonContext):
 
         save_path = self._cached_save_path
         if save_path is None or not save_path.exists():
-            save_path = _find_ats_save_file(forced_profile_id=self._dll_profile_id)
+            _slot_name = (self.player_names.get(self.slot)
+                          if getattr(self, "slot", None) is not None else None)
+            save_path = _find_ats_save_file(forced_profile_id=self._dll_profile_id,
+                                            slot_name_hint=_slot_name)
         if not save_path:
             if not self._save_fallback_no_save_warned:
                 self._save_fallback_no_save_warned = True
@@ -2437,8 +2495,14 @@ class ATSContext(CommonContext):
         except Exception as e:
             logger.debug(f"[ATS] Could not write save backup: {e}")
 
-        # Plain SiiN text loads in ATS regardless of the player's save format.
-        if not _write_sii_plain(save_path, new_text):
+        # Write back in the container format we read: ScsC saves (ATS 1.49+)
+        # are re-encrypted; everything else is written as plain SiiN text,
+        # which ATS loads regardless of the g_save_format setting.
+        if _meta is not None:
+            ok = _write_scsc(save_path, new_text, {})
+        else:
+            ok = _write_sii_plain(save_path, new_text)
+        if not ok:
             logger.error("[ATS] Save-grant fallback: write failed — grants remain pending")
             return
 
@@ -2526,8 +2590,10 @@ class ATSContext(CommonContext):
         """
         Read the most recent ATS game.sii to detect new city/state visits and
         update level/money as a fallback when DLL memory pointers are not yet
-        captured.  No save-file patching occurs here — grants are applied
-        directly to live memory by the DLL.
+        captured.  Grant delivery never happens here: live grants are injected
+        by the DLL, and offline grants are patched into the save by
+        _maybe_apply_save_grants (only while the game is closed, so the game
+        can never overwrite a patch with pre-grant values from live memory).
         """
         if not self.auth:
             return
@@ -2551,7 +2617,10 @@ class ATSContext(CommonContext):
         # ID is not yet available or changes transiently.
         if self._cached_save_path is None or not self._cached_save_path.exists():
             self._cached_save_path = None
-            save_path = _find_ats_save_file(forced_profile_id=self._dll_profile_id)
+            _slot_name = (self.player_names.get(self.slot)
+                          if self.auth and getattr(self, "slot", None) is not None else None)
+            save_path = _find_ats_save_file(forced_profile_id=self._dll_profile_id,
+                                             slot_name_hint=_slot_name)
             if not save_path:
                 if not self._save_not_found_warned:
                     self._save_not_found_warned = True
@@ -2589,7 +2658,7 @@ class ATSContext(CommonContext):
         self._force_save_poll = False
         self._save_last_mtime = mtime
 
-        text, fmt, _ = _read_sii_text(save_path)
+        text, fmt, scsc_meta = _read_sii_text(save_path)
         if text is None:
             logger.debug(f"[ATS] Save file unreadable (format: {fmt}) — skipping poll")
             return
