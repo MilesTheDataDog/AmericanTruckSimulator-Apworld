@@ -141,12 +141,22 @@ The plugin creates and uses these files in:
 **Money/XP/city addresses failed to verify after a game update:**
 - `game.log.txt` will show `ADDR money FAIL@ ...` (or xp/city) with the bytes
   found at the old address. This means the game update moved the instructions.
-- Items still arrive: the AP client automatically writes pending money/XP into
-  your save file whenever the game is closed, and city checks fall back to
-  save-file polling.
-- To restore instant live injection, find the new instruction addresses
-  (Cheat Engine: "money increase" / "XP write" / "visited-city count write")
-  and create `Documents\American Truck Simulator\archipelago\addresses.json`:
+- **This recovers itself — no action needed.** When the hard-coded addresses
+  break, the plugin runs an automatic value scanner: the client sends your
+  exact money/XP (read from your save), the plugin scans game memory for those
+  values, and confirms the live address the first time your money changes
+  (a delivery, fuel stop, etc.). Live grants resume automatically, on any game
+  version. The log shows `Money address FOUND via value scan @ ...` and
+  `/status` reports `Money ptr ready: True (via scan)`.
+  - Until the scanner locks on (usually your first delivery after launch),
+    grants are delivered by patching your save while the game is closed, so
+    nothing is ever lost.
+  - The scanner needs a non-trivial balance to work (money > $1,000); a
+    brand-new profile with almost no cash locks on once you earn some.
+- **Optional manual override** (skips the scan, instant from the first launch):
+  find the new instruction addresses (Cheat Engine: "money increase" /
+  "XP write" / "visited-city count write") and create
+  `Documents\American Truck Simulator\archipelago\addresses.json`:
 
   ```json
   {

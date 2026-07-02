@@ -51,6 +51,7 @@
 #include <map>
 #include <mutex>
 #include <atomic>
+#include <thread>
 #include <chrono>
 #include <ctime>
 #include <sstream>
@@ -68,7 +69,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.21.0";
+static const char* PLUGIN_VERSION = "2.22.0";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -134,6 +135,11 @@ struct ItemState {
     long long goal_money           = 1000000;
     double    last_read_time       = 0.0;
     std::string seed;  // AP seed name; used to detect new-seed transitions
+    // Authoritative money/XP the client parsed from the save file.  Ground
+    // truth for the value scanner that self-finds the live addresses when the
+    // hard-coded instruction addresses no longer verify (game update).
+    long long save_money           = -1;   // -1 = not provided
+    int       save_xp              = -1;
 };
 
 static ItemState g_items;
@@ -600,6 +606,240 @@ static void load_rva_overrides(uintptr_t& money_rva, uintptr_t& xp_rva,
     }
 }
 
+// ── Automatic value scanner (Cheat-Engine-style, no human required) ────────────
+//
+// When the hard-coded instruction addresses no longer verify after a game
+// update, the breakpoint path can never capture the money/XP pointers.  This
+// scanner recovers them automatically:
+//
+//   1. The client parses the save and sends the exact money/XP values.
+//   2. We scan the game's writable memory for the money value → candidate
+//      addresses (an "exact value" scan).
+//   3. When the player's money changes (delivery, fuel, toll), the client
+//      sends the new value; we keep only candidates that tracked the change
+//      (a "next scan").  An address that follows a REAL change is provably the
+//      live economy value — not a stale "last saved" cache.
+//   4. The confirmed address is stored in the SAME pointer variable the
+//      breakpoint path fills (as addr - OFFSET), so injection, stale-detection
+//      and flushing all work unchanged and live grants resume instantly.
+//
+// Everything here uses ReadProcessMemory and cannot fault.  Writes only ever
+// happen later, through the existing apply path, after confirmation.
+
+struct ScanState {
+    std::vector<uintptr_t> money_addrs;
+    std::vector<uintptr_t> xp_addrs;
+    long long money_last = LLONG_MIN;  // value the money candidate set was last filtered on
+    int       xp_last    = INT32_MIN;
+    bool money_scanned = false;
+    bool xp_scanned    = false;
+    int  money_confirms = 0;   // number of real value changes the survivors tracked
+    int  xp_confirms    = 0;
+};
+static ScanState g_scan;
+static std::mutex g_scan_state_mutex;
+static std::atomic<bool> g_scanning{false};
+static std::atomic<bool> g_money_via_scan{false};
+static std::atomic<bool> g_xp_via_scan{false};
+
+// A value common enough to exceed this many hits is too ambiguous to be useful
+// on its own; we discard the scan and wait for the value to change to something
+// rarer.  (Truncating would risk dropping the true address.)
+static const size_t SCAN_MAX_HITS = 40000;
+
+// Scan committed, writable, private memory for an exact 8-byte value at 4-byte
+// alignment.  Sets *capped=true (and returns partial) if SCAN_MAX_HITS reached.
+template <typename T>
+static std::vector<uintptr_t> scan_process_for_value(T value, bool* capped) {
+    std::vector<uintptr_t> hits;
+    *capped = false;
+    HANDLE proc = GetCurrentProcess();
+    MEMORY_BASIC_INFORMATION mbi;
+    uintptr_t addr = 0;
+    const size_t CHUNK = 4 * 1024 * 1024;
+    std::vector<uint8_t> buf(CHUNK);
+
+    while (VirtualQueryEx(proc, (LPCVOID)addr, &mbi, sizeof(mbi)) == sizeof(mbi)) {
+        uintptr_t region_base = (uintptr_t)mbi.BaseAddress;
+        size_t    region_size = mbi.RegionSize;
+        uintptr_t next = region_base + region_size;
+        if (next <= addr) break;  // no forward progress — stop
+        addr = next;
+
+        if (mbi.State != MEM_COMMIT) continue;
+        DWORD prot = mbi.Protect;
+        if (prot & PAGE_GUARD) continue;
+        if (!(prot & (PAGE_READWRITE | PAGE_WRITECOPY |
+                      PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))) continue;
+
+        for (size_t off = 0; off < region_size; off += CHUNK) {
+            size_t toRead = (std::min)(CHUNK, region_size - off);
+            SIZE_T n = 0;
+            if (!ReadProcessMemory(proc, (LPCVOID)(region_base + off),
+                                   buf.data(), toRead, &n) || n < sizeof(T))
+                continue;
+            for (size_t i = 0; i + sizeof(T) <= n; i += 4) {
+                T v;
+                memcpy(&v, buf.data() + i, sizeof(T));
+                if (v == value) {
+                    hits.push_back(region_base + off + i);
+                    if (hits.size() >= SCAN_MAX_HITS) { *capped = true; return hits; }
+                }
+            }
+        }
+    }
+    return hits;
+}
+
+// Re-read every candidate; keep only those still holding `value` ("next scan").
+template <typename T>
+static void keep_candidates_matching(std::vector<uintptr_t>& addrs, T value) {
+    HANDLE proc = GetCurrentProcess();
+    std::vector<uintptr_t> keep;
+    keep.reserve(addrs.size());
+    for (uintptr_t a : addrs) {
+        T v; SIZE_T n = 0;
+        if (ReadProcessMemory(proc, (LPCVOID)a, &v, sizeof(T), &n) &&
+            n == sizeof(T) && v == value)
+            keep.push_back(a);
+    }
+    addrs.swap(keep);
+}
+
+// One scan/refine pass.  Runs on a detached worker thread so a multi-hundred-MB
+// scan never stalls the game frame.  Locks in an address only after a survivor
+// has tracked at least one real value change (proves it is live economy state).
+static void value_scan_pass() {
+    long long km; int kx;
+    bool plugin_alive;
+    {
+        std::lock_guard<std::mutex> lock(g_state_mutex);
+        km = g_items.save_money;
+        kx = g_items.save_xp;
+        plugin_alive = g_state.plugin_alive;
+    }
+    if (!plugin_alive) return;
+
+    // Only scan for a field whose breakpoint pointer is missing AND whose
+    // instruction address failed to resolve (the update-broke-it case).
+    bool need_money = (g_money_ptr.load(std::memory_order_relaxed) == 0 &&
+                       ADDR_MONEY_INC == 0 && km > 1000);
+    bool need_xp    = (g_xp_ptr.load(std::memory_order_relaxed) == 0 &&
+                       ADDR_XP_WRITE == 0 && kx > 100);
+    if (!need_money && !need_xp) return;
+
+    std::lock_guard<std::mutex> scan_lock(g_scan_state_mutex);
+
+    if (need_money) {
+        bool capped = false;
+        if (!g_scan.money_scanned) {
+            g_scan.money_addrs = scan_process_for_value<long long>(km, &capped);
+            if (capped) {
+                log("Value scan (money): $" + std::to_string(km) +
+                    " too common (>" + std::to_string(SCAN_MAX_HITS) +
+                    " hits) — waiting for a rarer balance", SCS_LOG_TYPE_message);
+                g_scan.money_addrs.clear();
+            } else {
+                g_scan.money_scanned = true;
+                g_scan.money_last = km;
+                log("Value scan (money): first pass found " +
+                    std::to_string(g_scan.money_addrs.size()) +
+                    " candidate(s) for $" + std::to_string(km));
+            }
+        } else if (km != g_scan.money_last) {
+            keep_candidates_matching<long long>(g_scan.money_addrs, km);
+            g_scan.money_last = km;
+            g_scan.money_confirms++;
+            log("Value scan (money): after change to $" + std::to_string(km) +
+                ", " + std::to_string(g_scan.money_addrs.size()) +
+                " candidate(s) remain (confirms=" +
+                std::to_string(g_scan.money_confirms) + ")");
+            if (g_scan.money_addrs.empty()) {
+                // All pruned — the value we scanned was stale. Start over.
+                g_scan.money_scanned = false;
+                g_scan.money_confirms = 0;
+            }
+        }
+        // Lock in once a single survivor has tracked at least one real change.
+        if (g_scan.money_addrs.size() == 1 && g_scan.money_confirms >= 1) {
+            uintptr_t a = g_scan.money_addrs[0];
+            g_money_ptr.store(a - MONEY_OFFSET, std::memory_order_relaxed);
+            g_money_via_scan.store(true, std::memory_order_relaxed);
+            log("Money address FOUND via value scan @ " + hex_addr(a) +
+                " — live money grants restored (no addresses.json needed)");
+        }
+    }
+
+    if (need_xp) {
+        bool capped = false;
+        if (!g_scan.xp_scanned) {
+            g_scan.xp_addrs = scan_process_for_value<int32_t>((int32_t)kx, &capped);
+            if (capped) {
+                g_scan.xp_addrs.clear();  // too common; wait for a rarer XP value
+            } else {
+                g_scan.xp_scanned = true;
+                g_scan.xp_last = kx;
+                log("Value scan (XP): first pass found " +
+                    std::to_string(g_scan.xp_addrs.size()) +
+                    " candidate(s) for " + std::to_string(kx) + " XP");
+            }
+        } else if (kx != g_scan.xp_last) {
+            keep_candidates_matching<int32_t>(g_scan.xp_addrs, (int32_t)kx);
+            g_scan.xp_last = kx;
+            g_scan.xp_confirms++;
+            if (g_scan.xp_addrs.empty()) {
+                g_scan.xp_scanned = false;
+                g_scan.xp_confirms = 0;
+            }
+        }
+        // XP int32 has more false matches, so require two confirmed changes.
+        if (g_scan.xp_addrs.size() == 1 && g_scan.xp_confirms >= 2) {
+            uintptr_t a = g_scan.xp_addrs[0];
+            g_xp_ptr.store(a - XP_OFFSET, std::memory_order_relaxed);
+            g_xp_via_scan.store(true, std::memory_order_relaxed);
+            log("XP address FOUND via value scan @ " + hex_addr(a) +
+                " — live XP grants restored");
+        }
+    }
+}
+
+// Discard scanner progress so the next pass starts from a fresh full scan.
+// Called when a scanned address goes stale (object moved) and when a new save
+// loads (telemetry_started) — in both cases the old candidate list is invalid.
+static void reset_money_scan() {
+    std::lock_guard<std::mutex> lock(g_scan_state_mutex);
+    g_scan.money_addrs.clear();
+    g_scan.money_scanned = false;
+    g_scan.money_confirms = 0;
+    g_scan.money_last = LLONG_MIN;
+    g_money_via_scan.store(false, std::memory_order_relaxed);
+}
+static void reset_xp_scan() {
+    std::lock_guard<std::mutex> lock(g_scan_state_mutex);
+    g_scan.xp_addrs.clear();
+    g_scan.xp_scanned = false;
+    g_scan.xp_confirms = 0;
+    g_scan.xp_last = INT32_MIN;
+    g_xp_via_scan.store(false, std::memory_order_relaxed);
+}
+
+// Kick off a scan pass on a worker thread if one isn't already running and a
+// field still needs finding.  Called from the frame poll.
+static void maybe_start_value_scan() {
+    bool need_money = (g_money_ptr.load(std::memory_order_relaxed) == 0 && ADDR_MONEY_INC == 0);
+    bool need_xp    = (g_xp_ptr.load(std::memory_order_relaxed)   == 0 && ADDR_XP_WRITE   == 0);
+    if (!need_money && !need_xp) return;
+    {
+        std::lock_guard<std::mutex> lock(g_state_mutex);
+        if (g_items.save_money <= 1000 && g_items.save_xp <= 100) return;  // nothing usable yet
+    }
+    if (g_scanning.exchange(true)) return;  // a pass is already in flight
+    std::thread([]() {
+        try { value_scan_pass(); } catch (...) {}
+        g_scanning.store(false, std::memory_order_release);
+    }).detach();
+}
+
 // Called once at plugin init.  Fills ADDR_MONEY_INC / ADDR_XP_WRITE / ADDR_CITY_COUNT.
 static void resolve_addresses() {
     HMODULE hMod = GetModuleHandleA("amtrucks.exe");
@@ -934,6 +1174,7 @@ static void apply_memory_grants(bool allow_paused) {
             log("Money pointer stale (read " + std::to_string(current) +
                 ") — resetting and re-arming", SCS_LOG_TYPE_warning);
             g_money_ptr.store(0, std::memory_order_relaxed);
+            if (g_money_via_scan.load(std::memory_order_relaxed)) reset_money_scan();
             needs_rearm = true;
         } else {
             // net_money = granted - deducted (traps); delta may be negative (fine).
@@ -980,6 +1221,7 @@ static void apply_memory_grants(bool allow_paused) {
                     } else {
                         log("Grant failed: money write error — resetting pointer", SCS_LOG_TYPE_warning);
                         g_money_ptr.store(0, std::memory_order_relaxed);
+                        if (g_money_via_scan.load(std::memory_order_relaxed)) reset_money_scan();
                         needs_rearm = true;
                     }
                 } else {
@@ -1008,6 +1250,7 @@ static void apply_memory_grants(bool allow_paused) {
             log("XP pointer stale (read " + std::to_string(current) +
                 ") — resetting and re-arming", SCS_LOG_TYPE_warning);
             g_xp_ptr.store(0, std::memory_order_relaxed);
+            if (g_xp_via_scan.load(std::memory_order_relaxed)) reset_xp_scan();
             needs_rearm = true;
         } else {
             if (g_items.total_xp_granted > g_applied_xp) {
@@ -1027,6 +1270,7 @@ static void apply_memory_grants(bool allow_paused) {
                 } else {
                     log("Grant failed: XP write error — resetting pointer", SCS_LOG_TYPE_warning);
                     g_xp_ptr.store(0, std::memory_order_relaxed);
+                    if (g_xp_via_scan.load(std::memory_order_relaxed)) reset_xp_scan();
                     needs_rearm = true;
                 }
             }
@@ -1116,6 +1360,8 @@ static void read_items_file() {
         g_items.goal_level          = j.value("goal_level", 35);
         g_items.goal_money          = (long long)(j.value("goal_money_thousands", 1000)) * 1000;
         g_items.seed                = j.value("seed", std::string(""));
+        g_items.save_money          = (long long)j.value("save_money", (long long)-1);
+        g_items.save_xp             = j.value("save_xp", -1);
         g_items.last_read_time      = now_seconds();
     } catch (const std::exception& e) {
         log(std::string("Failed to read items.json: ") + e.what(), SCS_LOG_TYPE_warning);
@@ -1188,6 +1434,12 @@ static void flush_events_file() {
     j["ptr_money_ready"]    = (mp != 0);
     j["ptr_xp_ready"]       = (xp != 0);
     j["ptr_city_ready"]     = (g_city_ptr.load(std::memory_order_relaxed) != 0);
+    // How each pointer was obtained: "scan" if the auto value-scanner found it,
+    // "breakpoint" if the SDK-address path captured it, "" if not yet ready.
+    j["money_ptr_source"]   = (mp == 0) ? "" :
+        (g_money_via_scan.load(std::memory_order_relaxed) ? "scan" : "breakpoint");
+    j["xp_ptr_source"]      = (xp == 0) ? "" :
+        (g_xp_via_scan.load(std::memory_order_relaxed) ? "scan" : "breakpoint");
     j["applied_money_total"] = g_applied_money;
     j["applied_xp_total"]   = g_applied_xp;
 
@@ -1567,6 +1819,9 @@ SCSAPI_VOID telemetry_frame_start(const scs_event_t event,
         read_items_file();
         apply_memory_grants();
         poll_city_count();
+        // Self-find money/XP addresses when the hard-coded ones broke (game
+        // update).  No-op once found or when the breakpoint path is working.
+        maybe_start_value_scan();
     }
 
     if (t - g_last_flush_time >= FLUSH_INTERVAL_SECONDS) {

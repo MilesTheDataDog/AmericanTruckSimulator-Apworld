@@ -58,7 +58,7 @@ except Exception as _e:
 colorama.init()
 
 GAME_NAME = "American Truck Simulator"
-CLIENT_VERSION = "1.13.0"
+CLIENT_VERSION = "1.14.0"
 
 # ── Communication folder ───────────────────────────────────────────────────────
 def _get_comm_dir() -> Path:
@@ -1482,9 +1482,12 @@ class ATSCommandProcessor(ClientCommandProcessor):
         logger.info(f"[ATS] Seed name (AP):      {getattr(ctx, 'seed_name', '<not set>')}")
         logger.info(f"[ATS] Seed ID (DLL):       {ctx._seed_id()}")
         logger.info(f"[ATS] Plugin connected:    {ctx.plugin_connected}")
-        logger.info(f"[ATS] Money ptr ready:     {ctx._ptr_money_ready}")
-        logger.info(f"[ATS] XP ptr ready:        {ctx._ptr_xp_ready}")
+        logger.info(f"[ATS] Money ptr ready:     {ctx._ptr_money_ready}"
+                    + (f" (via {ctx._money_ptr_source})" if ctx._money_ptr_source else ""))
+        logger.info(f"[ATS] XP ptr ready:        {ctx._ptr_xp_ready}"
+                    + (f" (via {ctx._xp_ptr_source})" if ctx._xp_ptr_source else ""))
         logger.info(f"[ATS] City ptr ready:      {ctx._ptr_city_ready}")
+        logger.info(f"[ATS] Save money/XP (scan seed): ${ctx._save_money_value:,} / {ctx._save_xp_value:,}")
         logger.info(f"[ATS] Current level:       {ctx.current_level}")
         logger.info(f"[ATS] Current money:       ${ctx.current_money:,}")
         logger.info(f"[ATS] Total money granted:   ${ctx._total_money_granted:,}")
@@ -1685,6 +1688,16 @@ class ATSContext(CommonContext):
         # both the DLL and the save-grant fallback share.
         self._dll_applied_money: int = 0
         self._dll_applied_xp: int = 0
+        # How the DLL obtained each pointer: "", "breakpoint", or "scan".
+        self._money_ptr_source: str = ""
+        self._xp_ptr_source: str = ""
+
+        # Exact money/XP last parsed from the save file. Sent to the DLL as
+        # ground truth for its automatic value scanner, which self-finds the
+        # live memory addresses when the hard-coded ones break after a game
+        # update. -1 = not yet known.
+        self._save_money_value: int = -1
+        self._save_xp_value: int = -1
 
         # Last level value for which we logged a win-condition progress line
         self._last_logged_level: int = 0
@@ -1972,6 +1985,9 @@ class ATSContext(CommonContext):
             "win_condition": self.slot_data.get("win_condition", 0),
             "goal_level": self.slot_data.get("goal_level", 35),
             "goal_money_thousands": self.slot_data.get("goal_money", 1000),
+            # Ground truth for the DLL's automatic address scanner.
+            "save_money": self._save_money_value,
+            "save_xp": self._save_xp_value,
             "item_notifications": self._notifications,
         }
         _write_json(ITEMS_FILE, payload)
@@ -2096,6 +2112,8 @@ class ATSContext(CommonContext):
         self._ptr_money_ready = data.get("ptr_money_ready", False)
         self._ptr_xp_ready    = data.get("ptr_xp_ready", False)
         self._ptr_city_ready  = data.get("ptr_city_ready", False)
+        self._money_ptr_source = data.get("money_ptr_source", "")
+        self._xp_ptr_source    = data.get("xp_ptr_source", "")
 
         # Track how much the DLL has injected via memory (for save-fallback accounting).
         self._dll_applied_money = data.get("applied_money_total", 0)
@@ -2664,6 +2682,17 @@ class ATSContext(CommonContext):
             return
 
         save = _parse_sii_save(text)
+
+        # Feed the DLL's automatic value scanner the exact save money/XP so it
+        # can self-find the live memory addresses when the hard-coded ones broke
+        # after a game update.  Re-write items.json whenever these change so the
+        # scanner sees each real value change (its confirmation signal).
+        _save_money = int(save["money"])
+        _save_xp    = int(save["experience_points"])
+        if (_save_money != self._save_money_value or _save_xp != self._save_xp_value):
+            self._save_money_value = _save_money
+            self._save_xp_value    = _save_xp
+            self._write_items_file()
 
         # Update level/money from save as fallback when DLL pointers not yet captured.
         if not self._ptr_xp_ready:
