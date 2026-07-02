@@ -202,7 +202,7 @@ class ATSWorld(World):
         """
         o = self.options
         return {
-            "game_version": "1.2.0",
+            "game_version": "1.3.0",
             "win_condition": int(o.win_condition.value),
             "goal_level": int(o.goal_level.value),
             "goal_money": int(o.goal_money.value),  # in thousands
@@ -211,4 +211,5 @@ class ATSWorld(World):
             "city_arrival_checks": bool(o.city_arrival_checks.value),
             "state_arrival_checks": bool(o.state_arrival_checks.value),
             "death_link": bool(o.death_link.value),
+            "death_link_penalty": int(o.death_link_penalty.value),
         }

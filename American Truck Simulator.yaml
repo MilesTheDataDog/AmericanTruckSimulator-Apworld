@@ -153,8 +153,27 @@ American Truck Simulator:
     random-range-0-100: 0
 
   # ── Death Link ────────────────────────────────────────────────────────────────
-  # When enabled, crashing your truck sends a "death" event to all Death Link
-  # players in the session. Receiving a death from them causes a truck breakdown.
+  # When enabled, wrecking your truck (engine damage reaching 90% — effectively
+  # undriveable) sends a "death" to all Death Link players in the session.
+  # When one of THEM dies, you pay an emergency towing fee: a percentage of
+  # your current money (death_link_penalty below). Balance never drops below $0.
   death_link:
     'false': 50
     'true': 0
+
+  # Percentage of your current money deducted when receiving a death (0-50).
+  # Only used when death_link is enabled.
+  #
+  # You can define additional values between the minimum and maximum values.
+  # Minimum value is 0
+  # Maximum value is 50
+  death_link_penalty:
+    0: 0
+    5: 0
+    15: 50
+    25: 0
+    50: 0
+    random: 0
+    random-low: 0
+    random-high: 0
+    random-range-0-50: 0

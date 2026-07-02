@@ -137,3 +137,24 @@ The plugin creates and uses these files in:
   They must be calibrated using in-game coordinate measurement (use the ATS
   console or a position-display mod to read X/Z values at state borders).
   Once calibrated, update `STATE_BOUNDS` in `ats_archipelago.cpp` and rebuild.
+
+**Money/XP/city addresses failed to verify after a game update:**
+- `game.log.txt` will show `ADDR money FAIL@ ...` (or xp/city) with the bytes
+  found at the old address. This means the game update moved the instructions.
+- Items still arrive: the AP client automatically writes pending money/XP into
+  your save file whenever the game is closed, and city checks fall back to
+  save-file polling.
+- To restore instant live injection, find the new instruction addresses
+  (Cheat Engine: "money increase" / "XP write" / "visited-city count write")
+  and create `Documents\American Truck Simulator\archipelago\addresses.json`:
+
+  ```json
+  {
+    "money_rva": "0x76DA69",
+    "xp_rva":    "0x41FE66",
+    "city_rva":  "0x41A9DF"
+  }
+  ```
+
+  Values are RVAs (absolute address minus the `amtrucks.exe base=` value the
+  plugin logs at startup), as hex strings. No DLL rebuild needed — restart ATS.

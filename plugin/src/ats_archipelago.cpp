@@ -42,6 +42,7 @@
 #include <windows.h>
 #include <shlobj.h>
 #include <tlhelp32.h>
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -67,7 +68,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.20.0";
+static const char* PLUGIN_VERSION = "2.21.0";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -100,6 +101,26 @@ struct GameState {
     bool      city_count_changed = false;
     bool      dest_hint_sent   = false;   // true once nav-distance or delivery hint fires; reset per job
 };
+
+// ── Game identity (from SDK init params) ──────────────────────────────────────
+// Reported in events.json so the client can tell the player which game build is
+// running — the first thing to check when memory addresses stop verifying.
+static std::string g_game_id;           // "ats" / "eut2"
+static std::string g_game_version_str;  // "1.19" style, from SCS_GET_*_VERSION
+
+// ── DeathLink state (engine wear telemetry) ────────────────────────────────────
+// A death is sent when engine wear crosses DEATH_WEAR_THRESHOLD while driving.
+// The latch prevents repeat deaths from one wreck; it re-arms after the player
+// repairs below DEATH_REARM_THRESHOLD.  g_wear_baselined suppresses a spurious
+// death when a save that already has a destroyed engine is loaded (the first
+// wear sample after telemetry (re)starts only sets the latch, never fires).
+static const float DEATH_WEAR_THRESHOLD  = 0.90f;
+static const float DEATH_REARM_THRESHOLD = 0.60f;
+static std::atomic<float> g_engine_wear{0.0f};
+static bool   g_death_latched   = false;
+static bool   g_wear_baselined  = false;
+static double g_telemetry_started_at = 0.0;  // set on telemetry_started
+static int    g_death_counter   = 0;
 
 static GameState g_state;
 
@@ -407,6 +428,87 @@ static bool safe_write_i32(uintptr_t addr, int32_t val) {
     return true;
 }
 
+// Quiet u64 read for speculative probing — returns false instead of logging,
+// because city-token probing intentionally reads addresses that may be invalid.
+static bool read_u64_quiet(uintptr_t addr, uint64_t* out) {
+    SIZE_T n = 0;
+    return ReadProcessMemory(g_self, reinterpret_cast<LPCVOID>(addr),
+                             out, sizeof(*out), &n) && n == sizeof(*out);
+}
+
+// ── SCS token decoding ─────────────────────────────────────────────────────────
+// SCS engine "tokens" pack a short identifier (max 12 chars of [0-9a-z_]) into
+// a u64 using base-38 encoding.  City IDs are stored as tokens in game memory;
+// decoding them lets us name a newly-discovered city without any save-file read.
+
+static std::string decode_scs_token(uint64_t token) {
+    static const char CHARSET[] = "\0" "0123456789abcdefghijklmnopqrstuvwxyz_";
+    std::string out;
+    while (token) {
+        uint64_t c = token % 38;
+        token /= 38;
+        if (c == 0 || c > 37) return std::string();  // invalid digit — not a token
+        out.push_back(CHARSET[c]);
+        if (out.size() > 12) return std::string();   // tokens are at most 12 chars
+    }
+    return out;
+}
+
+// A decoded string is plausibly a city token if it looks like an SCS city ID:
+// starts with a letter, 2-12 chars of lowercase/digits/underscore.
+static bool plausible_city_token(const std::string& s) {
+    if (s.size() < 2 || s.size() > 12) return false;
+    if (s[0] < 'a' || s[0] > 'z') return false;
+    for (char c : s)
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'))
+            return false;
+    return true;
+}
+
+// Probe the visited-city registry for the token of the most recently added city.
+// The registry object (g_city_ptr) keeps its count at +0x10; the backing array
+// pointer lives at a nearby offset that varies between game builds, so several
+// candidate layouts are probed.  Elements are either inline u64 tokens or
+// pointers to city objects with the token near the start.  All reads use
+// ReadProcessMemory and cannot fault; implausible decodes are discarded.  The
+// client validates every candidate against its authoritative city list, so a
+// stray false positive here is filtered out before any check is sent.
+static std::vector<std::string> probe_city_candidates(uintptr_t cp, uint64_t count) {
+    std::vector<std::string> out;
+    if (!cp || count == 0) return out;
+
+    auto add = [&](uint64_t raw) {
+        std::string t = decode_scs_token(raw);
+        if (plausible_city_token(t) &&
+            std::find(out.begin(), out.end(), t) == out.end() &&
+            out.size() < 8)
+            out.push_back(t);
+    };
+    auto looks_like_ptr = [](uint64_t v) {
+        return v >= 0x10000ULL && v <= 0x00007FFFFFFFFFFFULL;
+    };
+
+    static const ptrdiff_t ARRAY_OFFSETS[] = {0x0, 0x8, 0x18};
+    static const size_t    STRIDES[]       = {8, 16};
+
+    for (ptrdiff_t arr_off : ARRAY_OFFSETS) {
+        uint64_t arr = 0;
+        if (!read_u64_quiet(cp + arr_off, &arr) || !looks_like_ptr(arr)) continue;
+        for (size_t stride : STRIDES) {
+            uint64_t elem = 0;
+            if (!read_u64_quiet((uintptr_t)(arr + (count - 1) * stride), &elem)) continue;
+            add(elem);                       // element is an inline token
+            if (looks_like_ptr(elem)) {      // element is a pointer to a city object
+                for (ptrdiff_t o : {0x0, 0x8, 0x10, 0x18}) {
+                    uint64_t v = 0;
+                    if (read_u64_quiet((uintptr_t)(elem + o), &v)) add(v);
+                }
+            }
+        }
+    }
+    return out;
+}
+
 // ── Address resolution helpers ────────────────────────────────────────────────
 
 static std::string bytes_hex(const uint8_t* buf, size_t len) {
@@ -465,6 +567,39 @@ static size_t pe_image_size(uintptr_t base) {
     return nt->OptionalHeader.SizeOfImage;
 }
 
+// Optional RVA overrides from <comm_dir>/addresses.json.  When a game update
+// moves the target instructions, a maintainer can publish new RVAs in this
+// file and players fix their install WITHOUT waiting for a recompiled DLL:
+//   { "money_rva": "0x76DA69", "xp_rva": "0x41FE66", "city_rva": "0x41A9DF" }
+// Values are hex strings (with or without 0x) or plain numbers.
+static void load_rva_overrides(uintptr_t& money_rva, uintptr_t& xp_rva,
+                               uintptr_t& city_rva) {
+    fs::path f = g_comm_dir / "addresses.json";
+    if (!fs::exists(f)) return;
+    try {
+        std::ifstream in(f);
+        json j = json::parse(in);
+        auto get = [&](const char* key, uintptr_t& dst) {
+            if (!j.contains(key)) return;
+            uintptr_t v = 0;
+            if (j[key].is_string())
+                v = (uintptr_t)std::stoull(j[key].get<std::string>(), nullptr, 16);
+            else if (j[key].is_number_unsigned())
+                v = (uintptr_t)j[key].get<uint64_t>();
+            if (v) {
+                dst = v;
+                log(std::string("addresses.json override: ") + key + " = " + hex_addr(v));
+            }
+        };
+        get("money_rva", money_rva);
+        get("xp_rva",    xp_rva);
+        get("city_rva",  city_rva);
+    } catch (const std::exception& e) {
+        log(std::string("addresses.json parse failed (ignored): ") + e.what(),
+            SCS_LOG_TYPE_warning);
+    }
+}
+
 // Called once at plugin init.  Fills ADDR_MONEY_INC / ADDR_XP_WRITE / ADDR_CITY_COUNT.
 static void resolve_addresses() {
     HMODULE hMod = GetModuleHandleA("amtrucks.exe");
@@ -480,9 +615,14 @@ static void resolve_addresses() {
         " size=" + std::to_string(imgSize / 1024) + " KB  "
         "(friend_base=" + hex_addr(FRIEND_BASE) + ")");
 
+    uintptr_t money_rva = MONEY_RVA;
+    uintptr_t xp_rva    = XP_RVA;
+    uintptr_t city_rva  = CITY_RVA;
+    load_rva_overrides(money_rva, xp_rva, city_rva);
+
     // ── Money ──────────────────────────────────────────────────────────────────
     {
-        uintptr_t addr = base + MONEY_RVA;
+        uintptr_t addr = base + money_rva;
         uint8_t   found[8] = {};
         SIZE_T    n = 0;
         ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(addr),
@@ -495,14 +635,16 @@ static void resolve_addresses() {
             log("ADDR money   FAIL@ " + hex_addr(addr) +
                 "  found=" + bytes_hex(found, n) +
                 "  want=" + bytes_hex(MONEY_PATTERN, sizeof(MONEY_PATTERN)) +
-                "  (money grants disabled — update FRIEND_BASE or provide new address)",
+                "  (game update likely moved this instruction — live money grants "
+                "disabled; the AP client will deliver grants via the save file. "
+                "To restore live grants, put the new RVA in archipelago/addresses.json)",
                 SCS_LOG_TYPE_warning);
         }
     }
 
     // ── XP — try RVA first, then AOB scan (6-byte pattern is fairly unique) ──
     {
-        uintptr_t addr = base + XP_RVA;
+        uintptr_t addr = base + xp_rva;
         uint8_t   found[8] = {};
         SIZE_T    n = 0;
         ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(addr),
@@ -532,7 +674,7 @@ static void resolve_addresses() {
 
     // ── City count ─────────────────────────────────────────────────────────────
     {
-        uintptr_t addr = base + CITY_RVA;
+        uintptr_t addr = base + city_rva;
         uint8_t   found[8] = {};
         SIZE_T    n = 0;
         ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(addr),
@@ -545,7 +687,9 @@ static void resolve_addresses() {
             log("ADDR city    FAIL@ " + hex_addr(addr) +
                 "  found=" + bytes_hex(found, n) +
                 "  want=" + bytes_hex(CITY_PATTERN, sizeof(CITY_PATTERN)) +
-                "  (city detection disabled — update FRIEND_BASE or provide new address)",
+                "  (game update likely moved this instruction — live city detection "
+                "disabled; city checks fall back to save-file polling. "
+                "To restore, put the new RVA in archipelago/addresses.json)",
                 SCS_LOG_TYPE_warning);
         }
     }
@@ -729,6 +873,9 @@ static LONG WINAPI ats_veh(EXCEPTION_POINTERS* ep) {
 static void read_items_file();
 static void save_applied_state();
 static void apply_memory_grants(bool allow_paused = false);
+static void flush_events_file();
+static void queue_event(const std::string& type, const std::string& game_id,
+                        const std::string& key_suffix, json extra = json::object());
 
 // ── Apply pending grants directly to live memory ───────────────────────────────
 static void apply_memory_grants(bool allow_paused) {
@@ -922,8 +1069,34 @@ static void poll_city_count() {
         log("City count changed: " + std::to_string(g_prev_city_count) +
             " -> " + std::to_string(count) + " — signalling client");
         g_prev_city_count = count;
-        std::lock_guard<std::mutex> lock(g_state_mutex);
-        g_state.city_count_changed = true;
+
+        // Try to name the discovered city directly from memory: probe the
+        // registry's backing array for the newest entry and decode it as an
+        // SCS token.  The client validates candidates against its city list
+        // and falls back to save-file polling when nothing matches, so this
+        // is purely an accelerator — it turns "check fires at next autosave"
+        // into "check fires the moment the City Discovered banner appears".
+        std::vector<std::string> candidates = probe_city_candidates(cp, count);
+        float tx, ty, tz;
+        {
+            std::lock_guard<std::mutex> lock(g_state_mutex);
+            g_state.city_count_changed = true;
+            tx = g_state.truck_x; ty = g_state.truck_y; tz = g_state.truck_z;
+        }
+        if (!candidates.empty()) {
+            std::string joined;
+            for (const auto& c : candidates)
+                joined += (joined.empty() ? "" : ", ") + c;
+            log("City discovery candidates from memory: [" + joined + "]");
+            json extra;
+            extra["candidates"] = candidates;
+            extra["position"]   = {tx, ty, tz};
+            queue_event("city_discovered", "", "citycount_" + std::to_string(count), extra);
+        } else {
+            log("City discovery: no plausible token found in registry probe — "
+                "client will resolve via save file");
+        }
+        flush_events_file();
     }
 }
 
@@ -1000,7 +1173,10 @@ static void flush_events_file() {
     json j;
     j["plugin_alive"]   = g_state.plugin_alive;
     j["plugin_version"] = PLUGIN_VERSION;
+    j["game_id"]        = g_game_id;
+    j["game_version"]   = g_game_version_str;
     j["timestamp"]      = now_seconds();
+    j["engine_wear"]    = g_engine_wear.load(std::memory_order_relaxed);
     j["current_level"]  = g_state.current_level;
     j["current_money"]  = g_state.current_money;
     j["current_xp"]     = live_xp;
@@ -1056,7 +1232,7 @@ static void flush_events_file() {
 
 // ── Queue a game event ─────────────────────────────────────────────────────────
 static void queue_event(const std::string& type, const std::string& game_id,
-                        const std::string& key_suffix, json extra = json::object()) {
+                        const std::string& key_suffix, json extra) {
     std::string eid = make_event_id(type, key_suffix);
     if (g_sent_event_ids.count(eid)) return;
     g_sent_event_ids.insert(eid);
@@ -1178,6 +1354,58 @@ SCSAPI_VOID on_nav_distance(const scs_string_t name, const scs_u32_t index,
     log("Live city arrival hint: " + dest_city
         + " (destination at nav_distance=" + std::to_string(static_cast<int>(dist)) + "m)");
     flush_events_file();
+}
+
+// Engine wear channel — drives DeathLink.  When wear crosses the threshold
+// while driving, one truck_disabled event is queued for the client (which
+// forwards it to the multiworld as a DeathLink if the option is enabled).
+SCSAPI_VOID on_engine_wear(const scs_string_t name, const scs_u32_t index,
+                            const scs_value_t* const value,
+                            const scs_context_t context) {
+    if (!value || value->type != SCS_VALUE_TYPE_float) return;
+    const float wear = value->value_float.value;
+    g_engine_wear.store(wear, std::memory_order_relaxed);
+
+    // First sample shortly after telemetry (re)start only establishes the
+    // baseline: a save loaded with an already-destroyed engine must not fire
+    // a death.  Samples arriving later than the load window behave normally,
+    // so gradual wear crossing the threshold after an unpause still fires.
+    if (!g_wear_baselined) {
+        g_wear_baselined = true;
+        if (wear >= DEATH_WEAR_THRESHOLD &&
+            now_seconds() - g_telemetry_started_at < 5.0) {
+            g_death_latched = true;
+            log("Engine wear baseline " + std::to_string((int)(wear * 100)) +
+                "% — already destroyed at load, DeathLink latched without firing");
+            return;
+        }
+    }
+
+    bool in_game;
+    {
+        std::lock_guard<std::mutex> lock(g_state_mutex);
+        in_game = g_state.in_game;
+    }
+    if (!in_game) return;
+
+    if (!g_death_latched && wear >= DEATH_WEAR_THRESHOLD) {
+        g_death_latched = true;
+        ++g_death_counter;
+        json extra;
+        extra["engine_wear"] = wear;
+        // Wall-clock stamp lets the client ignore stale deaths it re-reads
+        // from events.json after a client restart.
+        extra["epoch"] = (double)std::time(nullptr);
+        queue_event("truck_disabled", "engine",
+                    "death_" + std::to_string(g_death_counter), extra);
+        log("Truck disabled: engine wear " + std::to_string((int)(wear * 100)) +
+            "% — queuing DeathLink event");
+        flush_events_file();
+    } else if (g_death_latched && wear <= DEATH_REARM_THRESHOLD) {
+        g_death_latched = false;
+        log("Engine repaired to " + std::to_string((int)(wear * 100)) +
+            "% — DeathLink re-armed");
+    }
 }
 
 SCSAPI_VOID telemetry_configuration(const scs_event_t event,
@@ -1304,6 +1532,10 @@ SCSAPI_VOID telemetry_started(const scs_event_t event, const void* const event_i
         std::lock_guard<std::mutex> lock(g_state_mutex);
         g_state.in_game = true;
     }
+    // Re-baseline engine wear: a different save/profile may have just been
+    // loaded, and its persisted damage must not fire a spurious DeathLink.
+    g_wear_baselined = false;
+    g_telemetry_started_at = now_seconds();
     // Re-read config.cfg here: the player may have just selected a new profile
     // from the profile screen, and config.cfg is now updated with the new ID.
     // Flush immediately so the client receives the ID before the first save poll.
@@ -1356,7 +1588,12 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
 
     g_log = p->common.log;
     g_self = GetCurrentProcess();
-    log("Archipelago plugin v" + std::string(PLUGIN_VERSION) + " initializing");
+    g_game_id = p->common.game_id ? p->common.game_id : "";
+    g_game_version_str =
+        std::to_string(SCS_GET_MAJOR_VERSION(p->common.game_version)) + "." +
+        std::to_string(SCS_GET_MINOR_VERSION(p->common.game_version));
+    log("Archipelago plugin v" + std::string(PLUGIN_VERSION) + " initializing"
+        " (game=" + g_game_id + " v" + g_game_version_str + ")");
 
     g_comm_dir     = get_documents_path() / "American Truck Simulator" / "archipelago";
     g_events_file  = g_comm_dir / "events.json";
@@ -1401,6 +1638,12 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version,
         SCS_U32_NIL, SCS_VALUE_TYPE_float,
         SCS_TELEMETRY_CHANNEL_FLAG_none,
         on_nav_distance, nullptr
+    );
+    p->register_for_channel(
+        SCS_TELEMETRY_TRUCK_CHANNEL_wear_engine,
+        SCS_U32_NIL, SCS_VALUE_TYPE_float,
+        SCS_TELEMETRY_CHANNEL_FLAG_none,
+        on_engine_wear, nullptr
     );
 
     {

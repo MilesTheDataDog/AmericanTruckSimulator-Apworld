@@ -26,6 +26,7 @@ import json
 import os
 import re
 import struct
+import subprocess
 import sys
 import time
 import traceback
@@ -57,7 +58,7 @@ except Exception as _e:
 colorama.init()
 
 GAME_NAME = "American Truck Simulator"
-CLIENT_VERSION = "1.12.0"
+CLIENT_VERSION = "1.13.0"
 
 # ── Communication folder ───────────────────────────────────────────────────────
 def _get_comm_dir() -> Path:
@@ -81,6 +82,11 @@ CLIENT_OPTIONS_FILE = COMM_DIR / "ats_client_options.json"
 # Persistent city-coordinate table built from captured telemetry positions.
 # Survives across sessions; seeded at startup with 29 Koenvh1-verified entries.
 COORD_STORE_FILE = COMM_DIR / "coord_store.json"
+# Cumulative applied-grant ledger SHARED with the DLL (same schema).  The DLL
+# updates it when it injects grants into live memory; the client updates it when
+# it delivers grants by patching the save file while the game is closed.  Both
+# sides read it so a grant is never delivered twice.
+APPLIED_FILE = COMM_DIR / "applied.json"
 
 # ── City coordinate store ──────────────────────────────────────────────────────
 
@@ -989,6 +995,96 @@ def _find_block_end(text: str, brace_pos: int, max_search: int = 1_000_000) -> i
     return brace_pos + len(segment)
 
 
+def _is_ats_running() -> Optional[bool]:
+    """Return True/False if it can be determined whether amtrucks.exe is running.
+
+    Uses Windows tasklist (the client's target platform).  Returns None when
+    the check itself is unavailable so callers can fall back to a heuristic.
+    """
+    try:
+        out = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq amtrucks.exe", "/NH"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return "amtrucks.exe" in (out.stdout or "").lower()
+    except Exception:
+        return None
+
+
+def _patch_save_grant_fields(text: str, money_delta: int, xp_delta: int
+                             ) -> "Optional[tuple[str, int, int]]":
+    """Apply grant deltas to money_account / experience_points in SiiNunit text.
+
+    Returns (new_text, money_actually_applied, new_debt) or None when neither
+    field could be located.  money_actually_applied may be less than
+    money_delta when a negative delta (fines) would push the balance below $0;
+    the uncollected remainder is returned as new_debt (same clamp-and-debt
+    semantics the DLL uses for live-memory fines).
+    """
+    new_text = text
+    patched_any = False
+    money_applied = 0
+    new_debt = 0
+
+    if money_delta != 0:
+        m = re.search(r"\bmoney_account\s*:\s*(-?\d+)", new_text)
+        if m:
+            old_val = int(m.group(1))
+            target = old_val + money_delta
+            if target < 0:
+                new_debt = -target
+                target = 0
+            money_applied = target - old_val
+            new_text = new_text[:m.start(1)] + str(target) + new_text[m.end(1):]
+            patched_any = True
+
+    if xp_delta > 0:
+        # experience_points lives in the economy block; restrict the search the
+        # same way _parse_sii_save does so a similarly-named field elsewhere in
+        # the save can never be patched by mistake.
+        blk = _find_xp_block(new_text)
+        region_start, region_end = 0, len(new_text)
+        if blk:
+            region_start = blk.end() - 1
+            region_end = _find_block_end(new_text, region_start)
+        m = re.search(r"\bexperience_points\s*:\s*(\d+)",
+                      new_text[region_start:region_end])
+        if m:
+            old_val = int(m.group(1))
+            target = old_val + xp_delta
+            s = region_start + m.start(1)
+            e = region_start + m.end(1)
+            new_text = new_text[:s] + str(target) + new_text[e:]
+            patched_any = True
+
+    if not patched_any:
+        return None
+    return new_text, money_applied, new_debt
+
+
+def _read_applied_state(current_seed: str) -> Dict[str, Any]:
+    """Read the shared applied-grant ledger, resetting it on seed change.
+
+    Mirrors the DLL's new-seed semantics: counters from a previous multiworld
+    must not block grants for a new one.
+    """
+    state = {"applied_money": 0, "applied_xp": 0, "clamped_debt": 0, "seed": current_seed}
+    try:
+        if APPLIED_FILE.is_file():
+            data = _read_json(APPLIED_FILE)
+            if isinstance(data, dict):
+                file_seed = str(data.get("seed", ""))
+                if not current_seed or file_seed == current_seed:
+                    state["applied_money"] = int(data.get("applied_money", 0))
+                    state["applied_xp"]    = int(data.get("applied_xp", 0))
+                    state["clamped_debt"]  = int(data.get("clamped_debt", 0))
+                    state["seed"] = file_seed or current_seed
+    except Exception as e:
+        logger.debug(f"[ATS] Could not read applied.json: {e}")
+    return state
+
+
 # ATS city token format: lowercase, starts with a letter, letters/digits/underscores only.
 _CITY_TOKEN_RE = re.compile(r'^[a-z][a-z0-9_]{1,29}$')
 
@@ -1335,6 +1431,20 @@ def _apply_yaml_options(ctx: "ATSContext") -> None:
         except (ValueError, TypeError):
             pass
 
+    dl_raw = _resolve_weighted(yaml_opts.get("death_link"))
+    if dl_raw is not None:
+        dl = str(dl_raw).strip().lower() in ("true", "1", "on", "yes")
+        ctx.slot_data["death_link"] = dl
+        changed.append(f"death_link={dl}")
+
+    dlp_raw = _resolve_weighted(yaml_opts.get("death_link_penalty"))
+    if dlp_raw is not None:
+        try:
+            ctx.slot_data["death_link_penalty"] = int(dlp_raw)
+            changed.append(f"death_link_penalty={dlp_raw}")
+        except (ValueError, TypeError):
+            pass
+
     if changed:
         logger.info(f"[ATS] Applied options from {source}: {', '.join(changed)}")
         ctx._options_source = source
@@ -1361,6 +1471,15 @@ class ATSCommandProcessor(ClientCommandProcessor):
         logger.info(f"[ATS] Checks sent:         {len(ctx.checked_locations)}")
         logger.info(f"[ATS] Goal satisfied:      {ctx.goal_complete}")
         logger.info(f"[ATS] Coord store:         {len(ctx._coord_store)} cities with coordinates")
+        _dl_on = "DeathLink" in ctx.tags
+        _dl_pct = ctx.slot_data.get("death_link_penalty", 15)
+        logger.info(f"[ATS] Death link:          "
+                    f"{'ENABLED (penalty ' + str(_dl_pct) + '% of balance)' if _dl_on else 'disabled'}")
+        logger.info(f"[ATS] Engine wear:         {ctx._engine_wear * 100:.0f}%")
+        _applied = _read_applied_state(ctx._seed_id())
+        logger.info(f"[ATS] Applied ledger:      ${_applied['applied_money']:,} money, "
+                    f"{_applied['applied_xp']:,} XP"
+                    + (f", debt ${_applied['clamped_debt']:,}" if _applied['clamped_debt'] else ""))
         pos = ctx._truck_pos
         if pos:
             logger.info(f"[ATS] Truck position:      ({pos[0]:.0f}, {pos[1]:.0f}, {pos[2]:.0f})")
@@ -1580,6 +1699,20 @@ class ATSContext(CommonContext):
         # Set to "YAML", "saved config (/setoptions)", etc. when options loaded from fallback
         self._options_source: Optional[str] = None
 
+        # ── DeathLink ────────────────────────────────────────────────────────
+        # Latest engine wear reported by the DLL (0.0-1.0); for /status display.
+        self._engine_wear: float = 0.0
+        # True once update_death_link(True) has been scheduled for this connection.
+        self._death_link_requested: bool = False
+
+        # ── Offline save-grant fallback ──────────────────────────────────────
+        # Delivers pending money/XP grants by patching the save file while the
+        # game is closed — the safety net for when a game update breaks the
+        # DLL's live-memory pointers (or the plugin isn't installed at all).
+        self._save_fallback_last_ts: float = 0.0    # throttle: min 30 s between patches
+        self._save_fallback_warned: bool = False    # one warning per blocked state
+        self._save_fallback_no_save_warned: bool = False
+
         # ── Coordinate store (Option C proximity detection) ─────────────────
         # Persistent map of city_id → {x, z, radius} built from live telemetry.
         # Seeded at startup with Koenvh1 data; grows as the player visits cities.
@@ -1656,8 +1789,50 @@ class ATSContext(CommonContext):
         gl = self.slot_data.get("goal_level", 35)
         gm = self.slot_data.get("goal_money", 1000) * 1000
         logger.info(f"[ATS] Win condition: {self._win_condition_description()} (goal_level={gl}, goal_money=${gm:,})")
+
+        # Enable DeathLink when the option is on (from server slot_data or the
+        # YAML fallback).  update_death_link adds the "DeathLink" tag and sends
+        # a ConnectUpdate so the server starts routing death bounces to us.
+        if self.slot_data.get("death_link") and not self._death_link_requested:
+            self._death_link_requested = True
+            pct = self.slot_data.get("death_link_penalty", 15)
+            logger.info(
+                f"[ATS] Death Link ENABLED — engine damage ≥90% sends a death; "
+                f"receiving one costs {pct}% of your current money."
+            )
+            asyncio.create_task(self.update_death_link(True))
+
         # Write slot data so the plugin/mod can read player options
         _write_json(SLOT_DATA_FILE, self.slot_data)
+        self._write_items_file()
+
+    def on_deathlink(self, data: Dict[str, Any]) -> None:
+        """Another Death Link player died — charge the emergency towing fee."""
+        super().on_deathlink(data)
+        source = data.get("source", "another player")
+        cause = data.get("cause", "")
+        pct = self.slot_data.get("death_link_penalty", 15)
+        try:
+            pct = max(0, min(100, int(pct)))
+        except (TypeError, ValueError):
+            pct = 15
+
+        balance = max(0, int(self.current_money))
+        fee = (balance * pct) // 100
+        if pct <= 0 or fee <= 0:
+            text = f"Death Link: {source} died" + (f" ({cause})" if cause else "")
+            logger.info(f"[ATS] {text} — no towing fee applied")
+        else:
+            self._total_money_deducted += fee
+            text = f"Death Link: {source} died — emergency towing fee -${fee:,} ({pct}%)"
+            logger.info(f"[ATS] {text}")
+        self._notifications.append({
+            "id": self._notification_counter,
+            "item_name": "Death Link",
+            "from_player": source,
+            "text": text,
+        })
+        self._notification_counter += 1
         self._write_items_file()
 
     def _on_items_received(self, start_index: int, items) -> None:
@@ -1840,6 +2015,12 @@ class ATSContext(CommonContext):
         # Proximity must not fire during career-select, loading screens, or pause menus.
         self._in_game = data.get("in_game", False)
 
+        # Engine wear from telemetry (0.0-1.0) — displayed by /status.
+        try:
+            self._engine_wear = float(data.get("engine_wear", 0.0))
+        except (TypeError, ValueError):
+            pass
+
         # Update truck position from DLL telemetry; run proximity checks each poll.
         _pos = data.get("truck_position")
         if isinstance(_pos, list) and len(_pos) >= 3:
@@ -1937,6 +2118,55 @@ class ATSContext(CommonContext):
                             and hint_city not in self._coord_store):
                         self._capture_coord(hint_city, self._truck_pos)
                     self._process_city_arrival_hint(hint_city, _hint_label)
+                continue
+
+            # Instant city discovery: the DLL decoded candidate city tokens from
+            # the visited-city registry the moment the "City discovered" banner
+            # appeared.  Validate against our authoritative city list and fire
+            # the check immediately; the save-poll backstop covers a miss.
+            if event.get("type") == "city_discovered":
+                if not self.auth:
+                    continue
+                candidates = event.get("candidates") or []
+                matched = self._resolve_city_candidates(candidates)
+                if matched:
+                    pos = event.get("position")
+                    if (isinstance(pos, list) and len(pos) >= 3
+                            and matched not in self._coord_store):
+                        self._capture_coord(matched, pos)
+                    self._process_city_arrival_hint(matched, "memory discovery")
+                    self._city_arrival_pending = False
+                else:
+                    logger.info(
+                        f"[ATS] City discovery candidates {candidates} did not "
+                        "resolve to a single unvisited city — waiting for the "
+                        "save file to confirm which city was discovered"
+                    )
+                continue
+
+            # Truck wrecked (engine ≥90%) — forward as a DeathLink if enabled.
+            if event.get("type") == "truck_disabled":
+                wear = event.get("engine_wear", 0.0)
+                try:
+                    wear_pct = int(float(wear) * 100)
+                except (TypeError, ValueError):
+                    wear_pct = 0
+                # Ignore deaths older than 2 minutes: a restarted client re-reads
+                # the whole event queue and must not replay an old wreck.
+                epoch = event.get("epoch")
+                if isinstance(epoch, (int, float)) and time.time() - epoch > 120:
+                    logger.info("[ATS] Skipping stale truck_disabled event from before client start")
+                    continue
+                if self.auth and "DeathLink" in self.tags:
+                    who = self.username or "The trucker"
+                    cause = f"{who} wrecked their truck ({wear_pct}% engine damage)"
+                    logger.info(f"[ATS] Truck disabled — sending Death Link: {cause}")
+                    asyncio.create_task(self.send_death(cause))
+                else:
+                    logger.info(
+                        f"[ATS] Truck disabled ({wear_pct}% engine damage) — "
+                        "Death Link not enabled, no death sent"
+                    )
                 continue
 
             # On delivery: clear local job-active state and flush any arrival grants
@@ -2078,6 +2308,162 @@ class ATSContext(CommonContext):
             }]))
         else:
             logger.debug(f"[ATS] City arrival hint ({source_label}): {city_id} — no unchecked locations to send")
+
+    def _resolve_city_candidates(self, candidates: List[str]) -> Optional[str]:
+        """Match DLL memory-probe candidates against the authoritative city list.
+
+        Returns the city ID when exactly one candidate is a real, not-yet-visited
+        city; otherwise None (caller falls back to save-file confirmation).
+        The strict single-match rule means a garbage decode can never fire a
+        wrong check — at worst we fall back to the old (slower) save path.
+        """
+        from worlds.american_truck_simulator.locations import CITY_ARRIVAL_LOCATIONS
+        known_ids = {loc.game_id for loc in CITY_ARRIVAL_LOCATIONS.values()}
+        matches = [c for c in candidates
+                   if isinstance(c, str) and c in known_ids
+                   and c not in self._save_known_cities]
+        if len(matches) == 1:
+            return matches[0]
+        return None
+
+    def _maybe_apply_save_grants(self) -> None:
+        """Deliver pending grants by patching the save file when the game is closed.
+
+        This is the delivery path that survives game updates: when the DLL's
+        live-memory pointers break (or the plugin is missing), pending money/XP
+        are written directly into game.sii so the player receives everything on
+        their next launch.  The applied.json ledger is shared with the DLL, so
+        whichever side delivers a grant first marks it applied for both.
+        """
+        if not self.auth:
+            return
+
+        seed = self._seed_id()
+        applied = _read_applied_state(seed)
+        net_money = self._total_money_granted - self._total_money_deducted
+        delta_money = net_money - applied["applied_money"]
+        delta_xp = max(0, self._total_xp_granted - applied["applied_xp"])
+        debt = applied["clamped_debt"]
+
+        # Positive grants pay off clamp-debt first (same rule as the DLL).
+        effective_money = delta_money
+        new_debt = debt
+        if effective_money > 0 and new_debt > 0:
+            paid = min(new_debt, effective_money)
+            effective_money -= paid
+            new_debt -= paid
+
+        if delta_money == 0 and delta_xp == 0:
+            self._save_fallback_warned = False
+            return
+
+        # Never patch while ATS is running: the game would overwrite the patch
+        # on its next autosave and the grant would be lost.  While running, the
+        # DLL delivers grants — or reports why it can't.
+        running = _is_ats_running()
+        if running is None:
+            # Can't check the process list — use events.json freshness as a
+            # conservative proxy (the DLL flushes every 2 s while simulating).
+            try:
+                running = (time.time() - EVENTS_FILE.stat().st_mtime) < 300
+            except OSError:
+                running = False
+        if running:
+            money_live_ok = self._ptr_money_ready or delta_money == 0
+            xp_live_ok = self._ptr_xp_ready or delta_xp == 0
+            if self.plugin_connected and money_live_ok and xp_live_ok:
+                return  # DLL has working pointers for everything pending
+            if not self._save_fallback_warned:
+                self._save_fallback_warned = True
+                logger.warning(
+                    f"[ATS] Pending grants (money {delta_money:+,}, XP +{delta_xp:,}) "
+                    "cannot be injected into the running game "
+                    "(memory pointers unavailable — did ATS just update?). "
+                    "They will be written into your save automatically after you close ATS."
+                )
+            return
+
+        # Throttle patch attempts.
+        now = time.monotonic()
+        if now - self._save_fallback_last_ts < 30.0:
+            return
+        self._save_fallback_last_ts = now
+
+        save_path = self._cached_save_path
+        if save_path is None or not save_path.exists():
+            save_path = _find_ats_save_file(forced_profile_id=self._dll_profile_id)
+        if not save_path:
+            if not self._save_fallback_no_save_warned:
+                self._save_fallback_no_save_warned = True
+                logger.warning(
+                    f"[ATS] Pending grants (money {delta_money:+,}, XP +{delta_xp:,}) "
+                    "but no save file found to patch — they will be delivered "
+                    "once a save exists (or live once the game runs with working pointers)."
+                )
+            return
+        self._save_fallback_no_save_warned = False
+
+        # Don't touch a save that was written moments ago — the game (or its
+        # exit autosave) may still be flushing.
+        try:
+            if time.time() - save_path.stat().st_mtime < 5.0:
+                self._save_fallback_last_ts = 0.0  # retry soon
+                return
+        except OSError:
+            return
+
+        text, fmt, _meta = _read_sii_text(save_path)
+        if text is None:
+            logger.warning(
+                f"[ATS] Save-grant fallback: save file unreadable (format: {fmt}) — "
+                "cannot deliver pending grants offline"
+            )
+            return
+
+        result = _patch_save_grant_fields(text, effective_money, delta_xp)
+        if result is None:
+            logger.warning(
+                "[ATS] Save-grant fallback: money_account/experience_points not "
+                f"found in {save_path.name} — cannot patch"
+            )
+            return
+        new_text, money_applied, clamp_debt_added = result
+        new_debt += clamp_debt_added
+
+        # Keep a one-deep backup of the pre-patch save next to it.
+        try:
+            backup = save_path.with_name(save_path.name + ".ap_backup")
+            backup.write_bytes(save_path.read_bytes())
+        except Exception as e:
+            logger.debug(f"[ATS] Could not write save backup: {e}")
+
+        # Plain SiiN text loads in ATS regardless of the player's save format.
+        if not _write_sii_plain(save_path, new_text):
+            logger.error("[ATS] Save-grant fallback: write failed — grants remain pending")
+            return
+
+        try:
+            _write_json(APPLIED_FILE, {
+                "applied_money": net_money,
+                "applied_xp": self._total_xp_granted,
+                "clamped_debt": new_debt,
+                "seed": seed,
+            })
+        except Exception:
+            logger.error(f"[ATS] Could not update applied.json:\n{traceback.format_exc()}")
+
+        parts = []
+        if money_applied or effective_money:
+            parts.append(f"money {money_applied:+,}")
+        if delta_xp:
+            parts.append(f"XP +{delta_xp:,}")
+        logger.info(
+            f"[ATS] Offline grant delivery: {', '.join(parts)} written into "
+            f"{save_path.parent.name}/{save_path.name}"
+            + (f" (uncollected fine debt: ${new_debt:,})" if new_debt else "")
+            + " — you'll have it when you next load the game."
+        )
+        self._save_fallback_warned = False
 
     def _capture_coord(self, city_id: str, pos: List[float]) -> None:
         """Record city_id → (x, z) into the persistent coordinate store.
@@ -2396,6 +2782,10 @@ async def game_watcher(ctx: ATSContext) -> None:
                 ctx._poll_save_file()
             except Exception:
                 logger.error(f"[ATS] Error polling save file:\n{traceback.format_exc()}")
+            try:
+                ctx._maybe_apply_save_grants()
+            except Exception:
+                logger.error(f"[ATS] Error in save-grant fallback:\n{traceback.format_exc()}")
 
         await asyncio.sleep(1.0)
 

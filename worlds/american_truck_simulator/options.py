@@ -136,6 +136,21 @@ class TrapPercentage(Range):
     default = 0
 
 
+class DeathLinkPenalty(Range):
+    """
+    Percentage of your current in-game money deducted when a death link is
+    received from another player (an "emergency towing fee"). Only used when
+    death_link is enabled. The balance cannot drop below $0.
+
+    Your own truck sends a death to other players when its engine damage
+    reaches 90% (effectively undriveable).
+    """
+    display_name = "Death Link Penalty (%)"
+    range_start = 0
+    range_end = 50
+    default = 15
+
+
 @dataclass
 class ATSOptions(PerGameCommonOptions):
     win_condition: WinCondition
@@ -148,3 +163,4 @@ class ATSOptions(PerGameCommonOptions):
     state_arrival_checks: StateArrivalChecks
     trap_percentage: TrapPercentage
     death_link: DeathLink
+    death_link_penalty: DeathLinkPenalty
