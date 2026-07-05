@@ -9,6 +9,7 @@ ATS_BASE_ID = 17_000_000
 # Money grant items:      ATS_BASE_ID + 3000  (slots 3000–3002)
 # XP grant items:         ATS_BASE_ID + 3100  (slots 3100–3102)
 # Money trap items:       ATS_BASE_ID + 4000  (slots 4000–4006)
+# State unlock items:     ATS_BASE_ID + 5000  (slots 5000–5049)
 # Filler items:           ATS_BASE_ID + 9000  (slots 9000–9099)
 
 
@@ -149,6 +150,46 @@ MONEY_TRAP_ITEMS: Dict[str, ATSItemData] = {
     ),
 }
 
+# ── State unlock items (progression) ──────────────────────────────────────────
+# When the state_unlocks option is on, receiving "Unlock <State>" lets the client
+# release that state's held city/state-arrival checks.  One per DLC state.
+#
+# IMPORTANT: stable append-only IDs.  Never renumber; add new DLC states at the
+# END with the next offset.  Order mirrors locations._STATE_TOKEN_OFFSET (0-16).
+_STATE_UNLOCK_OFFSET: Dict[str, int] = {
+    "arizona":    0,
+    "new_mexico": 1,
+    "oregon":     2,
+    "washington": 3,
+    "utah":       4,
+    "idaho":      5,
+    "colorado":   6,
+    "wyoming":    7,
+    "montana":    8,
+    "texas":      9,
+    "oklahoma":   10,
+    "kansas":     11,
+    "nebraska":   12,
+    "arkansas":   13,
+    "missouri":   14,
+    "iowa":       15,
+    "louisiana":  16,
+    # ── Future DLC states: append here with offset 17, 18, ... ───────────────
+}
+
+# state token → display name (from cities.json), for building item names.
+_STATE_ID_TO_NAME: Dict[str, str] = {s["id"]: s["name"] for s in _cities_data["states"]}
+
+STATE_UNLOCK_ITEMS: Dict[str, ATSItemData] = {}
+for _tok, _off in _STATE_UNLOCK_OFFSET.items():
+    _sname = _STATE_ID_TO_NAME.get(_tok, _tok)
+    STATE_UNLOCK_ITEMS[f"Unlock {_sname}"] = ATSItemData(
+        code=ATS_BASE_ID + 5000 + _off,
+        classification=ItemClassification.progression,
+        category="state_unlock",
+        game_id=_tok,
+    )
+
 # ── Filler items ───────────────────────────────────────────────────────────────
 FILLER_ITEMS: Dict[str, ATSItemData] = {
     **MONEY_GRANT_ITEMS,
@@ -175,6 +216,7 @@ ALL_ITEMS: Dict[str, ATSItemData] = {
     **MONEY_GRANT_ITEMS,
     **XP_GRANT_ITEMS,
     **MONEY_TRAP_ITEMS,
+    **STATE_UNLOCK_ITEMS,
     **FILLER_ITEMS,
     VICTORY_ITEM_NAME: VICTORY_ITEM,
 }
@@ -183,8 +225,25 @@ ITEM_NAME_TO_ID: Dict[str, int] = {name: data.code for name, data in ALL_ITEMS.i
 
 
 def get_items_for_options(options) -> List[str]:
-    """Return the list of item names to place into the pool given player options."""
-    return []
+    """Return the list of pool item names to place given player options.
+
+    Only state-unlock progression items are placed here; grants, traps, and
+    filler are added as padding by the world's create_items().  Unlock items are
+    created only for enabled DLC states, and only when there are arrival checks
+    for them to gate (otherwise they would be dead progression).
+    """
+    names: List[str] = []
+    if not getattr(options, "state_unlocks", None) or not options.state_unlocks.value:
+        return names
+    # Nothing to gate unless city or state arrival checks are enabled.
+    if not (options.city_arrival_checks.value or options.state_arrival_checks.value):
+        return names
+    enabled_ids = _get_enabled_state_ids(options)
+    for tok, off in _STATE_UNLOCK_OFFSET.items():
+        if tok in enabled_ids:
+            sname = _STATE_ID_TO_NAME.get(tok, tok)
+            names.append(f"Unlock {sname}")
+    return names
 
 
 def _get_enabled_state_ids(options) -> set:

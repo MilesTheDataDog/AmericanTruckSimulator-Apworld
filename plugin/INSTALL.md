@@ -4,7 +4,8 @@
 
 `ats_archipelago.dll` is a C++ plugin loaded by American Truck Simulator via the
 official SCS SDK plugin system. It detects game events (deliveries, city arrivals,
-level-ups) and enforces Archipelago rules (locked states, truck restrictions).
+level-ups, engine damage for Death Link) and applies Archipelago money/XP grants
+directly to live game memory.
 
 ---
 
@@ -115,9 +116,9 @@ The plugin creates and uses these files in:
 
 | File | Written by | Read by | Purpose |
 |------|-----------|---------|---------|
-| `events.json` | Plugin (C++) | Client (Python) | Game events: deliveries, city visits, level-ups |
-| `items.json` | Client (Python) | Plugin (C++) | Unlocked states, trucks, garages, offices |
-| `slot_data.json` | Client (Python) | Plugin + Lua mod | Player options from Archipelago server |
+| `events.json` | Plugin (C++) | Client (Python) | Game events: deliveries, city visits, level-ups, engine wear |
+| `items.json` | Client (Python) | Plugin (C++) | Grant totals, save money/XP (scan seed), win condition |
+| `slot_data.json` | Client (Python) | Plugin (C++) | Player options from Archipelago server |
 
 ---
 
@@ -132,11 +133,12 @@ The plugin creates and uses these files in:
 - Confirm the Python client (`ATSClient.py`) is running and connected.
 - Confirm the `archipelago\` folder exists in your ATS documents folder.
 
-**State enforcement not working:**
-- The state bounding boxes in the plugin source are approximate placeholders.
-  They must be calibrated using in-game coordinate measurement (use the ATS
-  console or a position-display mod to read X/Z values at state borders).
-  Once calibrated, update `STATE_BOUNDS` in `ats_archipelago.cpp` and rebuild.
+**State-unlock progression (logic mode):**
+- State locking is enforced by the AP client and world logic, not the game: you
+  can physically drive anywhere, but city and state first-visit checks in a
+  locked state are held by the client and released when you receive the matching
+  `Unlock <State>` item. No in-game enforcement or coordinate calibration is
+  involved, so nothing here can break on a game update.
 
 **Money/XP/city addresses failed to verify after a game update:**
 - `game.log.txt` will show `ADDR money FAIL@ ...` (or xp/city) with the bytes

@@ -122,6 +122,23 @@ class StateArrivalChecks(Toggle):
     default = 1
 
 
+class StateUnlocks(Toggle):
+    """
+    If enabled, each DLC state must be unlocked by receiving its "Unlock <State>"
+    item from the multiworld before that state's city and first-visit checks can
+    be sent. You can still physically drive anywhere and deliver anywhere at any
+    time — nothing in the game is blocked. The only effect is that arrival checks
+    in a locked state are held by the client and released the moment its unlock
+    item arrives, turning your states into real Archipelago progression.
+
+    California and Nevada (base game) are always unlocked. This option has no
+    effect unless City First Arrival Checks and/or State First Visit Checks are
+    also enabled (those are the checks it gates).
+    """
+    display_name = "State Unlock Progression"
+    default = 0
+
+
 class TrapPercentage(Range):
     """
     Percentage of filler item slots that will be replaced with money trap items
@@ -161,6 +178,7 @@ class ATSOptions(PerGameCommonOptions):
     cargo_delivery_checks: CargoDeliveryChecks
     city_arrival_checks: CityArrivalChecks
     state_arrival_checks: StateArrivalChecks
+    state_unlocks: StateUnlocks
     trap_percentage: TrapPercentage
     death_link: DeathLink
     death_link_penalty: DeathLinkPenalty

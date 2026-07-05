@@ -49,6 +49,7 @@ from .items import (
     ITEM_NAME_TO_ID,
     FILLER_ITEMS,
     MONEY_TRAP_ITEMS,
+    STATE_UNLOCK_ITEMS,
     VICTORY_ITEM_NAME,
     VICTORY_ITEM,
     get_items_for_options,
@@ -86,9 +87,14 @@ class ATSWorld(World):
     """
     American Truck Simulator — drive across the American West, delivering cargo,
     discovering cities, and building your trucking empire. In Archipelago mode,
-    states must be unlocked before you can enter them, trucks and upgrades are
-    shuffled into the multiworld pool, and your goal is to reach a configurable
-    level and/or money target.
+    delivering cargo, arriving in cities and states, and reaching driver levels
+    are location checks; you receive money and XP grants (and optional traps)
+    from the multiworld, and your goal is to reach a configurable level and/or
+    money target.
+
+    With the optional State Unlock Progression setting, each DLC state's arrival
+    checks are gated behind an "Unlock <State>" item — you can still drive and
+    deliver anywhere, but those checks are held until the unlock arrives.
     """
 
     game = "American Truck Simulator"
@@ -109,6 +115,7 @@ class ATSWorld(World):
         "Money Grants": {name for name in ALL_ITEMS if name.endswith("Money Grant")},
         "XP Grants": {name for name in ALL_ITEMS if name.endswith("XP Grant")},
         "Money Traps": set(MONEY_TRAP_ITEMS.keys()),
+        "State Unlocks": set(STATE_UNLOCK_ITEMS.keys()),
     }
 
     def create_item(self, name: str) -> ATSItem:
@@ -202,7 +209,7 @@ class ATSWorld(World):
         """
         o = self.options
         return {
-            "game_version": "1.3.0",
+            "game_version": "1.4.0",
             "win_condition": int(o.win_condition.value),
             "goal_level": int(o.goal_level.value),
             "goal_money": int(o.goal_money.value),  # in thousands
@@ -212,4 +219,5 @@ class ATSWorld(World):
             "state_arrival_checks": bool(o.state_arrival_checks.value),
             "death_link": bool(o.death_link.value),
             "death_link_penalty": int(o.death_link_penalty.value),
+            "state_unlocks": bool(o.state_unlocks.value),
         }

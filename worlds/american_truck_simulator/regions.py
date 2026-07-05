@@ -25,13 +25,13 @@ def create_regions(world: "ATSWorld") -> None:
     - "Menu"       → always reachable (Archipelago requires this)
     - "California" → always reachable (base game, always connected from Menu)
     - "Nevada"     → always reachable (base game, always connected from Menu)
-    - <State>      → reachable only when player has received "Unlock <State>"
+    - <DLC State>  → always connected, UNLESS state_unlocks is enabled, in which
+                     case its entrance requires the "Unlock <State>" item
 
     All cargo delivery and level milestone locations live in "Menu" so they are
-    always logically reachable (the player can attempt them from the base states).
-
-    City arrival and state first-visit locations live in the corresponding state
-    region and are only logically reachable when that state is unlocked.
+    always logically reachable.  City arrival and state first-visit locations
+    live in the corresponding state region; with state_unlocks on they become
+    logically reachable only once that state's unlock item is received.
     """
     from .locations import (
         ALL_LOCATIONS,
@@ -75,10 +75,30 @@ def create_regions(world: "ATSWorld") -> None:
         location = ATSLocation(player, loc_name, loc_data.code, regions[target_region_name])
         regions[target_region_name].locations.append(location)
 
-    # Connect Menu → all active state regions (all always accessible)
+    # Connect Menu → active state regions.
+    #
+    # With state_unlocks enabled, each DLC state's entrance requires its
+    # "Unlock <State>" progression item, so that state's city/first-visit checks
+    # are logically gated behind the unlock.  California and Nevada (base game)
+    # are always connected.  This gating is purely logical — the client never
+    # blocks driving; it only holds the checks until the unlock is received.
+    unlocks_on = bool(getattr(options, "state_unlocks", None) and options.state_unlocks.value
+                      and (options.city_arrival_checks.value or options.state_arrival_checks.value))
+    base_states = {"California", "Nevada"}
+    id_to_name = {s["id"]: s["name"] for s in _cities_data["states"]}
+    name_to_id = {v: k for k, v in id_to_name.items()}
+
     menu = regions["Menu"]
     for state_name in active_state_names:
-        menu.connect(regions[state_name])
+        if unlocks_on and state_name not in base_states:
+            _tok = name_to_id.get(state_name)
+            _item = f"Unlock {state_name}"
+            menu.connect(
+                regions[state_name],
+                rule=lambda state, item=_item: state.has(item, player),
+            )
+        else:
+            menu.connect(regions[state_name])
 
 
 class ATSLocation:

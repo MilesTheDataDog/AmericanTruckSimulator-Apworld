@@ -131,6 +131,17 @@ American Truck Simulator:
     'false': 0
     'true': 50
 
+  # ── State Unlock Progression ──────────────────────────────────────────────────
+  # If enabled, each DLC state must be unlocked by receiving its "Unlock <State>"
+  # item before that state's city and first-visit checks are sent. You can still
+  # drive and deliver ANYWHERE at any time — nothing in the game is blocked; the
+  # arrival checks are simply held by the client and released when the unlock
+  # item arrives. California and Nevada are always unlocked. Has no effect unless
+  # city_arrival_checks and/or state_arrival_checks are also enabled.
+  state_unlocks:
+    'false': 50
+    'true': 0
+
   # ── Trap Percentage ───────────────────────────────────────────────────────────
   # What percentage of filler item slots are replaced with money trap items
   # (traffic fines). When a trap is received, the fine amount is deducted from

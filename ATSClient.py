@@ -58,7 +58,7 @@ except Exception as _e:
 colorama.init()
 
 GAME_NAME = "American Truck Simulator"
-CLIENT_VERSION = "1.14.0"
+CLIENT_VERSION = "1.16.0"
 
 # ── Communication folder ───────────────────────────────────────────────────────
 def _get_comm_dir() -> Path:
@@ -92,6 +92,17 @@ APPLIED_FILE = COMM_DIR / "applied.json"
 # DLL never saw this file and would double-apply those grants once its memory
 # pointers work again.  Deleted after migration.
 CLIENT_GRANTS_FILE = COMM_DIR / "client_grants.json"
+# Persisted DeathLink towing fees, keyed by seed.  DeathLink deaths arrive as
+# Bounce packets (not items), so unlike traps they are NOT replayed from the
+# server on a client restart.  Without persistence, the restarted client would
+# report a higher net money than the applied.json ledger and the DLL/save
+# fallback would refund every fee.  This file makes the deductions durable.
+DEATHLINK_FILE = COMM_DIR / "deathlink_deducted.json"
+# Persisted city/state arrival checks that were earned while their state was
+# still locked (state_unlocks option).  Keyed by seed so a client restart before
+# the unlock arrives does not lose them.  Released when the unlock item is
+# received.  Schema: {"seed": ..., "held": {"<State Name>": [loc_code, ...]}}
+HELD_CHECKS_FILE = COMM_DIR / "held_checks.json"
 
 # ── City coordinate store ──────────────────────────────────────────────────────
 
@@ -1460,6 +1471,12 @@ def _apply_yaml_options(ctx: "ATSContext") -> None:
         ctx.slot_data["death_link"] = dl
         changed.append(f"death_link={dl}")
 
+    su_raw = _resolve_weighted(yaml_opts.get("state_unlocks"))
+    if su_raw is not None:
+        su = str(su_raw).strip().lower() in ("true", "1", "on", "yes")
+        ctx.slot_data["state_unlocks"] = su
+        changed.append(f"state_unlocks={su}")
+
     dlp_raw = _resolve_weighted(yaml_opts.get("death_link_penalty"))
     if dlp_raw is not None:
         try:
@@ -1491,8 +1508,9 @@ class ATSCommandProcessor(ClientCommandProcessor):
         logger.info(f"[ATS] Current level:       {ctx.current_level}")
         logger.info(f"[ATS] Current money:       ${ctx.current_money:,}")
         logger.info(f"[ATS] Total money granted:   ${ctx._total_money_granted:,}")
-        logger.info(f"[ATS] Total money deducted:  ${ctx._total_money_deducted:,}")
-        logger.info(f"[ATS] Net money effect:      ${ctx._total_money_granted - ctx._total_money_deducted:,}")
+        logger.info(f"[ATS] Total money deducted:  ${ctx._effective_deducted():,} "
+                    f"(traps ${ctx._total_money_deducted:,} + deathlink ${ctx._deathlink_deducted:,})")
+        logger.info(f"[ATS] Net money effect:      ${ctx._total_money_granted - ctx._effective_deducted():,}")
         logger.info(f"[ATS] Total XP granted:      {ctx._total_xp_granted:,}")
         logger.info(f"[ATS] Checks sent:         {len(ctx.checked_locations)}")
         logger.info(f"[ATS] Goal satisfied:      {ctx.goal_complete}")
@@ -1502,6 +1520,13 @@ class ATSCommandProcessor(ClientCommandProcessor):
         logger.info(f"[ATS] Death link:          "
                     f"{'ENABLED (penalty ' + str(_dl_pct) + '% of balance)' if _dl_on else 'disabled'}")
         logger.info(f"[ATS] Engine wear:         {ctx._engine_wear * 100:.0f}%")
+        if ctx._state_unlocks_enabled:
+            _held = sum(len(v) for v in ctx._held_state_checks.values())
+            logger.info(f"[ATS] State unlocks:       ON — unlocked "
+                        f"{sorted(ctx._unlocked_states) or '(none yet)'}, "
+                        f"{_held} check(s) held")
+        else:
+            logger.info(f"[ATS] State unlocks:       off")
         _applied = _read_applied_state(ctx._seed_id())
         logger.info(f"[ATS] Applied ledger:      ${_applied['applied_money']:,} money, "
                     f"{_applied['applied_xp']:,} XP"
@@ -1702,7 +1727,9 @@ class ATSContext(CommonContext):
         # Last level value for which we logged a win-condition progress line
         self._last_logged_level: int = 0
 
-        # Notification queue for in-game popups (written to items.json)
+        # Notification queue written to items.json. ATS runs no mod scripting,
+        # so there is no in-game popup consumer today; the field is retained for
+        # a possible future client-side overlay and is harmless if unread.
         self._notifications: List[Dict] = []
         self._notification_counter: int = 0
 
@@ -1744,8 +1771,25 @@ class ATSContext(CommonContext):
         # ── DeathLink ────────────────────────────────────────────────────────
         # Latest engine wear reported by the DLL (0.0-1.0); for /status display.
         self._engine_wear: float = 0.0
-        # True once update_death_link(True) has been scheduled for this connection.
-        self._death_link_requested: bool = False
+        # Cumulative towing fees deducted for received deaths, this seed.
+        # Persisted to DEATHLINK_FILE so it survives client restarts (deaths are
+        # Bounces, not replayable items).  Loaded in _on_connected once the seed
+        # is known.  Kept SEPARATE from _total_money_deducted (which holds trap
+        # fines that the server DOES replay) so the two never double-count.
+        self._deathlink_deducted: int = 0
+        self._deathlink_seed_loaded: str = ""  # seed the above was loaded for
+        # Cooldown so a burst of deaths in a large multiworld doesn't stack fees.
+        self._deathlink_last_fee_ts: float = 0.0
+        self._DEATHLINK_FEE_COOLDOWN: float = 60.0  # seconds
+
+        # ── State-unlock progression (logic mode) ────────────────────────────
+        # When slot_data["state_unlocks"] is set, city/state arrival checks in a
+        # locked state are held (not sent) until the "Unlock <State>" item
+        # arrives.  Unlocked states are rebuilt from items_received each session
+        # (restart-safe); held checks are persisted per-seed as a backstop.
+        self._state_unlocks_enabled: bool = False
+        self._unlocked_states: Set[str] = set()        # state display names
+        self._held_state_checks: Dict[str, Set[int]] = {}  # state name → loc codes
 
         # ── Offline save-grant fallback ──────────────────────────────────────
         # Delivers pending money/XP grants by patching the save file while the
@@ -1826,17 +1870,69 @@ class ATSContext(CommonContext):
         # game_watcher polls that list and calls _on_items_received with
         # proper NetworkItem objects.
 
+    def _effective_deducted(self) -> int:
+        """Total money to subtract from grants: replayable trap fines plus the
+        persisted (non-replayable) DeathLink towing fees for this seed."""
+        return self._total_money_deducted + self._deathlink_deducted
+
+    def _load_deathlink_deducted(self) -> None:
+        """Load this seed's persisted DeathLink deductions (idempotent per seed)."""
+        seed = self._seed_id()
+        if self._deathlink_seed_loaded == seed:
+            return
+        deducted = 0
+        try:
+            if DEATHLINK_FILE.is_file():
+                data = _read_json(DEATHLINK_FILE)
+                if isinstance(data, dict) and str(data.get("seed", "")) == seed:
+                    deducted = int(data.get("deducted", 0))
+        except Exception as e:
+            logger.debug(f"[ATS] Could not read deathlink_deducted.json: {e}")
+        self._deathlink_deducted = deducted
+        self._deathlink_seed_loaded = seed
+        if deducted:
+            logger.info(f"[ATS] Restored ${deducted:,} of DeathLink towing fees for this seed")
+
+    def _persist_deathlink_deducted(self) -> None:
+        try:
+            _write_json(DEATHLINK_FILE, {
+                "seed": self._seed_id(),
+                "deducted": self._deathlink_deducted,
+            })
+        except Exception as e:
+            logger.debug(f"[ATS] Could not persist deathlink_deducted.json: {e}")
+
     def _on_connected(self) -> None:
         logger.info(f"[ATS] Connected to Archipelago server as {self.username}")
         gl = self.slot_data.get("goal_level", 35)
         gm = self.slot_data.get("goal_money", 1000) * 1000
         logger.info(f"[ATS] Win condition: {self._win_condition_description()} (goal_level={gl}, goal_money=${gm:,})")
 
+        # Restore this seed's DeathLink fees BEFORE the first items.json write so
+        # the DLL sees the correct net money and never refunds past penalties.
+        self._load_deathlink_deducted()
+
+        # State-unlock progression: arm gating and restore any held checks.
+        # Unlocked states accumulate in _unlocked_states as unlock items are
+        # applied (once per process via _applied_item_count) — do NOT reset the
+        # set here, or a mid-session reconnect (which does not re-apply items)
+        # would wrongly re-lock already-unlocked states.  Held checks are
+        # persisted per-seed and reloaded as a restart backstop.
+        self._state_unlocks_enabled = bool(self.slot_data.get("state_unlocks"))
+        if self._state_unlocks_enabled:
+            self._load_held_checks()
+            logger.info(
+                "[ATS] State Unlock Progression ENABLED — city/state checks in a "
+                "locked state are held until its 'Unlock <State>' item arrives "
+                "(driving and deliveries are never blocked)."
+            )
+
         # Enable DeathLink when the option is on (from server slot_data or the
-        # YAML fallback).  update_death_link adds the "DeathLink" tag and sends
-        # a ConnectUpdate so the server starts routing death bounces to us.
-        if self.slot_data.get("death_link") and not self._death_link_requested:
-            self._death_link_requested = True
+        # YAML fallback).  update_death_link adds the "DeathLink" tag and sends a
+        # ConnectUpdate.  Servers forget tags on disconnect, so this must run on
+        # EVERY (re)connect — not once — or we silently stop sending/receiving
+        # deaths after any reconnect.
+        if self.slot_data.get("death_link"):
             pct = self.slot_data.get("death_link_penalty", 15)
             logger.info(
                 f"[ATS] Death Link ENABLED — engine damage ≥90% sends a death; "
@@ -1844,7 +1940,7 @@ class ATSContext(CommonContext):
             )
             asyncio.create_task(self.update_death_link(True))
 
-        # Write slot data so the plugin/mod can read player options
+        # Write slot data so the plugin can read player options
         _write_json(SLOT_DATA_FILE, self.slot_data)
         self._write_items_file()
 
@@ -1859,13 +1955,25 @@ class ATSContext(CommonContext):
         except (TypeError, ValueError):
             pct = 15
 
+        # Make sure this seed's persisted total is loaded before we add to it.
+        self._load_deathlink_deducted()
+
+        now = time.monotonic()
+        on_cooldown = (now - self._deathlink_last_fee_ts) < self._DEATHLINK_FEE_COOLDOWN
         balance = max(0, int(self.current_money))
         fee = (balance * pct) // 100
+
         if pct <= 0 or fee <= 0:
             text = f"Death Link: {source} died" + (f" ({cause})" if cause else "")
             logger.info(f"[ATS] {text} — no towing fee applied")
+        elif on_cooldown:
+            wait = int(self._DEATHLINK_FEE_COOLDOWN - (now - self._deathlink_last_fee_ts))
+            text = f"Death Link: {source} died (no fee — {wait}s cooldown)"
+            logger.info(f"[ATS] {text}")
         else:
-            self._total_money_deducted += fee
+            self._deathlink_deducted += fee
+            self._deathlink_last_fee_ts = now
+            self._persist_deathlink_deducted()
             text = f"Death Link: {source} died — emergency towing fee -${fee:,} ({pct}%)"
             logger.info(f"[ATS] {text}")
         self._notifications.append({
@@ -1945,6 +2053,14 @@ class ATSContext(CommonContext):
             )
             return amount
 
+        elif item_data and item_data.category == "state_unlock":
+            state_name = self._state_token_to_name(item_data.game_id)
+            if state_name and state_name not in self._unlocked_states:
+                self._unlocked_states.add(state_name)
+                logger.info(f"[ATS] State unlocked: {state_name} — releasing any held checks")
+                self._release_state_checks(state_name)
+            return None
+
         elif item_name not in ("Victory", "Trucking Permit"):
             logger.warning(
                 f"[ATS] Received unknown item {item_name!r} — no in-game effect. "
@@ -1952,6 +2068,109 @@ class ATSContext(CommonContext):
             )
         return None
 
+
+    # ── State-unlock progression helpers ───────────────────────────────────────
+
+    def _state_token_to_name(self, token: str) -> Optional[str]:
+        """Map a state token (e.g. 'texas') to its display name (e.g. 'Texas')."""
+        try:
+            from worlds.american_truck_simulator.locations import _state_id_to_name
+            return _state_id_to_name.get(token)
+        except Exception:
+            return None
+
+    def _state_locked(self, state_name: str) -> bool:
+        """True when arrival checks for this state must be held (state_unlocks on,
+        the state is a gated DLC state, and its unlock has not been received)."""
+        if not self._state_unlocks_enabled:
+            return False
+        if state_name in ("California", "Nevada"):
+            return False
+        return state_name not in self._unlocked_states
+
+    def _gate_or_hold(self, code: int, state_name: str, label: str,
+                      new_checks: List[int]) -> None:
+        """Queue an arrival check for sending, or hold it if its state is locked."""
+        if code in self.checked_locations:
+            return
+        if self._state_locked(state_name):
+            self._held_state_checks.setdefault(state_name, set()).add(code)
+            self._persist_held_checks()
+            logger.info(
+                f"[ATS] Held {label} — {state_name} locked; will send when "
+                f"'Unlock {state_name}' arrives"
+            )
+        elif code not in new_checks:
+            new_checks.append(code)
+
+    def _load_held_checks(self) -> None:
+        self._held_state_checks = {}
+        try:
+            if HELD_CHECKS_FILE.is_file():
+                data = _read_json(HELD_CHECKS_FILE)
+                if isinstance(data, dict) and str(data.get("seed", "")) == self._seed_id():
+                    for sname, codes in (data.get("held") or {}).items():
+                        self._held_state_checks[sname] = set(int(c) for c in codes)
+            total = sum(len(v) for v in self._held_state_checks.values())
+            if total:
+                logger.info(f"[ATS] Restored {total} held arrival check(s) awaiting state unlocks")
+        except Exception as e:
+            logger.debug(f"[ATS] Could not read held_checks.json: {e}")
+
+    def _persist_held_checks(self) -> None:
+        try:
+            _write_json(HELD_CHECKS_FILE, {
+                "seed": self._seed_id(),
+                "held": {s: sorted(c) for s, c in self._held_state_checks.items() if c},
+            })
+        except Exception as e:
+            logger.debug(f"[ATS] Could not persist held_checks.json: {e}")
+
+    def _read_visited_cities_from_save(self) -> Optional[Set[str]]:
+        """Parse the current save's visited_cities set, or None if unavailable."""
+        path = self._cached_save_path
+        if path is None or not path.exists():
+            path = _find_ats_save_file(forced_profile_id=self._dll_profile_id)
+        if not path:
+            return None
+        text, _fmt, _ = _read_sii_text(path)
+        if text is None:
+            return None
+        try:
+            return set(_parse_sii_save(text)["visited_cities"])
+        except Exception:
+            return None
+
+    def _release_state_checks(self, state_name: str) -> None:
+        """Send all arrival checks for a just-unlocked state: the persisted held
+        set plus a re-derivation from the save's visited cities (covers checks
+        earned in a prior session). Idempotent — already-checked codes filtered."""
+        from worlds.american_truck_simulator.locations import (
+            CITY_ARRIVAL_LOCATIONS, STATE_ARRIVAL_LOCATIONS,
+        )
+        to_send: Set[int] = set(self._held_state_checks.pop(state_name, set()))
+
+        visited = self._read_visited_cities_from_save()
+        if visited is not None:
+            state_has_visit = False
+            for loc in CITY_ARRIVAL_LOCATIONS.values():
+                if loc.region == state_name and loc.game_id in visited:
+                    to_send.add(loc.code)
+                    state_has_visit = True
+            if state_has_visit:
+                for sa in STATE_ARRIVAL_LOCATIONS.values():
+                    if sa.region == state_name:
+                        to_send.add(sa.code)
+
+        self._persist_held_checks()
+        self._force_save_poll = True  # let future visits fire normally now
+        to_send = {c for c in to_send if c not in self.checked_locations}
+        if to_send:
+            logger.info(f"[ATS] Releasing {len(to_send)} check(s) for unlocked {state_name}")
+            asyncio.create_task(self.send_msgs([{
+                "cmd": "LocationChecks",
+                "locations": sorted(to_send),
+            }]))
 
     # ── Items file (client → plugin) ───────────────────────────────────────────
 
@@ -1980,7 +2199,8 @@ class ATSContext(CommonContext):
             # preventing stale carryover from a previous seed from blocking new grants.
             "seed": self._seed_id(),
             "total_money_granted": self._total_money_granted,
-            "total_money_deducted": self._total_money_deducted,
+            # Combined: replayable trap fines + persisted DeathLink towing fees.
+            "total_money_deducted": self._effective_deducted(),
             "total_xp_granted": self._total_xp_granted,
             "win_condition": self.slot_data.get("win_condition", 0),
             "goal_level": self.slot_data.get("goal_level", 35),
@@ -2327,24 +2547,31 @@ class ATSContext(CommonContext):
         new_checks: List[int] = []
         for loc_data in CITY_ARRIVAL_LOCATIONS.values():
             if loc_data.game_id == city_id:
+                state_name = loc_data.region
                 _reward_tag = ("(reward held — delivery active)"
                                if self._job_active else "(reward immediate — no active delivery)")
                 if loc_data.code not in self.checked_locations:
-                    new_checks.append(loc_data.code)
-                    if self._job_active and city_id not in self._held_arrival_labels:
+                    # Held instead of sent when the state is locked (state_unlocks).
+                    self._gate_or_hold(loc_data.code, state_name,
+                                       f"city arrival {city_id}", new_checks)
+                    if (loc_data.code in new_checks and self._job_active
+                            and city_id not in self._held_arrival_labels):
                         self._held_arrival_labels.append(city_id)
-                    logger.info(f"[ATS] City arrival check: {city_id} → {loc_data.code} {_reward_tag}")
-                state_name = loc_data.region
+                    if loc_data.code in new_checks:
+                        logger.info(f"[ATS] City arrival check: {city_id} → {loc_data.code} {_reward_tag}")
                 if state_name not in self._save_known_states:
                     logger.info(f"[ATS] New state detected: {state_name}")
                     self._save_known_states.add(state_name)
                     for sa_data in STATE_ARRIVAL_LOCATIONS.values():
                         if sa_data.region == state_name and sa_data.code not in self.checked_locations:
-                            new_checks.append(sa_data.code)
+                            self._gate_or_hold(sa_data.code, state_name,
+                                               f"state arrival {state_name}", new_checks)
                             _slabel = f"state:{state_name}"
-                            if self._job_active and _slabel not in self._held_arrival_labels:
+                            if (sa_data.code in new_checks and self._job_active
+                                    and _slabel not in self._held_arrival_labels):
                                 self._held_arrival_labels.append(_slabel)
-                            logger.info(f"[ATS] State arrival check: {state_name} → {sa_data.code} {_reward_tag}")
+                            if sa_data.code in new_checks:
+                                logger.info(f"[ATS] State arrival check: {state_name} → {sa_data.code} {_reward_tag}")
                             break
                 break
         if new_checks:
@@ -2385,6 +2612,23 @@ class ATSContext(CommonContext):
         if not self.auth:
             return
 
+        seed = self._seed_id()
+        has_legacy = CLIENT_GRANTS_FILE.is_file()
+
+        # Cheap check first: compute pending deltas from the (small) applied.json
+        # ledger and in-memory totals.  If nothing is pending and there's no
+        # legacy file to migrate, return WITHOUT spawning `tasklist` — this path
+        # runs every 5 s, so we must not poll the process list when idle.
+        applied = _read_applied_state(seed)
+        net_money = self._total_money_granted - self._effective_deducted()
+        delta_money = net_money - applied["applied_money"]
+        delta_xp = max(0, self._total_xp_granted - applied["applied_xp"])
+        if delta_money == 0 and delta_xp == 0 and not has_legacy:
+            self._save_fallback_warned = False
+            return
+
+        # Something is pending (or a legacy file needs migrating) — now it's
+        # worth checking whether the game is running.
         running = _is_ats_running()
         if running is None:
             # Can't check the process list — use events.json freshness as a
@@ -2394,22 +2638,19 @@ class ATSContext(CommonContext):
             except OSError:
                 running = False
 
-        seed = self._seed_id()
-
         # Migrate the legacy pre-v1.13 client_grants.json ledger: those save
         # patches were invisible to the DLL, which would re-inject the same
         # grants once its pointers work again.  Fold them into the shared
         # applied.json ledger (only while the game is closed — the DLL owns
         # applied.json while running) and delete the legacy file.
-        if not running and CLIENT_GRANTS_FILE.is_file():
+        if not running and has_legacy:
             try:
                 cg = _read_json(CLIENT_GRANTS_FILE)
                 if isinstance(cg, dict) and str(cg.get("seed", "")) == seed:
-                    prior = _read_applied_state(seed)
                     _write_json(APPLIED_FILE, {
-                        "applied_money": prior["applied_money"] + int(cg.get("save_applied_money", 0)),
-                        "applied_xp":    prior["applied_xp"] + int(cg.get("save_applied_xp", 0)),
-                        "clamped_debt":  prior["clamped_debt"],
+                        "applied_money": applied["applied_money"] + int(cg.get("save_applied_money", 0)),
+                        "applied_xp":    applied["applied_xp"] + int(cg.get("save_applied_xp", 0)),
+                        "clamped_debt":  applied["clamped_debt"],
                         "seed": seed,
                     })
                     logger.info(
@@ -2419,11 +2660,11 @@ class ATSContext(CommonContext):
                 CLIENT_GRANTS_FILE.unlink()
             except Exception:
                 logger.error(f"[ATS] client_grants.json migration failed:\n{traceback.format_exc()}")
+            # Recompute deltas: migration changed applied.json.
+            applied = _read_applied_state(seed)
+            delta_money = net_money - applied["applied_money"]
+            delta_xp = max(0, self._total_xp_granted - applied["applied_xp"])
 
-        applied = _read_applied_state(seed)
-        net_money = self._total_money_granted - self._total_money_deducted
-        delta_money = net_money - applied["applied_money"]
-        delta_xp = max(0, self._total_xp_granted - applied["applied_xp"])
         debt = applied["clamped_debt"]
 
         # Positive grants pay off clamp-debt first (same rule as the DLL).
@@ -2761,29 +3002,38 @@ class ATSContext(CommonContext):
                             self._save_known_states.add(state_name)
                             for sa_data in STATE_ARRIVAL_LOCATIONS.values():
                                 if sa_data.region == state_name and sa_data.code not in self.checked_locations:
-                                    new_checks.append(sa_data.code)
-                                    logger.info(f"[ATS] State arrival check: {state_name} → {sa_data.code} (baseline recovery)")
+                                    # Held if the state is locked (state_unlocks).
+                                    self._gate_or_hold(sa_data.code, state_name,
+                                                       f"state arrival {state_name} (baseline)", new_checks)
+                                    if sa_data.code in new_checks:
+                                        logger.info(f"[ATS] State arrival check: {state_name} → {sa_data.code} (baseline recovery)")
                                     break
                     else:
                         _reward_tag = "(reward held — delivery active)" if self._job_active else "(reward immediate — no active delivery)"
-                        # City check — independent of state check below
-                        if loc_data.code not in self.checked_locations:
-                            new_checks.append(loc_data.code)
-                            if self._job_active and city_id not in self._held_arrival_labels:
-                                self._held_arrival_labels.append(city_id)
-                            logger.info(f"[ATS] City arrival check: {city_id} → {loc_data.code} {_reward_tag}")
-                        # State check — always runs regardless of city check status
                         state_name = loc_data.region
+                        # City check — held instead of sent when the state is locked.
+                        if loc_data.code not in self.checked_locations:
+                            self._gate_or_hold(loc_data.code, state_name,
+                                               f"city arrival {city_id}", new_checks)
+                            if (loc_data.code in new_checks and self._job_active
+                                    and city_id not in self._held_arrival_labels):
+                                self._held_arrival_labels.append(city_id)
+                            if loc_data.code in new_checks:
+                                logger.info(f"[ATS] City arrival check: {city_id} → {loc_data.code} {_reward_tag}")
+                        # State check — always runs regardless of city check status
                         if state_name not in self._save_known_states:
                             logger.info(f"[ATS] New state detected: {state_name}")
                             self._save_known_states.add(state_name)
                             for sa_data in STATE_ARRIVAL_LOCATIONS.values():
                                 if sa_data.region == state_name and sa_data.code not in self.checked_locations:
-                                    new_checks.append(sa_data.code)
+                                    self._gate_or_hold(sa_data.code, state_name,
+                                                       f"state arrival {state_name}", new_checks)
                                     _slabel = f"state:{state_name}"
-                                    if self._job_active and _slabel not in self._held_arrival_labels:
+                                    if (sa_data.code in new_checks and self._job_active
+                                            and _slabel not in self._held_arrival_labels):
                                         self._held_arrival_labels.append(_slabel)
-                                    logger.info(f"[ATS] State arrival check: {state_name} → {sa_data.code} {_reward_tag}")
+                                    if sa_data.code in new_checks:
+                                        logger.info(f"[ATS] State arrival check: {state_name} → {sa_data.code} {_reward_tag}")
                                     break
                     break
 
