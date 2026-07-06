@@ -69,7 +69,7 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // ── Plugin version ─────────────────────────────────────────────────────────────
-static const char* PLUGIN_VERSION = "2.22.0";
+static const char* PLUGIN_VERSION = "2.23.0";
 
 // ── Communication file paths ───────────────────────────────────────────────────
 static fs::path g_comm_dir;
@@ -635,12 +635,37 @@ struct ScanState {
     bool xp_scanned    = false;
     int  money_confirms = 0;   // number of real value changes the survivors tracked
     int  xp_confirms    = 0;
+    // Plateau tracking: ATS keeps a value in more than one location (the real
+    // account plus a HUD/telemetry mirror), so the candidate set often stops
+    // shrinking at 2+ and NEVER reaches 1.  We detect when it has plateaued
+    // (same size across two consecutive confirms) and then commit ALL survivors
+    // as write targets.  size at the previous confirm:
+    size_t money_prev_size = (size_t)-1;
+    size_t xp_prev_size    = (size_t)-1;
+    bool   money_stable = false;  // set true when a confirm left the size unchanged
+    bool   xp_stable    = false;
+    bool   money_plateau_warned = false;
+    bool   xp_plateau_warned    = false;
 };
 static ScanState g_scan;
 static std::mutex g_scan_state_mutex;
 static std::atomic<bool> g_scanning{false};
 static std::atomic<bool> g_money_via_scan{false};
 static std::atomic<bool> g_xp_via_scan{false};
+
+// When the scanner locks on, these hold EVERY confirmed address for the value
+// (the real one plus any mirrors).  apply_memory_grants writes the grant to all
+// of them: the real address makes the grant stick, mirrors are refreshed from it
+// by the game so writing to them is harmless.  Guarded by g_targets_mutex.
+static std::mutex g_targets_mutex;
+static std::vector<uintptr_t> g_money_targets;  // direct data addresses
+static std::vector<uintptr_t> g_xp_targets;
+
+// Upper bound on how many addresses we will write to.  Enough for the real
+// value plus a few mirrors; a set larger than this is treated as unconverged
+// (too risky to write) and left to the save-file fallback.
+static const size_t MONEY_MAX_TARGETS = 8;
+static const size_t XP_MAX_TARGETS    = 8;
 
 // A value common enough to exceed this many hits is too ambiguous to be useful
 // on its own; we discard the scan and wait for the value to change to something
@@ -742,6 +767,8 @@ static void value_scan_pass() {
             } else {
                 g_scan.money_scanned = true;
                 g_scan.money_last = km;
+                g_scan.money_prev_size = g_scan.money_addrs.size();
+                g_scan.money_stable = false;
                 log("Value scan (money): first pass found " +
                     std::to_string(g_scan.money_addrs.size()) +
                     " candidate(s) for $" + std::to_string(km));
@@ -750,23 +777,44 @@ static void value_scan_pass() {
             keep_candidates_matching<long long>(g_scan.money_addrs, km);
             g_scan.money_last = km;
             g_scan.money_confirms++;
+            size_t sz = g_scan.money_addrs.size();
+            g_scan.money_stable = (sz == g_scan.money_prev_size);  // no shrink this round
+            g_scan.money_prev_size = sz;
             log("Value scan (money): after change to $" + std::to_string(km) +
-                ", " + std::to_string(g_scan.money_addrs.size()) +
+                ", " + std::to_string(sz) +
                 " candidate(s) remain (confirms=" +
                 std::to_string(g_scan.money_confirms) + ")");
-            if (g_scan.money_addrs.empty()) {
+            if (sz == 0) {
                 // All pruned — the value we scanned was stale. Start over.
                 g_scan.money_scanned = false;
                 g_scan.money_confirms = 0;
+                g_scan.money_prev_size = (size_t)-1;
+                g_scan.money_stable = false;
             }
         }
-        // Lock in once a single survivor has tracked at least one real change.
-        if (g_scan.money_addrs.size() == 1 && g_scan.money_confirms >= 1) {
-            uintptr_t a = g_scan.money_addrs[0];
-            g_money_ptr.store(a - MONEY_OFFSET, std::memory_order_relaxed);
+        // Commit when a single survivor has tracked one real change, OR when the
+        // set has plateaued small (real value + mirrors that all move together).
+        size_t sz = g_scan.money_addrs.size();
+        bool commit = (sz == 1 && g_scan.money_confirms >= 1) ||
+                      (sz >= 1 && sz <= MONEY_MAX_TARGETS &&
+                       g_scan.money_confirms >= 2 && g_scan.money_stable);
+        if (commit) {
+            {
+                std::lock_guard<std::mutex> tl(g_targets_mutex);
+                g_money_targets = g_scan.money_addrs;
+            }
+            g_money_ptr.store(g_scan.money_addrs[0] - MONEY_OFFSET, std::memory_order_relaxed);
             g_money_via_scan.store(true, std::memory_order_relaxed);
-            log("Money address FOUND via value scan @ " + hex_addr(a) +
+            log("Money address(es) FOUND via value scan: " + std::to_string(sz) +
+                " target(s), primary @ " + hex_addr(g_scan.money_addrs[0]) +
                 " — live money grants restored (no addresses.json needed)");
+        } else if (sz > MONEY_MAX_TARGETS && g_scan.money_confirms >= 3 &&
+                   g_scan.money_stable && !g_scan.money_plateau_warned) {
+            g_scan.money_plateau_warned = true;
+            log("Value scan (money): plateaued at " + std::to_string(sz) +
+                " candidates (>" + std::to_string(MONEY_MAX_TARGETS) +
+                ") — too many to write safely; grants will be delivered via the "
+                "save file when the game is closed", SCS_LOG_TYPE_warning);
         }
     }
 
@@ -779,6 +827,8 @@ static void value_scan_pass() {
             } else {
                 g_scan.xp_scanned = true;
                 g_scan.xp_last = kx;
+                g_scan.xp_prev_size = g_scan.xp_addrs.size();
+                g_scan.xp_stable = false;
                 log("Value scan (XP): first pass found " +
                     std::to_string(g_scan.xp_addrs.size()) +
                     " candidate(s) for " + std::to_string(kx) + " XP");
@@ -787,18 +837,41 @@ static void value_scan_pass() {
             keep_candidates_matching<int32_t>(g_scan.xp_addrs, (int32_t)kx);
             g_scan.xp_last = kx;
             g_scan.xp_confirms++;
-            if (g_scan.xp_addrs.empty()) {
+            size_t sz = g_scan.xp_addrs.size();
+            g_scan.xp_stable = (sz == g_scan.xp_prev_size);
+            g_scan.xp_prev_size = sz;
+            log("Value scan (XP): after change to " + std::to_string(kx) +
+                ", " + std::to_string(sz) + " candidate(s) remain (confirms=" +
+                std::to_string(g_scan.xp_confirms) + ")");
+            if (sz == 0) {
                 g_scan.xp_scanned = false;
                 g_scan.xp_confirms = 0;
+                g_scan.xp_prev_size = (size_t)-1;
+                g_scan.xp_stable = false;
             }
         }
-        // XP int32 has more false matches, so require two confirmed changes.
-        if (g_scan.xp_addrs.size() == 1 && g_scan.xp_confirms >= 2) {
-            uintptr_t a = g_scan.xp_addrs[0];
-            g_xp_ptr.store(a - XP_OFFSET, std::memory_order_relaxed);
+        // XP int32 has more false matches, so require two confirmed changes and,
+        // for a multi-address set, a plateau (mirrors that move together).
+        size_t sz = g_scan.xp_addrs.size();
+        bool commit = (sz == 1 && g_scan.xp_confirms >= 2) ||
+                      (sz >= 1 && sz <= XP_MAX_TARGETS &&
+                       g_scan.xp_confirms >= 2 && g_scan.xp_stable);
+        if (commit) {
+            {
+                std::lock_guard<std::mutex> tl(g_targets_mutex);
+                g_xp_targets = g_scan.xp_addrs;
+            }
+            g_xp_ptr.store(g_scan.xp_addrs[0] - XP_OFFSET, std::memory_order_relaxed);
             g_xp_via_scan.store(true, std::memory_order_relaxed);
-            log("XP address FOUND via value scan @ " + hex_addr(a) +
+            log("XP address(es) FOUND via value scan: " + std::to_string(sz) +
+                " target(s), primary @ " + hex_addr(g_scan.xp_addrs[0]) +
                 " — live XP grants restored");
+        } else if (sz > XP_MAX_TARGETS && g_scan.xp_confirms >= 3 &&
+                   g_scan.xp_stable && !g_scan.xp_plateau_warned) {
+            g_scan.xp_plateau_warned = true;
+            log("Value scan (XP): plateaued at " + std::to_string(sz) +
+                " candidates (>" + std::to_string(XP_MAX_TARGETS) +
+                ") — delivering XP via the save file instead", SCS_LOG_TYPE_warning);
         }
     }
 }
@@ -812,7 +885,11 @@ static void reset_money_scan() {
     g_scan.money_scanned = false;
     g_scan.money_confirms = 0;
     g_scan.money_last = LLONG_MIN;
+    g_scan.money_prev_size = (size_t)-1;
+    g_scan.money_stable = false;
+    g_scan.money_plateau_warned = false;
     g_money_via_scan.store(false, std::memory_order_relaxed);
+    { std::lock_guard<std::mutex> tl(g_targets_mutex); g_money_targets.clear(); }
 }
 static void reset_xp_scan() {
     std::lock_guard<std::mutex> lock(g_scan_state_mutex);
@@ -820,7 +897,39 @@ static void reset_xp_scan() {
     g_scan.xp_scanned = false;
     g_scan.xp_confirms = 0;
     g_scan.xp_last = INT32_MIN;
+    g_scan.xp_prev_size = (size_t)-1;
+    g_scan.xp_stable = false;
+    g_scan.xp_plateau_warned = false;
     g_xp_via_scan.store(false, std::memory_order_relaxed);
+    { std::lock_guard<std::mutex> tl(g_targets_mutex); g_xp_targets.clear(); }
+}
+
+// Write a value to every confirmed target (scanner path), or to the single
+// primary address (breakpoint path).  Returns true if at least one write
+// succeeded.  Used by apply_memory_grants so mirrored values all receive the grant.
+static bool write_money_value(uintptr_t primary, int64_t newval) {
+    if (g_money_via_scan.load(std::memory_order_relaxed)) {
+        std::lock_guard<std::mutex> tl(g_targets_mutex);
+        if (!g_money_targets.empty()) {
+            bool any = false;
+            for (uintptr_t a : g_money_targets)
+                if (safe_write_i64(a, newval)) any = true;
+            return any;
+        }
+    }
+    return safe_write_i64(primary, newval);
+}
+static bool write_xp_value(uintptr_t primary, int32_t newval) {
+    if (g_xp_via_scan.load(std::memory_order_relaxed)) {
+        std::lock_guard<std::mutex> tl(g_targets_mutex);
+        if (!g_xp_targets.empty()) {
+            bool any = false;
+            for (uintptr_t a : g_xp_targets)
+                if (safe_write_i32(a, newval)) any = true;
+            return any;
+        }
+    }
+    return safe_write_i32(primary, newval);
 }
 
 // Kick off a scan pass on a worker thread if one isn't already running and a
@@ -1204,7 +1313,7 @@ static void apply_memory_grants(bool allow_paused) {
                         log("Grant skip (money): in-memory value matches last write ($" +
                             std::to_string(newval) + ") — marking as applied");
                         applied = true;
-                    } else if (safe_write_i64(mp + MONEY_OFFSET, newval)) {
+                    } else if (write_money_value(mp + MONEY_OFFSET, newval)) {
                         g_last_written_money = newval;
                         // g_applied_dirty deferred to frame flush (≤2 s) — do NOT call
                         // save_applied_state() here; each per-write file-write can
@@ -1260,7 +1369,7 @@ static void apply_memory_grants(bool allow_paused) {
                     log("Grant skip (XP): in-memory value matches last write (" +
                         std::to_string(newval) + " XP) — marking as applied");
                     g_applied_xp = g_items.total_xp_granted;
-                } else if (safe_write_i32(xp + XP_OFFSET, newval)) {
+                } else if (write_xp_value(xp + XP_OFFSET, newval)) {
                     g_applied_xp      = g_items.total_xp_granted;
                     g_last_written_xp = newval;
                     g_applied_dirty.store(true, std::memory_order_relaxed);
