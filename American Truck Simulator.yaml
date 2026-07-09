@@ -88,11 +88,10 @@ American Truck Simulator:
     random-range-100-10000: 0
 
   # ── Enabled DLC States ────────────────────────────────────────────────────────
-  # All DLC states you own. REMOVE any you do NOT have the DLC for.
-  # California and Nevada (base game) are always active — do not add them here.
-  # Arizona is FREE DLC — safe to keep for all players.
+  # All paid map-DLC states you own. REMOVE any you do NOT have the DLC for.
+  # California, Nevada, and Arizona are always active and always unlocked (base
+  # game + free Arizona DLC) — listing Arizona here is harmless but not required.
   enabled_dlc:
-    - Arizona
     - New Mexico
     - Oregon
     - Washington

@@ -377,10 +377,13 @@ for _state in _cities_data["states"]:
 # ── Stable state first-visit ID offsets ───────────────────────────────────────
 # Keyed by ATS internal state token (cities.json state id field).
 # IMPORTANT: Never renumber existing entries — doing so invalidates every
-# generated seed.  To add new DLC states, append at the END with the next
-# sequential offset (17+).  California and Nevada are omitted deliberately
-# (always accessible; no unlock gate).
+# generated seed.  To add new states, append at the END with the next
+# sequential offset.
 # Initial 0-16 assignment follows the cities.json state order at v1.2.
+# California (17) and Nevada (18) were appended later: every state now has a
+# First Visit check, since a player with map DLC can start outside CA/NV, which
+# makes reaching them a genuine first visit.  Base states (CA/NV/AZ) are never
+# unlock-gated — see _STATE_UNLOCK_OFFSET in items.py and BASE_STATE_NAMES.
 _STATE_TOKEN_OFFSET: Dict[str, int] = {
     "arizona":    0,
     "new_mexico": 1,
@@ -399,11 +402,15 @@ _STATE_TOKEN_OFFSET: Dict[str, int] = {
     "missouri":   14,
     "iowa":       15,
     "louisiana":  16,
-    # ── Future DLC states: append here with offset 17, 18, ... ───────────────
+    "california": 17,
+    "nevada":     18,
+    # ── Future states: append here with offset 19, 20, ... ───────────────────
 }
 
-# States excluded from arrival checks (always accessible, no DLC gate).
-_STATES_EXCLUDED = frozenset({"california", "nevada"})
+# No state is excluded from first-visit checks any more; every state in the
+# table above gets one.  (Kept as an empty set so the loop below still reads
+# clearly and future exclusions, if ever needed, have an obvious home.)
+_STATES_EXCLUDED: frozenset = frozenset()
 
 # ── State first visit locations ────────────────────────────────────────────────
 # One location per DLC state; IDs stable via _STATE_TOKEN_OFFSET above.
@@ -485,9 +492,9 @@ def get_locations_for_options(options) -> List[str]:
 
 def _get_active_regions(options) -> set:
     """Return region names (state display names) that are active given options."""
-    from .items import _DLC_KEY_MAP
+    from .items import _DLC_KEY_MAP, BASE_STATE_NAMES
     enabled_ids = {_DLC_KEY_MAP[dlc] for dlc in options.enabled_dlc.value if dlc in _DLC_KEY_MAP}
-    active = {"California", "Nevada"}  # always active
+    active = set(BASE_STATE_NAMES)  # California, Nevada, Arizona — always active
     for _state in _cities_data["states"]:
         if _state["id"] in enabled_ids:
             active.add(_state["name"])

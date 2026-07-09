@@ -150,14 +150,20 @@ MONEY_TRAP_ITEMS: Dict[str, ATSItemData] = {
     ),
 }
 
+# Base states are always accessible and never need an unlock item, mirroring how
+# ATS ships California + Nevada (and the free Arizona DLC everyone can use).
+# They still have First Visit / city checks; they are simply never gated.
+BASE_STATE_NAMES: frozenset = frozenset({"California", "Nevada", "Arizona"})
+
 # ── State unlock items (progression) ──────────────────────────────────────────
 # When the state_unlocks option is on, receiving "Unlock <State>" lets the client
-# release that state's held city/state-arrival checks.  One per DLC state.
+# release that state's held city/state-arrival checks.  One per PAID map-DLC state.
 #
-# IMPORTANT: stable append-only IDs.  Never renumber; add new DLC states at the
-# END with the next offset.  Order mirrors locations._STATE_TOKEN_OFFSET (0-16).
+# IMPORTANT: stable IDs keyed by offset.  Never renumber existing entries; add new
+# DLC states at the END with the next offset.  Arizona (formerly offset 0) is a
+# base state now and has NO unlock item — its old offset 0 is intentionally left
+# unused so every other state keeps its established ID.
 _STATE_UNLOCK_OFFSET: Dict[str, int] = {
-    "arizona":    0,
     "new_mexico": 1,
     "oregon":     2,
     "washington": 3,
@@ -174,7 +180,7 @@ _STATE_UNLOCK_OFFSET: Dict[str, int] = {
     "missouri":   14,
     "iowa":       15,
     "louisiana":  16,
-    # ── Future DLC states: append here with offset 17, 18, ... ───────────────
+    # ── Future DLC states: append here with offset 19, 20, ... ───────────────
 }
 
 # state token → display name (from cities.json), for building item names.

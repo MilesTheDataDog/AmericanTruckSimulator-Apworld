@@ -2079,12 +2079,16 @@ class ATSContext(CommonContext):
         except Exception:
             return None
 
+    # Base states are always accessible and never gated (mirrors the apworld's
+    # BASE_STATE_NAMES: California, Nevada, and the free Arizona DLC).
+    _BASE_STATES = ("California", "Nevada", "Arizona")
+
     def _state_locked(self, state_name: str) -> bool:
         """True when arrival checks for this state must be held (state_unlocks on,
         the state is a gated DLC state, and its unlock has not been received)."""
         if not self._state_unlocks_enabled:
             return False
-        if state_name in ("California", "Nevada"):
+        if state_name in self._BASE_STATES:
             return False
         return state_name not in self._unlocked_states
 

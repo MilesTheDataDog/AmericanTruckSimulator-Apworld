@@ -47,9 +47,11 @@ def create_regions(world: "ATSWorld") -> None:
 
     active_location_names = set(get_locations_for_options(options))
 
-    # All enabled DLC states get regions — no adjacency or unlock gating
+    # Base states (California, Nevada, Arizona) are always active; paid map-DLC
+    # states are active only when enabled.
+    from .items import BASE_STATE_NAMES
     enabled_state_ids = {_DLC_KEY_MAP[dlc] for dlc in options.enabled_dlc.value if dlc in _DLC_KEY_MAP}
-    active_state_names = {"California", "Nevada"}
+    active_state_names = set(BASE_STATE_NAMES)
     for state in _cities_data["states"]:
         if state["id"] in enabled_state_ids:
             active_state_names.add(state["name"])
@@ -77,14 +79,15 @@ def create_regions(world: "ATSWorld") -> None:
 
     # Connect Menu → active state regions.
     #
-    # With state_unlocks enabled, each DLC state's entrance requires its
+    # With state_unlocks enabled, each paid map-DLC state's entrance requires its
     # "Unlock <State>" progression item, so that state's city/first-visit checks
-    # are logically gated behind the unlock.  California and Nevada (base game)
-    # are always connected.  This gating is purely logical — the client never
-    # blocks driving; it only holds the checks until the unlock is received.
+    # are logically gated behind the unlock.  Base states (California, Nevada,
+    # Arizona) are always connected and never gated.  This gating is purely
+    # logical — the client never blocks driving; it only holds the checks until
+    # the unlock is received.
     unlocks_on = bool(getattr(options, "state_unlocks", None) and options.state_unlocks.value
                       and (options.city_arrival_checks.value or options.state_arrival_checks.value))
-    base_states = {"California", "Nevada"}
+    base_states = set(BASE_STATE_NAMES)
     id_to_name = {s["id"]: s["name"] for s in _cities_data["states"]}
     name_to_id = {v: k for k, v in id_to_name.items()}
 

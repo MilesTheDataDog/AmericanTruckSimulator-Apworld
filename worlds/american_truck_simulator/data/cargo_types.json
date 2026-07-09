@@ -2067,7 +2067,7 @@
       "required_dlc": null
     },
     {
-      "id": "chem_gran",
+      "id": "chem_granule",
       "name": "Chemical Granules",
       "trailer_types": [
         "container_carrier",
@@ -2108,7 +2108,7 @@
       "required_dlc": null
     },
     {
-      "id": "sulphur",
+      "id": "sulfur",
       "name": "Sulphur",
       "trailer_types": [
         "container_carrier",
