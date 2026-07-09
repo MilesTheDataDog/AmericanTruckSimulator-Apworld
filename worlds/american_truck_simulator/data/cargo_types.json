@@ -766,7 +766,7 @@
       "required_dlc": null
     },
     {
-      "id": "mobile_barrier",
+      "id": "mbt",
       "name": "Mobile Barrier",
       "trailer_types": [
         "mobile_barrier"
@@ -1224,7 +1224,7 @@
       "required_dlc": null
     },
     {
-      "id": "wheel_loader",
+      "id": "digger1000",
       "name": "Wheel Loader",
       "trailer_types": [
         "lowboy"
@@ -2079,7 +2079,7 @@
       "required_dlc": null
     },
     {
-      "id": "geo_membrane",
+      "id": "geo_rolls",
       "name": "Geo Membranes Rolls",
       "trailer_types": [
         "drop_deck",

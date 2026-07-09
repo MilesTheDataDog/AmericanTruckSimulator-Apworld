@@ -393,38 +393,69 @@ def main():
         print(f"\nLoading locale ...")
         locale_map = _load_locale(locale_scs)
 
-    # ── Cargo (only in def.scs) ─────────────────────────────────────────────
+    # ── Cargo (def.scs = base + map DLC; equipment packs in their own archives) ──
+    # We scan def.scs first, then EVERY dlc_*.scs present, so that cargoes added
+    # by the equipment/brand DLC packs are captured too — each tagged with the
+    # pack it came from via "dlc_pack" (null = base / map-DLC / truck-transport).
+    # The apworld uses dlc_pack to gate paid-pack cargoes behind an option.
     print(f"\n=== Extracting cargo IDs ===")
-    print(f"Scanning {def_scs.name} ...")
-    cargo_texts = _read_all_text(def_scs, "cargo_data")
+
+    # Archive filename → dlc_pack tag for the paid equipment/brand packs.
+    KNOWN_PACKS = {
+        "dlc_heavy_cargo.scs":        "heavy_cargo",
+        "dlc_farm_machinery.scs":     "farm_machinery",
+        "dlc_forest_harvesting.scs":  "forest_machinery",
+        "dlc_oversize.scs":           "special_transport",
+        "dlc_bobcat.scs":             "bobcat",
+        "dlc_jcb.scs":                "jcb",
+        "dlc_volvo_construction.scs": "volvo_construction",
+        "dlc_krone_agriculture.scs":  "krone",
+    }
+
+    # def.scs (base + map cargoes) first, then every other dlc_*.scs in the folder.
+    cargo_archives = [(def_scs, None)]
+    for p in sorted(ats_dir.glob("dlc_*.scs")):
+        cargo_archives.append((p, KNOWN_PACKS.get(p.name)))
 
     cargo_list = []
     seen: set = set()
-    for text in cargo_texts:
-        token = _cargo_token(text)
-        if not token or token in seen:
+    for scs_path, pack in cargo_archives:
+        print(f"Scanning {scs_path.name} (pack={pack or 'base'}) ...")
+        try:
+            cargo_texts = _read_all_text(scs_path, "cargo_data")
+        except Exception as e:
+            print(f"  [WARN] {scs_path.name}: {e}")
             continue
-        seen.add(token)
-        name_key = _cargo_name_key(text)
-        display = ""
-        if name_key:
-            bare = name_key.lstrip("@")
-            display = locale_map.get(bare, locale_map.get(name_key, ""))
-        cargo_list.append({
-            "internal_id": token,
-            "display_name": display or name_key or token,
-            "locale_key": name_key or "",
-        })
-    cargo_list.sort(key=lambda x: x["internal_id"])
+        file_new = 0
+        for text in cargo_texts:
+            token = _cargo_token(text)
+            if not token or token in seen:
+                continue
+            seen.add(token)
+            name_key = _cargo_name_key(text)
+            display = ""
+            if name_key:
+                bare = name_key.lstrip("@")
+                display = locale_map.get(bare, locale_map.get(name_key, ""))
+            cargo_list.append({
+                "internal_id": token,
+                "display_name": display or name_key or token,
+                "locale_key": name_key or "",
+                "dlc_pack": pack,
+            })
+            file_new += 1
+        if file_new:
+            print(f"  → {file_new} new cargo(es) (running total: {len(cargo_list)})")
+    cargo_list.sort(key=lambda x: (x["dlc_pack"] or "", x["internal_id"]))
 
     print(f"Found {len(cargo_list)} cargo types.")
+    from collections import Counter
+    by_pack = Counter(c["dlc_pack"] or "base" for c in cargo_list)
+    print("  by pack:", dict(by_pack))
     out = Path("ats_cargo_ids.json")
     with open(out, "w", encoding="utf-8") as f:
         json.dump(cargo_list, f, indent=2, ensure_ascii=False)
     print(f"Wrote {out.resolve()}")
-    print("\nFirst 30:")
-    for c in cargo_list[:30]:
-        print(f"  {c['internal_id']:35s}  {c['display_name']}")
 
     # ── Cities (def.scs + every state DLC) ─────────────────────────────────
     print(f"\n=== Extracting city IDs ===")
